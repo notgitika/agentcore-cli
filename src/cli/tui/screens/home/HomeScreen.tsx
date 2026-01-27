@@ -18,14 +18,7 @@ function InputLine() {
   return (
     <Box>
       <ShellPrompt />
-      {isActive ? (
-        <>
-          <ShellCommandText />
-          <Cursor />
-        </>
-      ) : (
-        <Cursor />
-      )}
+      {isActive ? <ShellCommandText /> : <Cursor />}
     </Box>
   );
 }

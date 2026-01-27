@@ -76,23 +76,92 @@ export function ShellEscapeContainer({
         }
 
         if (shell.mode === 'input') {
-          if (key.return && shell.command.trim()) {
-            shell.execute();
-            return;
-          }
-          if (key.backspace || key.delete) {
+          // Handle special keys first (before paste detection)
+          // On Mac, the "delete" key sends key.delete, not key.backspace
+          // So we treat both as backspace (delete char before cursor)
+          if (key.backspace || key.delete || (key.ctrl && input === 'h')) {
             shell.backspaceCommand();
             return;
           }
-          if (input && !key.ctrl && !key.meta) {
-            shell.appendToCommand(input);
+          if (key.upArrow) {
+            shell.historyUp();
+            return;
+          }
+          if (key.downArrow) {
+            shell.historyDown();
+            return;
+          }
+          if (key.leftArrow) {
+            shell.cursorLeft();
+            return;
+          }
+          if (key.rightArrow) {
+            shell.cursorRight();
+            return;
+          }
+          // Ctrl+A = cursor to start, Ctrl+E = cursor to end
+          if (key.ctrl && input === 'a') {
+            shell.cursorToStart();
+            return;
+          }
+          if (key.ctrl && input === 'e') {
+            shell.cursorToEnd();
+            return;
+          }
+
+          // Detect paste: multiple printable characters at once
+          const isPaste = input.length > 1;
+
+          if (isPaste) {
+            // Pasted content: append everything, normalize line endings
+            shell.appendToCommand(input.replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
+            return;
+          }
+
+          // Single character input
+          if (key.return) {
+            if (shell.command.trim()) {
+              shell.execute();
+            }
+            return;
+          }
+
+          // Filter out control characters and special keys before appending
+          if (input && !key.ctrl && !key.meta && !key.backspace && !key.delete) {
+            // Also filter out actual backspace/delete characters (DEL=0x7F, BS=0x08)
+            // Using RegExp constructor to avoid lint errors about control characters
+            // eslint-disable-next-line security/detect-non-literal-regexp
+            const controlChars = new RegExp('[' + String.fromCharCode(0x7f, 0x08) + ']', 'g');
+            const filtered = input.replace(controlChars, '');
+            if (filtered) {
+              shell.appendToCommand(filtered);
+            }
           }
         } else if (shell.mode === 'done') {
+          // Scroll controls in done mode (Shift+arrows or Page Up/Down)
+          if (key.upArrow && key.shift) {
+            shell.scrollUp();
+            return;
+          }
+          if (key.downArrow && key.shift) {
+            shell.scrollDown();
+            return;
+          }
+          // Ctrl+Home/End for top/bottom
+          if (key.ctrl && input === 'u') {
+            shell.scrollToTop();
+            return;
+          }
+          if (key.ctrl && input === 'd') {
+            shell.scrollToBottom();
+            return;
+          }
+
           if (key.return && shell.command.trim()) {
             // Re-run same command
             shell.execute();
-          } else if (key.backspace || key.delete) {
-            // Edit the previous command
+          } else if (key.backspace || key.delete || (key.ctrl && input === 'h')) {
+            // Edit the previous command (Mac sends key.delete for backspace key)
             shell.backspaceCommand();
           } else if (input && !key.ctrl && !key.meta) {
             // Start fresh command
@@ -120,8 +189,20 @@ export function ShellEscapeContainer({
       output: shell.output,
       exitCode: shell.exitCode,
       isActive,
+      truncatedLines: shell.truncatedLines,
+      cursorPosition: shell.cursorPosition,
+      scrollOffset: shell.scrollOffset,
     }),
-    [shell.mode, shell.command, shell.output, shell.exitCode, isActive]
+    [
+      shell.mode,
+      shell.command,
+      shell.output,
+      shell.exitCode,
+      isActive,
+      shell.truncatedLines,
+      shell.cursorPosition,
+      shell.scrollOffset,
+    ]
   );
 
   return (

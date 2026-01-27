@@ -88,9 +88,22 @@ export function spawnShellCommand(command: string, callbacks: ShellExecutorCallb
   };
 }
 
+export interface TruncateResult {
+  lines: string[];
+  truncatedCount: number;
+}
+
 /**
- * Truncates output array to max lines (keeps most recent)
+ * Truncates output array to max lines (keeps most recent).
+ * Returns both the truncated lines and how many were dropped.
  */
-export function truncateOutput(lines: string[], maxLines: number = MAX_OUTPUT_LINES): string[] {
-  return lines.length > maxLines ? lines.slice(lines.length - maxLines) : lines;
+export function truncateOutput(lines: string[], maxLines: number = MAX_OUTPUT_LINES): TruncateResult {
+  if (lines.length <= maxLines) {
+    return { lines, truncatedCount: 0 };
+  }
+  const truncatedCount = lines.length - maxLines;
+  return {
+    lines: lines.slice(truncatedCount),
+    truncatedCount,
+  };
 }

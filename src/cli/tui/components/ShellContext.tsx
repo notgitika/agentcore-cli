@@ -7,6 +7,12 @@ export interface ShellContextValue {
   output: string[];
   exitCode: number | null;
   isActive: boolean;
+  /** Number of output lines that were truncated from memory */
+  truncatedLines: number;
+  /** Cursor position within the command */
+  cursorPosition: number;
+  /** Scroll offset for output (0 = bottom) */
+  scrollOffset: number;
 }
 
 const defaultValue: ShellContextValue = {
@@ -15,6 +21,9 @@ const defaultValue: ShellContextValue = {
   output: [],
   exitCode: null,
   isActive: false,
+  truncatedLines: 0,
+  cursorPosition: 0,
+  scrollOffset: 0,
 };
 
 export const ShellContext = createContext<ShellContextValue>(defaultValue);
