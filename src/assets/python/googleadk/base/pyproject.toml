@@ -9,7 +9,8 @@ description = "AgentCore Runtime Application using Google ADK"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "aws-opentelemetry-distro==0.12.2",
+    "opentelemetry-distro",
+    "opentelemetry-exporter-otlp",
     "google-adk >= 1.17.0",
     "bedrock-agentcore >= 1.0.3",
     "python-dotenv >= 1.0.1",

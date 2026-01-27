@@ -175,7 +175,7 @@ const PythonEntrypointSchema = z
  */
 const InstrumentationSchema = z.object({
   /**
-   * Enable OpenTelemetry instrumentation using aws-opentelemetry-distro.
+   * Enable OpenTelemetry instrumentation using opentelemetry-distro.
    * When enabled, the runtime entrypoint is wrapped with opentelemetry-instrument.
    * Defaults to true for new runtimes.
    */
