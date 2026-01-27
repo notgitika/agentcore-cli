@@ -40,8 +40,8 @@ export const STEP_LABELS: Record<GenerateStep, string> = {
 };
 
 export const LANGUAGE_OPTIONS = [
-  { id: 'Python', title: 'Python' },
-  { id: 'TypeScript', title: 'TypeScript' },
+  { id: 'Python', title: 'Python', disabled: false },
+  { id: 'TypeScript', title: 'TypeScript (coming soon)', disabled: true },
 ] as const;
 
 export const SDK_OPTIONS = [
