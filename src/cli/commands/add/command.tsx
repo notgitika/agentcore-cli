@@ -1,12 +1,236 @@
 import { COMMAND_DESCRIPTIONS } from '../../tui/copy';
 import { requireProject } from '../../tui/guards';
 import { AddFlow } from '../../tui/screens/add/AddFlow';
+import { handleAddAgent, handleAddGateway, handleAddIdentity, handleAddMcpTool, handleAddMemory } from './actions';
+import { handleAddTarget } from './target-action';
+import type {
+  AddAgentOptions,
+  AddGatewayOptions,
+  AddIdentityOptions,
+  AddMcpToolOptions,
+  AddMemoryOptions,
+} from './types';
+import {
+  validateAddAgentOptions,
+  validateAddGatewayOptions,
+  validateAddIdentityOptions,
+  validateAddMcpToolOptions,
+  validateAddMemoryOptions,
+} from './validate';
 import type { Command } from '@commander-js/extra-typings';
 import { render } from 'ink';
 import React from 'react';
 
+interface AddTargetCliOptions {
+  name?: string;
+  account?: string;
+  region?: string;
+  description?: string;
+  json?: boolean;
+}
+
+async function handleAddTargetCLI(options: AddTargetCliOptions): Promise<void> {
+  if (!options.name || !options.account || !options.region) {
+    const error = 'Required: --name, --account, --region';
+    if (options.json) {
+      console.log(JSON.stringify({ success: false, error }));
+    } else {
+      console.error(error);
+    }
+    process.exit(1);
+  }
+
+  const result = await handleAddTarget({
+    name: options.name,
+    account: options.account,
+    region: options.region,
+    description: options.description,
+  });
+
+  if (options.json) {
+    console.log(JSON.stringify(result));
+  } else if (result.success) {
+    console.log(`Added target '${options.name}'`);
+  } else {
+    console.error(result.error);
+  }
+
+  process.exit(result.success ? 0 : 1);
+}
+
+async function handleAddAgentCLI(options: AddAgentOptions): Promise<void> {
+  const validation = validateAddAgentOptions(options);
+  if (!validation.valid) {
+    if (options.json) {
+      console.log(JSON.stringify({ success: false, error: validation.error }));
+    } else {
+      console.error(validation.error);
+    }
+    process.exit(1);
+  }
+
+  const result = await handleAddAgent({
+    name: options.name!,
+    type: (options.type as 'create' | 'byo') ?? 'create',
+    language: options.language!,
+    framework: options.framework!,
+    modelProvider: options.modelProvider!,
+    apiKey: options.apiKey,
+    memory: options.memory,
+    codeLocation: options.codeLocation,
+    entrypoint: options.entrypoint,
+  });
+
+  if (options.json) {
+    console.log(JSON.stringify(result));
+  } else if (result.success) {
+    console.log(`Added agent '${result.agentName}'`);
+    if (result.agentPath) {
+      console.log(`Agent code: ${result.agentPath}`);
+    }
+  } else {
+    console.error(result.error);
+  }
+
+  process.exit(result.success ? 0 : 1);
+}
+
+async function handleAddGatewayCLI(options: AddGatewayOptions): Promise<void> {
+  const validation = validateAddGatewayOptions(options);
+  if (!validation.valid) {
+    if (options.json) {
+      console.log(JSON.stringify({ success: false, error: validation.error }));
+    } else {
+      console.error(validation.error);
+    }
+    process.exit(1);
+  }
+
+  const result = await handleAddGateway({
+    name: options.name!,
+    description: options.description,
+    authorizerType: options.authorizerType ?? 'NONE',
+    discoveryUrl: options.discoveryUrl,
+    allowedAudience: options.allowedAudience,
+    allowedClients: options.allowedClients,
+    agents: options.agents,
+  });
+
+  if (options.json) {
+    console.log(JSON.stringify(result));
+  } else if (result.success) {
+    console.log(`Added gateway '${result.gatewayName}'`);
+  } else {
+    console.error(result.error);
+  }
+
+  process.exit(result.success ? 0 : 1);
+}
+
+async function handleAddMcpToolCLI(options: AddMcpToolOptions): Promise<void> {
+  const validation = validateAddMcpToolOptions(options);
+  if (!validation.valid) {
+    if (options.json) {
+      console.log(JSON.stringify({ success: false, error: validation.error }));
+    } else {
+      console.error(validation.error);
+    }
+    process.exit(1);
+  }
+
+  const result = await handleAddMcpTool({
+    name: options.name!,
+    description: options.description,
+    language: options.language! as 'Python' | 'TypeScript',
+    exposure: options.exposure! as 'mcp-runtime' | 'behind-gateway',
+    agents: options.agents,
+    gateway: options.gateway,
+    host: options.host as 'Lambda' | 'AgentCoreRuntime' | undefined,
+  });
+
+  if (options.json) {
+    console.log(JSON.stringify(result));
+  } else if (result.success) {
+    console.log(`Added MCP tool '${result.toolName}'`);
+    if (result.sourcePath) {
+      console.log(`Tool code: ${result.sourcePath}`);
+    }
+  } else {
+    console.error(result.error);
+  }
+
+  process.exit(result.success ? 0 : 1);
+}
+
+async function handleAddMemoryCLI(options: AddMemoryOptions): Promise<void> {
+  const validation = validateAddMemoryOptions(options);
+  if (!validation.valid) {
+    if (options.json) {
+      console.log(JSON.stringify({ success: false, error: validation.error }));
+    } else {
+      console.error(validation.error);
+    }
+    process.exit(1);
+  }
+
+  const result = await handleAddMemory({
+    name: options.name!,
+    description: options.description,
+    strategies: options.strategies!,
+    expiry: options.expiry,
+    owner: options.owner!,
+    users: options.users,
+  });
+
+  if (options.json) {
+    console.log(JSON.stringify(result));
+  } else if (result.success) {
+    console.log(`Added memory '${result.memoryName}' owned by '${result.ownerAgent}'`);
+    if (result.userAgents && result.userAgents.length > 0) {
+      console.log(`Shared with: ${result.userAgents.join(', ')}`);
+    }
+  } else {
+    console.error(result.error);
+  }
+
+  process.exit(result.success ? 0 : 1);
+}
+
+async function handleAddIdentityCLI(options: AddIdentityOptions): Promise<void> {
+  const validation = validateAddIdentityOptions(options);
+  if (!validation.valid) {
+    if (options.json) {
+      console.log(JSON.stringify({ success: false, error: validation.error }));
+    } else {
+      console.error(validation.error);
+    }
+    process.exit(1);
+  }
+
+  const result = await handleAddIdentity({
+    name: options.name!,
+    type: options.type!,
+    apiKey: options.apiKey!,
+    owner: options.owner!,
+    users: options.users,
+  });
+
+  if (options.json) {
+    console.log(JSON.stringify(result));
+  } else if (result.success) {
+    console.log(`Added identity '${result.identityName}' owned by '${result.ownerAgent}'`);
+    if (result.userAgents && result.userAgents.length > 0) {
+      console.log(`Shared with: ${result.userAgents.join(', ')}`);
+    }
+  } else {
+    console.error(result.error);
+  }
+
+  process.exit(result.success ? 0 : 1);
+}
+
 export function registerAdd(program: Command) {
-  program
+  const addCmd = program
     .command('add')
     .description(COMMAND_DESCRIPTIONS.add)
     .action(() => {
@@ -21,5 +245,103 @@ export function registerAdd(program: Command) {
           }}
         />
       );
+    });
+
+  // Subcommand: add target
+  addCmd
+    .command('target')
+    .description('Add a deployment target')
+    .option('--name <name>', 'Target name')
+    .option('--account <id>', 'AWS account ID')
+    .option('--region <region>', 'AWS region')
+    .option('--description <desc>', 'Optional description')
+    .option('--json', 'Output as JSON')
+    .action(async options => {
+      requireProject();
+      await handleAddTargetCLI(options);
+    });
+
+  // Subcommand: add agent
+  addCmd
+    .command('agent')
+    .description('Add an agent to the project')
+    .option('--name <name>', 'Agent name (start with letter, alphanumeric only, max 64 chars)')
+    .option('--type <type>', 'Agent type: create or byo', 'create')
+    .option('--language <lang>', 'Language: Python (create), or Python/TypeScript/Other (BYO)')
+    .option('--framework <fw>', 'Framework: Strands, LangChain_LangGraph, AutoGen, CrewAI, GoogleADK, OpenAIAgents')
+    .option('--model-provider <provider>', 'Model provider: Bedrock, Anthropic, OpenAI, Gemini')
+    .option('--api-key <key>', 'API key for non-Bedrock providers')
+    .option('--memory <mem>', 'Memory: none, shortTerm, longAndShortTerm (create path only)')
+    .option('--code-location <path>', 'Path to existing code (BYO path only)')
+    .option('--entrypoint <file>', 'Entry file relative to code-location (BYO, default: main.py)')
+    .option('--json', 'Output as JSON')
+    .action(async options => {
+      requireProject();
+      await handleAddAgentCLI(options as AddAgentOptions);
+    });
+
+  // Subcommand: add gateway
+  addCmd
+    .command('gateway')
+    .description('Add an MCP gateway to the project')
+    .option('--name <name>', 'Gateway name')
+    .option('--description <desc>', 'Gateway description')
+    .option('--authorizer-type <type>', 'Authorizer type: NONE or CUSTOM_JWT', 'NONE')
+    .option('--discovery-url <url>', 'OIDC discovery URL (required for CUSTOM_JWT)')
+    .option('--allowed-audience <values>', 'Comma-separated allowed audience values (required for CUSTOM_JWT)')
+    .option('--allowed-clients <values>', 'Comma-separated allowed client IDs (required for CUSTOM_JWT)')
+    .option('--agents <names>', 'Comma-separated agent names to attach gateway to')
+    .option('--json', 'Output as JSON')
+    .action(async options => {
+      requireProject();
+      await handleAddGatewayCLI(options as AddGatewayOptions);
+    });
+
+  // Subcommand: add mcp-tool
+  addCmd
+    .command('mcp-tool')
+    .description('Add an MCP tool to the project')
+    .option('--name <name>', 'Tool name')
+    .option('--description <desc>', 'Tool description')
+    .option('--language <lang>', 'Language: Python or TypeScript')
+    .option('--exposure <mode>', 'Exposure mode: mcp-runtime or behind-gateway')
+    .option('--agents <names>', 'Comma-separated agent names (for mcp-runtime)')
+    .option('--gateway <name>', 'Gateway name (for behind-gateway)')
+    .option('--host <host>', 'Compute host: Lambda or AgentCoreRuntime (for behind-gateway)')
+    .option('--json', 'Output as JSON')
+    .action(async options => {
+      requireProject();
+      await handleAddMcpToolCLI(options as AddMcpToolOptions);
+    });
+
+  // Subcommand: add memory
+  addCmd
+    .command('memory')
+    .description('Add a memory resource to the project')
+    .option('--name <name>', 'Memory name')
+    .option('--description <desc>', 'Memory description')
+    .option('--strategies <types>', 'Comma-separated strategies: SEMANTIC, SUMMARIZATION, USER_PREFERENCE, CUSTOM')
+    .option('--expiry <days>', 'Event expiry duration in days (default: 30)', parseInt)
+    .option('--owner <agent>', 'Agent that owns the memory')
+    .option('--users <agents>', 'Comma-separated agent names that can use the memory')
+    .option('--json', 'Output as JSON')
+    .action(async options => {
+      requireProject();
+      await handleAddMemoryCLI(options as AddMemoryOptions);
+    });
+
+  // Subcommand: add identity
+  addCmd
+    .command('identity')
+    .description('Add an identity provider to the project')
+    .option('--name <name>', 'Identity name')
+    .option('--type <type>', 'Identity type: ApiKeyCredentialProvider')
+    .option('--api-key <key>', 'The API key value')
+    .option('--owner <agent>', 'Agent that owns the identity')
+    .option('--users <agents>', 'Comma-separated agent names that can use the identity')
+    .option('--json', 'Output as JSON')
+    .action(async options => {
+      requireProject();
+      await handleAddIdentityCLI(options as AddIdentityOptions);
     });
 }

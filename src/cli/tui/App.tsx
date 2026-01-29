@@ -136,7 +136,7 @@ function AppContent() {
   }
 
   if (route.name === 'dev') {
-    return <DevScreen isInteractive={true} onBack={() => setRoute({ name: 'home' })} />;
+    return <DevScreen onBack={() => setRoute({ name: 'home' })} />;
   }
 
   if (route.name === 'deploy') {

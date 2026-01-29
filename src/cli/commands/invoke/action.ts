@@ -1,6 +1,8 @@
 import { ConfigIO } from '../../../lib';
 import type { AgentCoreProjectSpec, AwsDeploymentTargets, DeployedState } from '../../../schema';
-import { invokeAgentRuntime } from '../../aws';
+import { invokeAgentRuntime, invokeAgentRuntimeStreaming } from '../../aws';
+import { InvokeLogger } from '../../logging';
+import type { InvokeOptions, InvokeResult } from './types';
 
 export interface InvokeContext {
   project: AgentCoreProjectSpec;
@@ -17,20 +19,6 @@ export async function loadInvokeConfig(configIO: ConfigIO = new ConfigIO()): Pro
     deployedState: await configIO.readDeployedState(),
     awsTargets: await configIO.readAWSDeploymentTargets(),
   };
-}
-
-export interface InvokeOptions {
-  agentName?: string;
-  targetName?: string;
-  prompt?: string;
-}
-
-export interface InvokeResult {
-  success: boolean;
-  agentName?: string;
-  targetName?: string;
-  response?: string;
-  error?: string;
 }
 
 /**
@@ -85,17 +73,61 @@ export async function handleInvoke(context: InvokeContext, options: InvokeOption
     return { success: false, error: 'No prompt provided. Usage: agentcore invoke "your prompt"' };
   }
 
-  // Invoke the agent
+  // Create logger for this invocation
+  const logger = new InvokeLogger({
+    agentName: agentSpec.name,
+    runtimeArn: agentState.runtimeArn,
+    region: targetConfig.region,
+  });
+
+  logger.logPrompt(options.prompt);
+
+  if (options.stream) {
+    // Streaming mode
+    let fullResponse = '';
+    try {
+      const result = await invokeAgentRuntimeStreaming({
+        region: targetConfig.region,
+        runtimeArn: agentState.runtimeArn,
+        payload: options.prompt,
+        logger, // Pass logger for SSE event debugging
+      });
+
+      for await (const chunk of result.stream) {
+        fullResponse += chunk;
+        process.stdout.write(chunk);
+      }
+      process.stdout.write('\n');
+
+      logger.logResponse(fullResponse);
+
+      return {
+        success: true,
+        agentName: agentSpec.name,
+        targetName: selectedTargetName,
+        response: fullResponse,
+        logFilePath: logger.logFilePath,
+      };
+    } catch (err) {
+      logger.logError(err, 'invoke streaming failed');
+      throw err;
+    }
+  }
+
+  // Non-streaming mode
   const response = await invokeAgentRuntime({
     region: targetConfig.region,
     runtimeArn: agentState.runtimeArn,
     payload: options.prompt,
   });
 
+  logger.logResponse(response);
+
   return {
     success: true,
     agentName: agentSpec.name,
     targetName: selectedTargetName,
     response,
+    logFilePath: logger.logFilePath,
   };
 }
