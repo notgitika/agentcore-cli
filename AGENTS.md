@@ -9,14 +9,16 @@ src/
 ├── index.ts           # Library entry - exports ConfigIO, types
 ├── schema/            # Schema definitions with Zod validators
 ├── lib/               # Shared utilities (ConfigIO, packaging)
-├── cdk/               # CDK constructs (for backward compatibility)
 ├── cli/               # CLI implementation
 │   ├── commands/      # CLI commands
 │   ├── tui/           # Terminal UI (Ink/React)
 │   ├── operations/    # Business logic
+│   ├── cdk/           # CDK toolkit wrapper for programmatic CDK operations
 │   └── templates/     # Project templating
 └── assets/            # Template assets vended to users
 ```
+
+Note: CDK L3 constructs are in a separate package `@aws/agentcore-l3-cdk-constructs`.
 
 ## CLI Commands
 
