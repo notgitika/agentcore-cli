@@ -63,6 +63,11 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     const context = await validateProject();
     endStep('success');
 
+    // Ensure L3 constructs are linked (for local development)
+    startStep('Link L3 constructs');
+    await context.cdkProject.ensureL3Link();
+    endStep('success');
+
     // Build CDK project
     startStep('Build CDK project');
     await buildCdkProject(context.cdkProject);
