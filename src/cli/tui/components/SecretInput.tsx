@@ -1,6 +1,5 @@
-import { Cursor } from './Cursor';
 import { Box, Text, useInput } from 'ink';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ZodString } from 'zod';
 
 /** Custom validation beyond schema - returns true if valid, or error message string if invalid */
@@ -80,6 +79,13 @@ export function SecretInput({
   const [value, setValue] = useState(initialValue);
   const [showValue, setShowValue] = useState(false);
   const [showError, setShowError] = useState(false);
+  const [cursorVisible, setCursorVisible] = useState(true);
+
+  // Cursor blink effect
+  useEffect(() => {
+    const timer = setInterval(() => setCursorVisible(prev => !prev), 500);
+    return () => clearInterval(timer);
+  }, []);
 
   const trimmed = value.trim();
   const validationErrorMsg = validateValue(trimmed, schema, customValidation);
@@ -177,11 +183,28 @@ export function SecretInput({
         </Box>
       )}
       <Box marginTop={1}>
-        <Text color="cyan">&gt; </Text>
-        {displayValue ? <Text>{displayValue}</Text> : placeholder ? <Text dimColor>{placeholder}</Text> : null}
-        <Cursor />
-        {showCheckmark && <Text color="green"> ✓</Text>}
-        {showInvalidMark && <Text color="red"> ✗</Text>}
+        <Text>
+          <Text color="cyan">&gt; </Text>
+          {displayValue ? (
+            <>
+              {displayValue}
+              <Text color="white">{cursorVisible ? '▋' : ' '}</Text>
+            </>
+          ) : placeholder ? (
+            cursorVisible ? (
+              <>
+                <Text color="white">▋</Text>
+                <Text dimColor>{placeholder.slice(1)}</Text>
+              </>
+            ) : (
+              <Text dimColor>{placeholder}</Text>
+            )
+          ) : (
+            <Text color="white">{cursorVisible ? '▋' : ' '}</Text>
+          )}
+          {showCheckmark && <Text color="green"> ✓</Text>}
+          {showInvalidMark && <Text color="red"> ✗</Text>}
+        </Text>
       </Box>
       {(showError || showInvalidMark) && validationErrorMsg && (
         <Box marginTop={1}>
@@ -232,14 +255,14 @@ export function ApiKeySecretInput({
     <Box flexDirection="column">
       <SecretInput
         prompt={`${providerName} API Key`}
-        description={`Enter your ${providerName} API key. This will be stored in .env for local development.
+        description={`Enter your ${providerName} API key. This will be stored in .env.local for local development.
 For deployment, the key will be securely stored in AgentCore Identity.`}
         placeholder={envVarName}
         onSubmit={onSubmit}
         onSkip={onSkip}
         onCancel={onCancel}
         isActive={isActive}
-        revealChars={4}
+        revealChars={0}
       />
     </Box>
   );
