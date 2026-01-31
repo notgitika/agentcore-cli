@@ -45,6 +45,8 @@ export function useDevServer(options: { workingDir: string; port: number; agentN
   const loggerRef = useRef<DevLogger | null>(null);
   // Track instance ID to ignore callbacks from stale server instances
   const instanceIdRef = useRef(0);
+  // Track if we're intentionally restarting to ignore exit callbacks
+  const isRestartingRef = useRef(false);
 
   const addLog = (level: LogEntry['level'], message: string) => {
     setLogs(prev => [...prev.slice(-MAX_LOG_ENTRIES), { level, message }]);
@@ -125,6 +127,12 @@ export function useDevServer(options: { workingDir: string; port: number; agentN
             // Ignore exit events from stale server instances
             if (instanceIdRef.current !== currentInstanceId) return;
 
+            // Ignore exit events when intentionally restarting
+            if (isRestartingRef.current) {
+              isRestartingRef.current = false;
+              return;
+            }
+
             setStatus(code === 0 ? 'stopped' : 'error');
             addLog('system', `Server exited (code ${code})`);
           },
@@ -191,6 +199,7 @@ export function useDevServer(options: { workingDir: string; port: number; agentN
 
   const restart = () => {
     addLog('system', 'Restarting server...');
+    isRestartingRef.current = true;
     killServer(serverRef.current);
     setStatus('starting');
     setRestartTrigger(t => t + 1);
