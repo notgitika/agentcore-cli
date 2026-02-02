@@ -9,6 +9,7 @@ import type {
   TargetLanguage,
 } from '../../../schema';
 import { getErrorMessage } from '../../errors';
+import { checkCreateDependencies } from '../../external-requirements';
 import { initGitRepo, setupPythonProject, writeEnvFile, writeGitignore } from '../../operations';
 import { mapGenerateConfigToAgentEnvSpec, writeAgentToProject } from '../../operations/agent/generate';
 import { CDKRenderer, createRenderer } from '../../templates';
@@ -41,15 +42,29 @@ export interface CreateProjectOptions {
   name: string;
   cwd: string;
   skipGit?: boolean;
+  skipDependencyCheck?: boolean;
 }
 
 export async function createProject(options: CreateProjectOptions): Promise<CreateResult> {
-  const { name, cwd, skipGit } = options;
+  const { name, cwd, skipGit, skipDependencyCheck } = options;
   const projectRoot = join(cwd, name);
   const configBaseDir = join(projectRoot, CONFIG_DIR);
 
+  // Check CLI dependencies first (no language = skip uv check)
+  let depWarnings: string[] = [];
+  if (!skipDependencyCheck) {
+    const depCheck = await checkCreateDependencies({ language: undefined });
+    depWarnings = depCheck.warnings;
+
+    // Fail on errors
+    if (!depCheck.passed) {
+      return { success: false, error: depCheck.errors.join('\n'), warnings: depWarnings };
+    }
+  }
+
   try {
     // Create project directory
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
     await mkdir(projectRoot, { recursive: true });
 
     // Initialize config directory
@@ -75,13 +90,17 @@ export async function createProject(options: CreateProjectOptions): Promise<Crea
     if (!skipGit) {
       const gitResult = await initGitRepo(projectRoot);
       if (gitResult.status === 'error') {
-        return { success: false, error: gitResult.message };
+        return { success: false, error: gitResult.message, warnings: depWarnings };
       }
     }
 
-    return { success: true, projectPath: projectRoot };
+    return {
+      success: true,
+      projectPath: projectRoot,
+      warnings: depWarnings.length > 0 ? depWarnings : undefined,
+    };
   } catch (err) {
-    return { success: false, error: getErrorMessage(err) };
+    return { success: false, error: getErrorMessage(err), warnings: depWarnings };
   }
 }
 
@@ -104,10 +123,21 @@ export async function createProjectWithAgent(options: CreateWithAgentOptions): P
   const projectRoot = join(cwd, name);
   const configBaseDir = join(projectRoot, CONFIG_DIR);
 
-  // First create the base project
-  const projectResult = await createProject({ name, cwd, skipGit });
+  // Check CLI dependencies first (with language for conditional uv check)
+  const depCheck = await checkCreateDependencies({ language });
+  const depWarnings = depCheck.warnings;
+
+  // Fail on errors
+  if (!depCheck.passed) {
+    return { success: false, error: depCheck.errors.join('\n'), warnings: depWarnings };
+  }
+
+  // First create the base project (skip dependency check since we already did it)
+  const projectResult = await createProject({ name, cwd, skipGit, skipDependencyCheck: true });
   if (!projectResult.success) {
-    return projectResult;
+    // Merge warnings from both checks
+    const allWarnings = [...depWarnings, ...(projectResult.warnings ?? [])];
+    return { ...projectResult, warnings: allWarnings.length > 0 ? allWarnings : undefined };
   }
 
   try {
@@ -139,9 +169,14 @@ export async function createProjectWithAgent(options: CreateWithAgentOptions): P
       await setupPythonProject({ projectDir: agentDir });
     }
 
-    return { success: true, projectPath: projectRoot, agentName: name };
+    return {
+      success: true,
+      projectPath: projectRoot,
+      agentName: name,
+      warnings: depWarnings.length > 0 ? depWarnings : undefined,
+    };
   } catch (err) {
-    return { success: false, error: getErrorMessage(err) };
+    return { success: false, error: getErrorMessage(err), warnings: depWarnings };
   }
 }
 

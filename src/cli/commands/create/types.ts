@@ -21,4 +21,5 @@ export interface CreateResult {
   error?: string;
   dryRun?: boolean;
   wouldCreate?: string[];
+  warnings?: string[];
 }

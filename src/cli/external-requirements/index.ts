@@ -14,6 +14,11 @@ export {
   formatVersionError,
   requiresUv,
   checkDependencyVersions,
+  checkCreateDependencies,
   type VersionCheckResult,
   type DependencyCheckResult,
+  type CheckSeverity,
+  type CliToolCheck,
+  type CliToolsCheckResult,
+  type CheckCreateDependenciesOptions,
 } from './checks';

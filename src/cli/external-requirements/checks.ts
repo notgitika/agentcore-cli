@@ -1,8 +1,8 @@
 /**
  * External dependency version checks.
  */
-import { runSubprocessCapture } from '../../lib';
-import type { AgentCoreProjectSpec } from '../../schema';
+import { checkSubprocess, isWindows, runSubprocessCapture } from '../../lib';
+import type { AgentCoreProjectSpec, TargetLanguage } from '../../schema';
 import { NODE_MIN_VERSION, UV_MIN_VERSION, formatSemVer, parseSemVer, semVerGte } from './versions';
 
 /**
@@ -150,4 +150,125 @@ export async function checkDependencyVersions(projectSpec: AgentCoreProjectSpec)
     uvCheck,
     errors,
   };
+}
+
+/**
+ * Severity level for CLI tool checks.
+ */
+export type CheckSeverity = 'error' | 'warn';
+
+/**
+ * Result of checking a single CLI tool.
+ */
+export interface CliToolCheck {
+  binary: string;
+  severity: CheckSeverity;
+  available: boolean;
+  installHint?: string;
+}
+
+/**
+ * Result of checking all CLI tools for project creation.
+ */
+export interface CliToolsCheckResult {
+  passed: boolean; // true if no errors (warnings allowed)
+  checks: CliToolCheck[];
+  errors: string[];
+  warnings: string[];
+}
+
+/**
+ * Options for checkCreateDependencies.
+ */
+export interface CheckCreateDependenciesOptions {
+  /** Language being used - determines if uv is required. Undefined = skip uv check */
+  language?: TargetLanguage;
+}
+
+/**
+ * Check availability of CLI tools required for project creation.
+ * - uv: required for Python projects only (skipped if language is undefined or TypeScript)
+ * - npm: required for CDK project (always)
+ * - aws: optional, needed for deployment (warn only)
+ */
+export async function checkCreateDependencies(
+  options: CheckCreateDependenciesOptions = {}
+): Promise<CliToolsCheckResult> {
+  const { language } = options;
+  const checks: CliToolCheck[] = [];
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  // Check uv (error if missing, only for Python)
+  if (language === 'Python') {
+    const uvAvailable = await checkBinaryAvailable('uv');
+    checks.push({
+      binary: 'uv',
+      severity: 'error',
+      available: uvAvailable,
+      installHint: 'Install from https://github.com/astral-sh/uv#installation',
+    });
+    if (!uvAvailable) {
+      errors.push("'uv' is required for Python projects. Install from https://github.com/astral-sh/uv#installation");
+    }
+  }
+
+  // Check npm (error if missing)
+  const npmAvailable = await checkBinaryAvailable('npm');
+  checks.push({
+    binary: 'npm',
+    severity: 'error',
+    available: npmAvailable,
+    installHint: 'Install Node.js from https://nodejs.org/',
+  });
+  if (!npmAvailable) {
+    errors.push("'npm' is required. Install Node.js from https://nodejs.org/");
+  }
+
+  // Check aws (warn if missing)
+  const awsAvailable = await checkBinaryAvailable('aws');
+  checks.push({
+    binary: 'aws',
+    severity: 'warn',
+    available: awsAvailable,
+    installHint: 'Install from https://aws.amazon.com/cli/',
+  });
+  if (!awsAvailable) {
+    warnings.push(
+      "'aws' CLI not found. Required for 'aws sso login' and profile configuration. Install from https://aws.amazon.com/cli/"
+    );
+  }
+
+  return {
+    passed: errors.length === 0,
+    checks,
+    errors,
+    warnings,
+  };
+}
+
+/**
+ * Check if a binary is available in PATH.
+ * Uses multiple fallback strategies for cross-platform compatibility.
+ */
+async function checkBinaryAvailable(binary: string): Promise<boolean> {
+  // Try multiple detection strategies
+  const checks = [
+    // Primary: use 'where' on Windows, 'command -v' on Unix
+    () =>
+      isWindows
+        ? checkSubprocess('where', [binary])
+        : checkSubprocess('sh', ['-c', `command -v ${binary}`], { shell: true }),
+    // Fallback: try running with --version
+    () => checkSubprocess(binary, ['--version']),
+    // Fallback: try running with -v
+    () => checkSubprocess(binary, ['-v']),
+  ];
+
+  for (const check of checks) {
+    if (await check()) {
+      return true;
+    }
+  }
+  return false;
 }
