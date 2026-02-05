@@ -40,7 +40,6 @@ export const COMMAND_DESCRIPTIONS = {
   package: 'Package Bedrock AgentCore runtime artifacts.',
   remove: 'Remove AgentCore resources and project',
   status: 'Retrieve details of deployed AgentCore resources.',
-  stopSession: 'Stop an active runtime session.',
   update: 'Check for and install CLI updates',
   validate: 'Validate agentcore/ config files.',
 } as const;

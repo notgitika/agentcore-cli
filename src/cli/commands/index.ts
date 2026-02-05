@@ -8,7 +8,6 @@ export { registerInvoke } from './invoke';
 export { registerPackage } from './package';
 export { registerRemove } from './remove';
 export { registerStatus } from './status';
-export { registerStopSession } from './stop-session';
 export { registerUpdate } from './update';
 
 // Dev server utilities (re-exported from operations)
