@@ -8,6 +8,5 @@
 export const LLM_CONTEXT_FILES: Record<string, string> = {
   'README.md': '# LLM Context Files\n\nMock content for browser testing.',
   'agentcore.ts': 'export const AgentCoreSchema = {};',
-  'mcp.ts': 'export const McpSchema = {};',
   'aws-targets.ts': 'export const AwsTargetsSchema = {};',
 };

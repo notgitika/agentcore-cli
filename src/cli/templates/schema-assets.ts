@@ -12,8 +12,6 @@ import llmContextReadmeSrc from '../../schema/llm-compacted/README.md';
 import agentcoreSchemaSrc from '../../schema/llm-compacted/agentcore.ts';
 // @ts-expect-error - text import handled by build plugin
 import awsTargetsSchemaSrc from '../../schema/llm-compacted/aws-targets.ts';
-// @ts-expect-error - text import handled by build plugin
-import mcpSchemaSrc from '../../schema/llm-compacted/mcp.ts';
 import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -38,6 +36,5 @@ function getContent(imported: unknown, filename: string): string {
 export const LLM_CONTEXT_FILES: Record<string, string> = {
   'README.md': getContent(llmContextReadmeSrc, 'README.md'),
   'agentcore.ts': getContent(agentcoreSchemaSrc, 'agentcore.ts'),
-  'mcp.ts': getContent(mcpSchemaSrc, 'mcp.ts'),
   'aws-targets.ts': getContent(awsTargetsSchemaSrc, 'aws-targets.ts'),
 };
