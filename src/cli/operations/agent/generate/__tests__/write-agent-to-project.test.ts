@@ -12,6 +12,7 @@ describe('writeAgentToProject with credentialStrategy', () => {
 
   const baseConfig: GenerateConfig = {
     projectName: 'TestAgent',
+    buildType: 'CodeZip',
     sdk: 'Strands',
     modelProvider: 'Gemini',
     memory: 'none',
