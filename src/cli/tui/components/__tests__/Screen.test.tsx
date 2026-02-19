@@ -49,7 +49,7 @@ describe('Screen', () => {
     expect(lastFrame()).toContain('Press Enter to continue');
   });
 
-  it('calls onExit on Escape key', () => {
+  it('calls onExit on Escape key', async () => {
     const onExit = vi.fn();
     const { stdin } = render(
       <Screen title="Test" onExit={onExit}>
@@ -58,6 +58,7 @@ describe('Screen', () => {
     );
 
     stdin.write(ESCAPE);
+    await new Promise(resolve => setImmediate(resolve));
 
     expect(onExit).toHaveBeenCalledTimes(1);
   });

@@ -49,7 +49,7 @@ describe('PromptScreen', () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
-  it('calls onExit on Escape key', () => {
+  it('calls onExit on Escape key', async () => {
     const onExit = vi.fn();
     const { stdin } = render(
       <PromptScreen helpText="help" onExit={onExit}>
@@ -58,6 +58,7 @@ describe('PromptScreen', () => {
     );
 
     stdin.write(ESCAPE);
+    await new Promise(resolve => setImmediate(resolve));
 
     expect(onExit).toHaveBeenCalledTimes(1);
   });
@@ -200,11 +201,12 @@ describe('ErrorPrompt', () => {
     expect(onBack).toHaveBeenCalledTimes(1);
   });
 
-  it('calls onExit on Escape key', () => {
+  it('calls onExit on Escape key', async () => {
     const onExit = vi.fn();
     const { stdin } = render(<ErrorPrompt message="Failed" onExit={onExit} />);
 
     stdin.write(ESCAPE);
+    await new Promise(resolve => setImmediate(resolve));
 
     expect(onExit).toHaveBeenCalledTimes(1);
   });
@@ -257,11 +259,12 @@ describe('ConfirmPrompt', () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
-  it('calls onCancel on Escape key', () => {
+  it('calls onCancel on Escape key', async () => {
     const onCancel = vi.fn();
     const { stdin } = render(<ConfirmPrompt message="Delete?" onConfirm={vi.fn()} onCancel={onCancel} />);
 
     stdin.write(ESCAPE);
+    await new Promise(resolve => setImmediate(resolve));
 
     expect(onCancel).toHaveBeenCalledTimes(1);
   });

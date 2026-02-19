@@ -14,11 +14,12 @@ function ExitHandlerHarness({ onExit, enabled }: { onExit: () => void; enabled?:
 }
 
 describe('useExitHandler', () => {
-  it('calls onExit when Escape is pressed', () => {
+  it('calls onExit when Escape is pressed', async () => {
     const onExit = vi.fn();
     const { stdin } = render(<ExitHandlerHarness onExit={onExit} />);
 
     stdin.write(ESCAPE);
+    await new Promise(resolve => setImmediate(resolve));
 
     expect(onExit).toHaveBeenCalledTimes(1);
   });
@@ -53,11 +54,12 @@ describe('useExitHandler', () => {
     expect(onExit).not.toHaveBeenCalled();
   });
 
-  it('enabled defaults to true', () => {
+  it('enabled defaults to true', async () => {
     const onExit = vi.fn();
     const { stdin } = render(<ExitHandlerHarness onExit={onExit} />);
 
     stdin.write(ESCAPE);
+    await new Promise(resolve => setImmediate(resolve));
 
     expect(onExit).toHaveBeenCalledTimes(1);
   });

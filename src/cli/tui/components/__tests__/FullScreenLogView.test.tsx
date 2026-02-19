@@ -53,11 +53,12 @@ describe('FullScreenLogView', () => {
     expect(lastFrame()).toContain('No logs yet');
   });
 
-  it('calls onExit on Escape key', () => {
+  it('calls onExit on Escape key', async () => {
     const onExit = vi.fn();
     const { stdin } = render(<FullScreenLogView logs={makeLogs(3)} onExit={onExit} />);
 
     stdin.write(ESCAPE);
+    await new Promise(resolve => setImmediate(resolve));
 
     expect(onExit).toHaveBeenCalledTimes(1);
   });

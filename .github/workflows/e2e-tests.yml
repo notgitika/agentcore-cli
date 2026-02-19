@@ -38,10 +38,19 @@ jobs:
       - name: Get AWS Account ID
         id: aws
         run: echo "account_id=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_OUTPUT"
+      - name: Get API keys from Secrets Manager
+        uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            E2E,${{ secrets.E2E_SECRET_ARN }}
+          parse-json-secrets: true
       - run: npm ci
       - run: npm run build
       - name: Run E2E tests
         env:
           AWS_ACCOUNT_ID: ${{ steps.aws.outputs.account_id }}
           AWS_REGION: ${{ inputs.aws_region || 'us-east-1' }}
+          ANTHROPIC_API_KEY: ${{ env.E2E_ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ env.E2E_OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ env.E2E_GEMINI_API_KEY }}
         run: npm run test:e2e
