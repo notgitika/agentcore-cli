@@ -20,13 +20,28 @@ export interface SubprocessOptions {
   shell?: boolean;
 }
 
+/**
+ * When shell mode is enabled, merge args into the command string so that
+ * Node.js does not receive both a non-empty args array and `shell: true`.
+ * Passing both triggers DEP0190 on Node ≥ 22 (and a warning on earlier
+ * versions) because the arguments are concatenated without escaping.
+ */
+function resolveCommand(command: string, args: string[], useShell: boolean): { cmd: string; cmdArgs: string[] } {
+  if (useShell) {
+    return { cmd: [command, ...args].join(' '), cmdArgs: [] };
+  }
+  return { cmd: command, cmdArgs: args };
+}
+
 export async function runSubprocess(command: string, args: string[], options: SubprocessOptions = {}): Promise<void> {
+  const shell = options.shell ?? isWindows;
+  const { cmd, cmdArgs } = resolveCommand(command, args, shell);
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawn(cmd, cmdArgs, {
       cwd: options.cwd,
       env: options.env,
       stdio: options.stdio ?? 'inherit',
-      shell: options.shell ?? isWindows,
+      shell,
     });
 
     child.on('error', reject);
@@ -46,12 +61,14 @@ export async function checkSubprocess(
   args: string[],
   options: SubprocessOptions = {}
 ): Promise<boolean> {
+  const shell = options.shell ?? isWindows;
+  const { cmd, cmdArgs } = resolveCommand(command, args, shell);
   return new Promise(resolve => {
-    const child = spawn(command, args, {
+    const child = spawn(cmd, cmdArgs, {
       cwd: options.cwd,
       env: options.env,
       stdio: options.stdio ?? 'ignore',
-      shell: options.shell ?? isWindows,
+      shell,
     });
 
     child.on('error', () => resolve(false));
@@ -71,12 +88,14 @@ export async function runSubprocessCapture(
   args: string[],
   options: SubprocessOptions = {}
 ): Promise<SubprocessResult> {
+  const shell = options.shell ?? isWindows;
+  const { cmd, cmdArgs } = resolveCommand(command, args, shell);
   return new Promise(resolve => {
-    const child = spawn(command, args, {
+    const child = spawn(cmd, cmdArgs, {
       cwd: options.cwd,
       env: options.env,
       stdio: 'pipe',
-      shell: options.shell ?? isWindows,
+      shell,
     });
 
     let stdout = '';
@@ -105,11 +124,13 @@ export function runSubprocessCaptureSync(
   args: string[],
   options: SubprocessOptions = {}
 ): SubprocessResult {
-  const result = spawnSync(command, args, {
+  const shell = options.shell ?? isWindows;
+  const { cmd, cmdArgs } = resolveCommand(command, args, shell);
+  const result = spawnSync(cmd, cmdArgs, {
     cwd: options.cwd,
     env: options.env,
     stdio: 'pipe',
-    shell: options.shell ?? isWindows,
+    shell,
     encoding: 'utf-8',
   });
 
@@ -122,12 +143,14 @@ export function runSubprocessCaptureSync(
 }
 
 export function checkSubprocessSync(command: string, args: string[], options: SubprocessOptions = {}): boolean {
+  const shell = options.shell ?? isWindows;
+  const { cmd, cmdArgs } = resolveCommand(command, args, shell);
   try {
-    const result = spawnSync(command, args, {
+    const result = spawnSync(cmd, cmdArgs, {
       cwd: options.cwd,
       env: options.env,
       stdio: options.stdio ?? 'ignore',
-      shell: options.shell ?? isWindows,
+      shell,
     });
     return result.status === 0;
   } catch {
