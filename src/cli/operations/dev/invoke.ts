@@ -100,6 +100,11 @@ export async function* invokeAgentStreaming(
         body: JSON.stringify({ prompt: msg }),
       });
 
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(body || `Server returned ${res.status}`);
+      }
+
       if (!res.body) {
         yield '(empty response)';
         return;

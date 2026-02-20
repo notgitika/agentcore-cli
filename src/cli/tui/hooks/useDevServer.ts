@@ -24,6 +24,8 @@ export interface LogEntry {
 export interface ConversationMessage {
   role: 'user' | 'assistant';
   content: string;
+  isError?: boolean;
+  isHint?: boolean;
 }
 
 const MAX_LOG_ENTRIES = 50;
@@ -45,6 +47,7 @@ export function useDevServer(options: { workingDir: string; port: number; agentN
 
   const serverRef = useRef<DevServer | null>(null);
   const loggerRef = useRef<DevLogger | null>(null);
+  const logsRef = useRef<LogEntry[]>([]);
   const onReadyRef = useRef(options.onReady);
   onReadyRef.current = options.onReady;
   // Track instance ID to ignore callbacks from stale server instances
@@ -53,7 +56,11 @@ export function useDevServer(options: { workingDir: string; port: number; agentN
   const isRestartingRef = useRef(false);
 
   const addLog = (level: LogEntry['level'], message: string) => {
-    setLogs(prev => [...prev.slice(-MAX_LOG_ENTRIES), { level, message }]);
+    setLogs(prev => {
+      const next = [...prev.slice(-MAX_LOG_ENTRIES), { level, message }];
+      logsRef.current = next;
+      return next;
+    });
     // Also log to file (DevLogger filters to only important logs)
     loggerRef.current?.log(level, message);
   };
@@ -146,7 +153,12 @@ export function useDevServer(options: { workingDir: string; port: number; agentN
           }
 
           setStatus(code === 0 ? 'stopped' : 'error');
-          addLog('system', `Server exited (code ${code})`);
+          addLog(
+            'system',
+            code !== 0 && code !== null
+              ? `Server crashed (code ${code}) — check logs above for details`
+              : `Server exited (code ${code})`
+          );
         },
       };
 
@@ -202,17 +214,47 @@ export function useDevServer(options: { workingDir: string; port: number; agentN
       loggerRef.current?.log('system', `→ ${message}`);
       loggerRef.current?.log('response', responseContent);
     } catch (err) {
-      const errorMsg = `Failed: ${err instanceof Error ? err.message : 'Unknown error'}`;
-      addLog('error', errorMsg);
-      // Add error as assistant message
-      setConversation(prev => [...prev, { role: 'assistant', content: errorMsg }]);
+      const rawMsg = err instanceof Error ? err.message : 'Unknown error';
+      const isServerOrConnectionError =
+        rawMsg.includes('fetch') ||
+        rawMsg.includes('ECONNREFUSED') ||
+        rawMsg.includes('Internal Server Error') ||
+        rawMsg.includes('Server Error');
+
+      // If the server crashed or returned an error, show the Python error
+      // from stderr instead of the generic HTTP/connection error message.
+      let errorMsg: string;
+      if (isServerOrConnectionError) {
+        const recentErrors = logsRef.current
+          .filter(l => l.level === 'error')
+          .slice(-5)
+          .map(l => l.message);
+        if (recentErrors.length > 0) {
+          errorMsg = recentErrors.join('\n');
+        } else {
+          errorMsg = `Server error: ${rawMsg}`;
+        }
+      } else {
+        errorMsg = `Failed: ${rawMsg}`;
+      }
+
+      addLog('error', `Failed: ${rawMsg}`);
+      // Add error as assistant message, with a non-error hint to check logs
+      setConversation(prev => [
+        ...prev,
+        { role: 'assistant', content: errorMsg, isError: true },
+        { role: 'assistant', content: 'See logs for full stack trace.', isHint: true },
+      ]);
       setStreamingResponse(null);
     } finally {
       setIsStreaming(false);
     }
   };
 
-  const clearLogs = () => setLogs([]);
+  const clearLogs = () => {
+    setLogs([]);
+    logsRef.current = [];
+  };
 
   const restart = () => {
     addLog('system', 'Restarting server...');

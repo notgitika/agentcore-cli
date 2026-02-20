@@ -18,6 +18,9 @@ interface DevScreenProps {
 /**
  * Render conversation as a single string for scrolling.
  */
+const ERROR_LINE_PREFIX = '\x00err\x00';
+const HINT_LINE_PREFIX = '\x00hint\x00';
+
 function formatConversation(
   conversation: ConversationMessage[],
   streamingResponse: string | null,
@@ -28,6 +31,12 @@ function formatConversation(
   for (const msg of conversation) {
     if (msg.role === 'user') {
       lines.push(`> ${msg.content}`);
+    } else if (msg.isError) {
+      for (const errLine of msg.content.split('\n')) {
+        lines.push(`${ERROR_LINE_PREFIX}${errLine}`);
+      }
+    } else if (msg.isHint) {
+      lines.push(`${HINT_LINE_PREFIX}${msg.content}`);
     } else {
       lines.push(msg.content);
     }
@@ -410,10 +419,10 @@ export function DevScreen(props: DevScreenProps) {
           )}
         </Box>
       )}
-      {status === 'error' &&
+      {conversation.length === 0 &&
         logs
           .filter(l => l.level === 'error')
-          .slice(-3)
+          .slice(-10)
           .map((l, i) => (
             <Text key={i} color="red">
               {l.message}
@@ -440,11 +449,18 @@ export function DevScreen(props: DevScreenProps) {
         {(conversation.length > 0 || isStreaming) && (
           <Box flexDirection="column" height={needsScroll ? displayHeight : undefined}>
             {visibleLines.map((line, idx) => {
-              // Detect user messages (start with "> ")
               const isUserMessage = line.startsWith('> ');
+              const isErrorMessage = line.startsWith(ERROR_LINE_PREFIX);
+              const isHintMessage = line.startsWith(HINT_LINE_PREFIX);
+              const displayLine = isErrorMessage
+                ? line.slice(ERROR_LINE_PREFIX.length)
+                : isHintMessage
+                  ? line.slice(HINT_LINE_PREFIX.length)
+                  : line;
+              const color = isUserMessage ? 'blue' : isErrorMessage ? 'red' : isHintMessage ? 'cyan' : 'green';
               return (
-                <Text key={effectiveOffset + idx} color={isUserMessage ? 'blue' : 'green'} wrap="truncate">
-                  {line || ' '}
+                <Text key={effectiveOffset + idx} color={color} wrap="truncate">
+                  {displayLine || ' '}
                 </Text>
               );
             })}
