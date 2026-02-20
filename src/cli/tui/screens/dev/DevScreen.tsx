@@ -15,40 +15,43 @@ interface DevScreenProps {
   agentName?: string;
 }
 
-/**
- * Render conversation as a single string for scrolling.
- */
-const ERROR_LINE_PREFIX = '\x00err\x00';
-const HINT_LINE_PREFIX = '\x00hint\x00';
+interface ColoredLine {
+  text: string;
+  color: string;
+}
 
+/**
+ * Render conversation as colored lines for scrolling.
+ * Each line carries its own color so that word-wrapping preserves it.
+ */
 function formatConversation(
   conversation: ConversationMessage[],
   streamingResponse: string | null,
   isStreaming: boolean
-): string {
-  const lines: string[] = [];
+): ColoredLine[] {
+  const lines: ColoredLine[] = [];
 
   for (const msg of conversation) {
     if (msg.role === 'user') {
-      lines.push(`> ${msg.content}`);
+      lines.push({ text: `> ${msg.content}`, color: 'blue' });
     } else if (msg.isError) {
       for (const errLine of msg.content.split('\n')) {
-        lines.push(`${ERROR_LINE_PREFIX}${errLine}`);
+        lines.push({ text: errLine, color: 'red' });
       }
     } else if (msg.isHint) {
-      lines.push(`${HINT_LINE_PREFIX}${msg.content}`);
+      lines.push({ text: msg.content, color: 'cyan' });
     } else {
-      lines.push(msg.content);
+      lines.push({ text: msg.content, color: 'green' });
     }
-    lines.push(''); // blank line between messages
+    lines.push({ text: '', color: 'green' }); // blank line between messages
   }
 
   // Add streaming response if in progress
   if (isStreaming && streamingResponse) {
-    lines.push(streamingResponse);
+    lines.push({ text: streamingResponse, color: 'green' });
   }
 
-  return lines.join('\n');
+  return lines;
 }
 
 /**
@@ -93,14 +96,16 @@ function wrapLine(line: string, maxWidth: number): string[] {
 }
 
 /**
- * Wrap multi-line text to fit within maxWidth.
+ * Wrap colored lines to fit within maxWidth, preserving color on continuation lines.
  */
-function wrapText(text: string, maxWidth: number): string[] {
-  if (!text) return [];
-  const lines = text.split('\n');
-  const wrapped: string[] = [];
-  for (const line of lines) {
-    wrapped.push(...wrapLine(line, maxWidth));
+function wrapColoredLines(lines: ColoredLine[], maxWidth: number): ColoredLine[] {
+  const wrapped: ColoredLine[] = [];
+  for (const { text, color } of lines) {
+    for (const subLine of text.split('\n')) {
+      for (const wrappedLine of wrapLine(subLine, maxWidth)) {
+        wrapped.push({ text: wrappedLine, color });
+      }
+    }
   }
   return wrapped;
 }
@@ -199,14 +204,14 @@ export function DevScreen(props: DevScreenProps) {
   const displayHeight = mode === 'input' ? Math.max(3, baseHeight - 2) : baseHeight;
   const contentWidth = Math.max(40, terminalWidth - 4);
 
-  // Format conversation content
-  const conversationText = useMemo(
+  // Format conversation content into colored lines
+  const coloredLines = useMemo(
     () => formatConversation(conversation, streamingResponse, isStreaming),
     [conversation, streamingResponse, isStreaming]
   );
 
-  // Wrap text for display
-  const lines = useMemo(() => wrapText(conversationText, contentWidth), [conversationText, contentWidth]);
+  // Wrap lines for display, preserving color on continuation lines
+  const lines = useMemo(() => wrapColoredLines(coloredLines, contentWidth), [coloredLines, contentWidth]);
 
   const totalLines = lines.length;
   const maxScroll = Math.max(0, totalLines - displayHeight);
@@ -419,7 +424,7 @@ export function DevScreen(props: DevScreenProps) {
           )}
         </Box>
       )}
-      {conversation.length === 0 &&
+      {(conversation.length === 0 || status === 'error') &&
         logs
           .filter(l => l.level === 'error')
           .slice(-10)
@@ -448,22 +453,11 @@ export function DevScreen(props: DevScreenProps) {
         {/* Conversation display - always visible when there's content */}
         {(conversation.length > 0 || isStreaming) && (
           <Box flexDirection="column" height={needsScroll ? displayHeight : undefined}>
-            {visibleLines.map((line, idx) => {
-              const isUserMessage = line.startsWith('> ');
-              const isErrorMessage = line.startsWith(ERROR_LINE_PREFIX);
-              const isHintMessage = line.startsWith(HINT_LINE_PREFIX);
-              const displayLine = isErrorMessage
-                ? line.slice(ERROR_LINE_PREFIX.length)
-                : isHintMessage
-                  ? line.slice(HINT_LINE_PREFIX.length)
-                  : line;
-              const color = isUserMessage ? 'blue' : isErrorMessage ? 'red' : isHintMessage ? 'cyan' : 'green';
-              return (
-                <Text key={effectiveOffset + idx} color={color} wrap="truncate">
-                  {displayLine || ' '}
-                </Text>
-              );
-            })}
+            {visibleLines.map((line, idx) => (
+              <Text key={effectiveOffset + idx} color={line.color} wrap="truncate">
+                {line.text || ' '}
+              </Text>
+            ))}
             {/* Thinking indicator - shows while waiting for response to start */}
             {isStreaming && !streamingResponse && <GradientText text="Thinking..." />}
           </Box>

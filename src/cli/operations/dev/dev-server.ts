@@ -26,6 +26,9 @@ export interface SpawnConfig {
  * Handles process spawning, output parsing, and lifecycle management.
  * Subclasses implement prepare() and getSpawnConfig() for mode-specific behavior.
  */
+/** Keep the last 20 stderr lines so we can surface them if the process crashes.
+ *  20 lines is enough to capture a typical Python traceback or error context
+ *  without accumulating unbounded memory for long-running servers. */
 const STDERR_BUFFER_SIZE = 20;
 
 /** Paths that indicate internal framework frames (not user code) */

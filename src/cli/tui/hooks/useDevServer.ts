@@ -2,9 +2,11 @@ import { findConfigRoot, readEnvFile } from '../../../lib';
 import type { AgentCoreProjectSpec } from '../../../schema';
 import { DevLogger } from '../../logging/dev-logger';
 import {
+  ConnectionError,
   type DevConfig,
   DevServer,
   type LogLevel,
+  ServerError,
   createDevServer,
   findAvailablePort,
   getDevConfig,
@@ -215,36 +217,31 @@ export function useDevServer(options: { workingDir: string; port: number; agentN
       loggerRef.current?.log('response', responseContent);
     } catch (err) {
       const rawMsg = err instanceof Error ? err.message : 'Unknown error';
-      const isServerOrConnectionError =
-        rawMsg.includes('fetch') ||
-        rawMsg.includes('ECONNREFUSED') ||
-        rawMsg.includes('Internal Server Error') ||
-        rawMsg.includes('Server Error');
 
-      // If the server crashed or returned an error, show the Python error
-      // from stderr instead of the generic HTTP/connection error message.
       let errorMsg: string;
-      if (isServerOrConnectionError) {
+      let showHint = false;
+      if (err instanceof ServerError) {
+        // HTTP error — use the response body directly (avoids stderr race condition)
+        errorMsg = err.message || `Server error (${err.statusCode})`;
+        showHint = true;
+      } else if (err instanceof ConnectionError) {
+        // Connection failed after retries — check stderr logs for crash context
         const recentErrors = logsRef.current
           .filter(l => l.level === 'error')
           .slice(-5)
           .map(l => l.message);
-        if (recentErrors.length > 0) {
-          errorMsg = recentErrors.join('\n');
-        } else {
-          errorMsg = `Server error: ${rawMsg}`;
-        }
+        errorMsg = recentErrors.length > 0 ? recentErrors.join('\n') : `Connection failed: ${rawMsg}`;
+        showHint = recentErrors.length > 0;
       } else {
         errorMsg = `Failed: ${rawMsg}`;
       }
 
       addLog('error', `Failed: ${rawMsg}`);
-      // Add error as assistant message, with a non-error hint to check logs
-      setConversation(prev => [
-        ...prev,
-        { role: 'assistant', content: errorMsg, isError: true },
-        { role: 'assistant', content: 'See logs for full stack trace.', isHint: true },
-      ]);
+      const messages: ConversationMessage[] = [{ role: 'assistant', content: errorMsg, isError: true }];
+      if (showHint) {
+        messages.push({ role: 'assistant', content: 'See logs for full stack trace.', isHint: true });
+      }
+      setConversation(prev => [...prev, ...messages]);
       setStreamingResponse(null);
     } finally {
       setIsStreaming(false);
