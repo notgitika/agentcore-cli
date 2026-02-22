@@ -50,6 +50,30 @@ describe('compareVersions', () => {
   it('handles versions with missing parts', () => {
     expect(compareVersions('1.0', '1.0.0')).toBe(0);
   });
+
+  it('returns 1 when latest pre-release is newer', () => {
+    expect(compareVersions('0.3.0-preview.1.0', '0.3.0-preview.2.0')).toBe(1);
+  });
+
+  it('returns -1 when current pre-release is newer', () => {
+    expect(compareVersions('0.3.0-preview.2.0', '0.3.0-preview.1.0')).toBe(-1);
+  });
+
+  it('returns 0 for equal pre-release versions', () => {
+    expect(compareVersions('0.3.0-preview.1.0', '0.3.0-preview.1.0')).toBe(0);
+  });
+
+  it('returns 1 when latest is release and current is pre-release', () => {
+    expect(compareVersions('1.0.0-preview.1', '1.0.0')).toBe(1);
+  });
+
+  it('returns -1 when current is release and latest is pre-release', () => {
+    expect(compareVersions('1.0.0', '1.0.0-preview.1')).toBe(-1);
+  });
+
+  it('compares pre-release labels lexicographically', () => {
+    expect(compareVersions('1.0.0-alpha.1', '1.0.0-beta.1')).toBe(1);
+  });
 });
 
 describe('fetchLatestVersion', () => {

@@ -1,4 +1,8 @@
 import { hasAwsCredentials, parseJsonOutput, prereqs, runCLI } from '../src/test-utils/index.js';
+import {
+  BedrockAgentCoreControlClient,
+  DeleteApiKeyCredentialProviderCommand,
+} from '@aws-sdk/client-bedrock-agentcore-control';
 import { execSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
@@ -13,6 +17,7 @@ interface E2EConfig {
   framework: string;
   modelProvider: string;
   requiredEnvVar?: string;
+  build?: string;
 }
 
 /**
@@ -64,6 +69,10 @@ export function createE2ESuite(cfg: E2EConfig) {
         '--json',
       ];
 
+      if (cfg.build) {
+        createArgs.push('--build', cfg.build);
+      }
+
       // Pass API key so the credential is registered in the project and .env.local
       const apiKey = cfg.requiredEnvVar ? process.env[cfg.requiredEnvVar] : undefined;
       if (apiKey) {
@@ -93,6 +102,20 @@ export function createE2ESuite(cfg: E2EConfig) {
         if (result.exitCode !== 0) {
           console.log('Teardown stdout:', result.stdout);
           console.log('Teardown stderr:', result.stderr);
+        }
+
+        // Delete the API key credential provider from the account.
+        // These are created as a pre-deploy step outside CDK and are not
+        // cleaned up by stack teardown, so we must delete them explicitly.
+        if (cfg.modelProvider !== 'Bedrock' && agentName) {
+          const providerName = `${agentName}${cfg.modelProvider}`;
+          const region = process.env.AWS_REGION ?? 'us-east-1';
+          try {
+            const client = new BedrockAgentCoreControlClient({ region });
+            await client.send(new DeleteApiKeyCredentialProviderCommand({ name: providerName }));
+          } catch {
+            // Best-effort cleanup — don't fail the test if deletion fails
+          }
         }
       }
       if (testDir) await rm(testDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 1000 });
