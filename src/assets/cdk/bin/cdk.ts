@@ -47,4 +47,7 @@ async function main() {
   app.synth();
 }
 
-main();
+main().catch((error: unknown) => {
+  console.error('AgentCore CDK synthesis failed:', error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+});
