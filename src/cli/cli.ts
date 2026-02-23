@@ -16,7 +16,7 @@ import { COMMAND_DESCRIPTIONS } from './tui/copy';
 import { clearExitMessage, getExitMessage } from './tui/exit-message';
 import { CommandListScreen } from './tui/screens/home';
 import { getCommandsForUI } from './tui/utils';
-import { checkForUpdate, printUpdateNotification } from './update-notifier';
+import { type UpdateCheckResult, checkForUpdate, printUpdateNotification } from './update-notifier';
 import { Command } from '@commander-js/extra-typings';
 import { render } from 'ink';
 import React from 'react';
@@ -55,7 +55,7 @@ function setupGlobalCleanup() {
 /**
  * Render the TUI in alternate screen buffer mode.
  */
-function renderTUI(updateCheck: Promise<import('./update-notifier').UpdateCheckResult | null>) {
+function renderTUI(updateCheck: Promise<UpdateCheckResult | null>) {
   inAltScreen = true;
   process.stdout.write(ENTER_ALT_SCREEN);
 
