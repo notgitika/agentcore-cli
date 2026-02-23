@@ -6,11 +6,34 @@ import {
   RESERVED_PROJECT_NAMES,
   RuntimeVersionSchema,
   SDKFrameworkSchema,
+  TargetLanguageSchema,
   getSupportedModelProviders,
   isModelProviderSupported,
   isReservedProjectName,
+  matchEnumValue,
 } from '../constants.js';
 import { describe, expect, it } from 'vitest';
+
+describe('matchEnumValue', () => {
+  it('returns canonical value for case-insensitive match', () => {
+    expect(matchEnumValue(SDKFrameworkSchema, 'strands')).toBe('Strands');
+    expect(matchEnumValue(SDKFrameworkSchema, 'STRANDS')).toBe('Strands');
+    expect(matchEnumValue(SDKFrameworkSchema, 'Strands')).toBe('Strands');
+    expect(matchEnumValue(ModelProviderSchema, 'bedrock')).toBe('Bedrock');
+    expect(matchEnumValue(TargetLanguageSchema, 'python')).toBe('Python');
+  });
+
+  it('returns undefined for non-matching input', () => {
+    expect(matchEnumValue(SDKFrameworkSchema, 'nonexistent')).toBeUndefined();
+    expect(matchEnumValue(ModelProviderSchema, 'azure')).toBeUndefined();
+  });
+
+  it('handles multi-word enum values', () => {
+    expect(matchEnumValue(SDKFrameworkSchema, 'langchain_langgraph')).toBe('LangChain_LangGraph');
+    expect(matchEnumValue(SDKFrameworkSchema, 'openaiagents')).toBe('OpenAIAgents');
+    expect(matchEnumValue(SDKFrameworkSchema, 'googleadk')).toBe('GoogleADK');
+  });
+});
 
 describe('SDKFrameworkSchema', () => {
   it.each(['Strands', 'LangChain_LangGraph', 'CrewAI', 'GoogleADK', 'OpenAIAgents'])('accepts "%s"', framework => {

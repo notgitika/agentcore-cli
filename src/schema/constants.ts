@@ -14,6 +14,15 @@ export const ModelProviderSchema = z.enum(['Bedrock', 'Gemini', 'OpenAI', 'Anthr
 export type ModelProvider = z.infer<typeof ModelProviderSchema>;
 
 /**
+ * Case-insensitively match a user-provided value against a Zod enum's options.
+ * Returns the canonical (correctly-cased) value, or undefined if no match.
+ */
+export function matchEnumValue(schema: { options: readonly string[] }, input: string): string | undefined {
+  const lower = input.toLowerCase();
+  return schema.options.find(v => v.toLowerCase() === lower);
+}
+
+/**
  * Default model IDs used for each provider.
  * These are the models generated in agent templates.
  */

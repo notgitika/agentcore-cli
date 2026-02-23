@@ -113,6 +113,27 @@ describe('validate', () => {
       expect(result.error?.includes('Invalid language')).toBeTruthy();
     });
 
+    // Case-insensitive flag values
+    it('accepts lowercase flag values and normalizes them', () => {
+      const result = validateAddAgentOptions({
+        ...validAgentOptionsByo,
+        framework: 'strands' as any,
+        modelProvider: 'bedrock' as any,
+        language: 'python' as any,
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('accepts uppercase flag values and normalizes them', () => {
+      const result = validateAddAgentOptions({
+        ...validAgentOptionsByo,
+        framework: 'STRANDS' as any,
+        modelProvider: 'BEDROCK' as any,
+        language: 'PYTHON' as any,
+      });
+      expect(result.valid).toBe(true);
+    });
+
     // AC3: Framework/model provider compatibility
     it('returns error for incompatible framework and model provider', () => {
       const result = validateAddAgentOptions({

@@ -5,6 +5,7 @@ import {
   SDKFrameworkSchema,
   TargetLanguageSchema,
   getSupportedModelProviders,
+  matchEnumValue,
 } from '../../../schema';
 import type { CreateOptions } from './types';
 import { existsSync } from 'fs';
@@ -49,6 +50,13 @@ export function validateCreateOptions(options: CreateOptions, cwd?: string): Val
   if (options.agent === false) {
     return { valid: true };
   }
+
+  // Normalize enum flag values (case-insensitive matching)
+  if (options.language) options.language = matchEnumValue(TargetLanguageSchema, options.language) ?? options.language;
+  if (options.framework) options.framework = matchEnumValue(SDKFrameworkSchema, options.framework) ?? options.framework;
+  if (options.modelProvider)
+    options.modelProvider = matchEnumValue(ModelProviderSchema, options.modelProvider) ?? options.modelProvider;
+  if (options.build) options.build = matchEnumValue(BuildTypeSchema, options.build) ?? options.build;
 
   // Validate build type if provided
   if (options.build) {

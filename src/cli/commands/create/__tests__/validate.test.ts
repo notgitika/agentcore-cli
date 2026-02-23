@@ -132,6 +132,22 @@ describe('validateCreateOptions', () => {
     expect(result.valid).toBe(true);
   });
 
+  it('accepts lowercase flag values and normalizes them', () => {
+    const result = validateCreateOptions(
+      { name: 'TestProjLower', language: 'python', framework: 'strands', modelProvider: 'bedrock', memory: 'none' },
+      testDir
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts uppercase flag values and normalizes them', () => {
+    const result = validateCreateOptions(
+      { name: 'TestProjUpper', language: 'PYTHON', framework: 'STRANDS', modelProvider: 'BEDROCK', memory: 'none' },
+      testDir
+    );
+    expect(result.valid).toBe(true);
+  });
+
   it('returns invalid for unsupported framework/model combination', () => {
     // GoogleADK only supports certain providers, not all
     const result = validateCreateOptions(
