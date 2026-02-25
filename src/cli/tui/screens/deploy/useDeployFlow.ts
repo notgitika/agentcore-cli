@@ -4,7 +4,14 @@ import { buildDeployedState, getStackOutputs, parseAgentOutputs } from '../../..
 import { getErrorMessage, isChangesetInProgressError, isExpiredTokenError } from '../../../errors';
 import { ExecLogger } from '../../../logging';
 import { performStackTeardown } from '../../../operations/deploy';
-import { type Step, areStepsComplete, hasStepError } from '../../components';
+import {
+  type StackDiffSummary,
+  type Step,
+  areStepsComplete,
+  hasStepError,
+  parseDiffResult,
+  parseStackDiff,
+} from '../../components';
 import { type MissingCredential, type PreflightContext, useCdkPreflight } from '../../hooks';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -35,6 +42,8 @@ interface DeployFlowOptions {
   preSynthesized?: PreSynthesized;
   /** Whether running in interactive TUI mode - affects error message verbosity */
   isInteractive?: boolean;
+  /** Run CDK diff instead of deploy */
+  diffMode?: boolean;
 }
 
 interface DeployFlowState {
@@ -55,6 +64,14 @@ interface DeployFlowState {
   logFilePath: string;
   /** Missing credentials that need to be provided */
   missingCredentials: MissingCredential[];
+  /** Parsed diff summaries per stack */
+  diffSummaries: StackDiffSummary[];
+  /** Number of stacks with changes (from overall diff result) */
+  numStacksWithChanges?: number;
+  /** Whether an on-demand diff is currently running */
+  isDiffLoading: boolean;
+  /** Request an on-demand diff (lazy: runs once, caches result) */
+  requestDiff: () => void;
   startDeploy: () => void;
   confirmTeardown: () => void;
   cancelTeardown: () => void;
@@ -73,7 +90,7 @@ interface DeployFlowState {
 }
 
 export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState {
-  const { preSynthesized, isInteractive = false } = options;
+  const { preSynthesized, isInteractive = false, diffMode = false } = options;
   const skipPreflight = !!preSynthesized;
 
   // Create logger once for the entire deploy flow
@@ -91,6 +108,11 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
 
   const [publishAssetsStep, setPublishAssetsStep] = useState<Step>({ label: 'Publish assets', status: 'pending' });
   const [deployStep, setDeployStep] = useState<Step>({ label: 'Deploy to AWS', status: 'pending' });
+  const [diffStep, setDiffStep] = useState<Step>({ label: 'Run CDK diff', status: 'pending' });
+  const [diffSummaries, setDiffSummaries] = useState<StackDiffSummary[]>([]);
+  const [numStacksWithChanges, setNumStacksWithChanges] = useState<number | undefined>();
+  const [isDiffLoading, setIsDiffLoading] = useState(false);
+  const isDiffRunningRef = useRef(false);
   const [deployOutput, setDeployOutput] = useState<string | null>(null);
   const [deployMessages, setDeployMessages] = useState<DeployMessage[]>([]);
   const [stackOutputs, setStackOutputs] = useState<Record<string, string>>({});
@@ -116,6 +138,40 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
       void preflight.startPreflight();
     }
   }, [preflight, skipPreflight]);
+
+  /** Run diff on-demand (lazy: runs once, caches result). Safe to call anytime after synth. */
+  const requestDiff = useCallback(() => {
+    if (diffSummaries.length > 0 || isDiffRunningRef.current) return;
+    if (!cdkToolkitWrapper) return;
+
+    isDiffRunningRef.current = true;
+    setIsDiffLoading(true);
+
+    const run = async () => {
+      switchableIoHost?.setOnRawMessage((code, _level, message, data) => {
+        logger.logDiff(code, message);
+        if (code === 'CDK_TOOLKIT_I4002') {
+          setDiffSummaries(prev => [...prev, parseStackDiff(data, message)]);
+        } else if (code === 'CDK_TOOLKIT_I4001') {
+          setNumStacksWithChanges(parseDiffResult(data).numStacksWithChanges);
+        }
+      });
+      switchableIoHost?.setVerbose(true);
+
+      try {
+        await cdkToolkitWrapper.diff();
+      } catch {
+        setDiffSummaries([{ stackName: 'Error', sections: [], hasSecurityChanges: false, totalChanges: 0 }]);
+      } finally {
+        switchableIoHost?.setVerbose(false);
+        switchableIoHost?.setOnRawMessage(null);
+        isDiffRunningRef.current = false;
+        setIsDiffLoading(false);
+      }
+    };
+
+    void run();
+  }, [cdkToolkitWrapper, diffSummaries.length, switchableIoHost, logger]);
 
   /**
    * Persist deployed state after successful deployment.
@@ -173,12 +229,38 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
 
   // Start deploy when preflight completes OR when shouldStartDeploy is set
   useEffect(() => {
+    if (diffMode) return; // Diff mode uses its own effect
     const shouldStart = skipPreflight ? shouldStartDeploy : preflight.phase === 'complete';
     if (!shouldStart) return;
     if (deployStep.status !== 'pending') return;
     if (!cdkToolkitWrapper) return;
 
     const run = async () => {
+      // Run diff before deploy to capture pre-deploy differences
+      if (!isDiffRunningRef.current) {
+        isDiffRunningRef.current = true;
+        setIsDiffLoading(true);
+        switchableIoHost?.setOnRawMessage((code, _level, message, data) => {
+          logger.logDiff(code, message);
+          if (code === 'CDK_TOOLKIT_I4002') {
+            setDiffSummaries(prev => [...prev, parseStackDiff(data, message)]);
+          } else if (code === 'CDK_TOOLKIT_I4001') {
+            setNumStacksWithChanges(parseDiffResult(data).numStacksWithChanges);
+          }
+        });
+        switchableIoHost?.setVerbose(true);
+        try {
+          await cdkToolkitWrapper.diff();
+        } catch {
+          // Diff failure is non-fatal — deploy will proceed
+        } finally {
+          switchableIoHost?.setVerbose(false);
+          switchableIoHost?.setOnRawMessage(null);
+          isDiffRunningRef.current = false;
+          setIsDiffLoading(false);
+        }
+      }
+
       setPublishAssetsStep(prev => ({ ...prev, status: 'running' }));
       setShouldStartDeploy(false);
       setDeployMessages([]); // Clear previous messages
@@ -294,6 +376,69 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     switchableIoHost,
     context?.isTeardownDeploy,
     context?.awsTargets,
+    diffMode,
+  ]);
+
+  // Start diff when preflight completes (diff mode only)
+  useEffect(() => {
+    if (!diffMode) return;
+    const shouldStart = skipPreflight ? shouldStartDeploy : preflight.phase === 'complete';
+    if (!shouldStart) return;
+    if (diffStep.status !== 'pending') return;
+    if (!cdkToolkitWrapper) return;
+
+    const run = async () => {
+      setDiffStep(prev => ({ ...prev, status: 'running' }));
+      setShouldStartDeploy(false);
+      setDiffSummaries([]);
+      logger.startStep('Run CDK diff');
+
+      switchableIoHost?.setOnRawMessage((code, _level, message, data) => {
+        logger.logDiff(code, message);
+        if (code === 'CDK_TOOLKIT_I4002') {
+          setDiffSummaries(prev => [...prev, parseStackDiff(data, message)]);
+        } else if (code === 'CDK_TOOLKIT_I4001') {
+          setNumStacksWithChanges(parseDiffResult(data).numStacksWithChanges);
+        }
+      });
+      switchableIoHost?.setVerbose(true);
+
+      try {
+        await cdkToolkitWrapper.diff();
+        logger.endStep('success');
+        logger.finalize(true);
+        setDiffStep(prev => ({ ...prev, status: 'success' }));
+      } catch (err) {
+        const errorMsg = getErrorMessage(err);
+        logger.endStep('error', errorMsg);
+        logger.finalize(false);
+
+        if (isExpiredTokenError(err)) {
+          setHasTokenExpiredError(true);
+        }
+
+        setDiffStep(prev => ({
+          ...prev,
+          status: 'error',
+          error: logger.getFailureMessage('Run CDK diff'),
+        }));
+      } finally {
+        switchableIoHost?.setVerbose(false);
+        switchableIoHost?.setOnRawMessage(null);
+        void cdkToolkitWrapper.dispose();
+      }
+    };
+
+    void run();
+  }, [
+    diffMode,
+    preflight.phase,
+    cdkToolkitWrapper,
+    diffStep.status,
+    logger,
+    skipPreflight,
+    shouldStartDeploy,
+    switchableIoHost,
   ]);
 
   // Finalize logger and dispose toolkit when preflight fails
@@ -305,20 +450,24 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     }
   }, [preflight.phase, preflight.cdkToolkitWrapper, logger, skipPreflight]);
 
-  const steps = useMemo(
-    () => (skipPreflight ? [publishAssetsStep, deployStep] : [...preflight.steps, publishAssetsStep, deployStep]),
-    [preflight.steps, publishAssetsStep, deployStep, skipPreflight]
-  );
+  const steps = useMemo(() => {
+    if (diffMode) {
+      return skipPreflight ? [diffStep] : [...preflight.steps, diffStep];
+    }
+    return skipPreflight ? [publishAssetsStep, deployStep] : [...preflight.steps, publishAssetsStep, deployStep];
+  }, [preflight.steps, publishAssetsStep, deployStep, diffStep, skipPreflight, diffMode]);
 
   const phase: DeployPhase = useMemo(() => {
+    const activeStep = diffMode ? diffStep : deployStep;
+
     if (skipPreflight) {
-      if (!shouldStartDeploy && deployStep.status === 'pending') {
+      if (!shouldStartDeploy && activeStep.status === 'pending') {
         return 'idle';
       }
-      if (deployStep.status === 'error') {
+      if (activeStep.status === 'error') {
         return 'error';
       }
-      if (deployStep.status === 'success') {
+      if (activeStep.status === 'success') {
         return 'complete';
       }
       return 'deploying';
@@ -342,14 +491,14 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     if (preflight.phase === 'running' || preflight.phase === 'bootstrapping' || preflight.phase === 'identity-setup') {
       return 'running';
     }
-    if (deployStep.status === 'error') {
+    if (activeStep.status === 'error') {
       return 'error';
     }
-    if (deployStep.status === 'success') {
+    if (activeStep.status === 'success') {
       return 'complete';
     }
     return 'deploying';
-  }, [preflight.phase, deployStep.status, skipPreflight, shouldStartDeploy]);
+  }, [preflight.phase, deployStep, diffStep, skipPreflight, shouldStartDeploy, diffMode]);
 
   const hasError = hasStepError(steps);
   const isComplete = areStepsComplete(steps);
@@ -372,6 +521,10 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     context,
     deployOutput,
     deployMessages,
+    diffSummaries,
+    numStacksWithChanges,
+    isDiffLoading,
+    requestDiff,
     stackOutputs,
     hasError,
     hasTokenExpiredError: combinedTokenExpiredError,

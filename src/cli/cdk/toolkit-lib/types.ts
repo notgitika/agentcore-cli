@@ -51,7 +51,7 @@ export interface SwitchableIoHost {
   /** Set callback to receive filtered deploy messages for TUI */
   setOnMessage: (callback: ((msg: DeployMessage) => void) | null) => void;
   /** Set callback to receive ALL raw CDK messages for logging */
-  setOnRawMessage: (callback: ((code: string, level: string, message: string) => void) | null) => void;
+  setOnRawMessage: (callback: ((code: string, level: string, message: string, data?: unknown) => void) | null) => void;
 }
 
 /**
@@ -94,7 +94,7 @@ function extractProgressFromMessage(message: string): ResourceProgress | undefin
 export function createSwitchableIoHost(): SwitchableIoHost {
   let verbose = false;
   let onMessage: ((msg: DeployMessage) => void) | null = null;
-  let onRawMessage: ((code: string, level: string, message: string) => void) | null = null;
+  let onRawMessage: ((code: string, level: string, message: string, data?: unknown) => void) | null = null;
 
   const ioHost: IIoHost = {
     notify(msg): Promise<void> {
@@ -104,8 +104,8 @@ export function createSwitchableIoHost(): SwitchableIoHost {
       const level = msg.level ?? 'info';
       const text = typeof msg.message === 'string' ? msg.message : '';
 
-      // Log ALL messages for debugging
-      onRawMessage?.(code, level, text);
+      // Log ALL messages for debugging (pass data for structured access)
+      onRawMessage?.(code, level, text, msg.data);
 
       // Only pass filtered messages to TUI
       if (onMessage && msg.code && DEPLOY_MESSAGE_CODES.has(msg.code)) {
@@ -150,7 +150,7 @@ export function createSwitchableIoHost(): SwitchableIoHost {
     setOnMessage: (cb: ((msg: DeployMessage) => void) | null) => {
       onMessage = cb;
     },
-    setOnRawMessage: (cb: ((code: string, level: string, message: string) => void) | null) => {
+    setOnRawMessage: (cb: ((code: string, level: string, message: string, data?: unknown) => void) | null) => {
       onRawMessage = cb;
     },
   };

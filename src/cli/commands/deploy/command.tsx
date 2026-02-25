@@ -11,13 +11,14 @@ import React from 'react';
 
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
-function handleDeployTUI(options: { autoConfirm?: boolean } = {}): void {
+function handleDeployTUI(options: { autoConfirm?: boolean; diffMode?: boolean } = {}): void {
   requireProject();
 
   const { unmount } = render(
     <DeployScreen
       isInteractive={false}
       autoConfirm={options.autoConfirm}
+      diffMode={options.diffMode}
       onExit={() => {
         unmount();
         process.exit(0);
@@ -71,8 +72,9 @@ async function handleDeployCLI(options: DeployOptions): Promise<void> {
   const result = await handleDeploy({
     target: options.target!,
     autoConfirm: options.yes,
-    verbose: options.verbose,
+    verbose: options.verbose ?? options.diff,
     plan: options.plan,
+    diff: options.diff,
     onProgress,
     onResourceEvent,
   });
@@ -85,7 +87,9 @@ async function handleDeployCLI(options: DeployOptions): Promise<void> {
   if (options.json) {
     console.log(JSON.stringify(result));
   } else if (result.success) {
-    if (options.plan) {
+    if (options.diff) {
+      console.log(`\n✓ Diff complete for '${result.targetName}' (stack: ${result.stackName})`);
+    } else if (options.plan) {
       console.log(`\n✓ Plan complete for '${result.targetName}' (stack: ${result.stackName})`);
       console.log('\nRun `agentcore deploy` to deploy.');
     } else {
@@ -127,8 +131,16 @@ export const registerDeploy = (program: Command) => {
     .option('-v, --verbose', 'Show resource-level deployment events [non-interactive]')
     .option('--json', 'Output as JSON [non-interactive]')
     .option('--plan', 'Preview deployment without deploying (dry-run) [non-interactive]')
+    .option('--diff', 'Show CDK diff without deploying [non-interactive]')
     .action(
-      async (cliOptions: { target?: string; yes?: boolean; verbose?: boolean; json?: boolean; plan?: boolean }) => {
+      async (cliOptions: {
+        target?: string;
+        yes?: boolean;
+        verbose?: boolean;
+        json?: boolean;
+        plan?: boolean;
+        diff?: boolean;
+      }) => {
         try {
           requireProject();
           if (cliOptions.json || cliOptions.target || cliOptions.plan || cliOptions.yes || cliOptions.verbose) {
@@ -139,6 +151,9 @@ export const registerDeploy = (program: Command) => {
               progress: !cliOptions.json,
             };
             await handleDeployCLI(options as DeployOptions);
+          } else if (cliOptions.diff) {
+            // Diff-only: use TUI with diff mode
+            handleDeployTUI({ diffMode: true });
           } else {
             handleDeployTUI();
           }

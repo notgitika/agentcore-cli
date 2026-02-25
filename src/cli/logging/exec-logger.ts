@@ -2,6 +2,14 @@ import { CLI_LOGS_DIR, CLI_SYSTEM_DIR, CONFIG_DIR, findConfigRoot } from '../../
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
+// eslint-disable-next-line no-control-regex
+const ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]/g;
+
+/** Strip ANSI escape codes from a string. */
+function stripAnsi(s: string): string {
+  return s.replace(ANSI_REGEX, '');
+}
+
 export interface ExecLoggerOptions {
   /** Command name for the log file (e.g., 'deploy', 'destroy') */
   command: string;
@@ -158,6 +166,39 @@ ${separator}
   log(message: string, level?: 'info' | 'warn' | 'error' | 'debug'): void {
     const levelPrefix = level && level !== 'info' ? `[${level.toUpperCase()}] ` : '';
     this.appendLine(`[${this.formatTime()}] ${levelPrefix}${message}`);
+  }
+
+  /**
+   * Log a CDK diff block. Strips ANSI codes and writes each line cleanly.
+   * Multi-line messages (like I4002 per-stack diffs) are written with a section header.
+   */
+  logDiff(code: string, message: string): void {
+    if (!message) return;
+    const clean = stripAnsi(message);
+    const lines = clean.split('\n');
+
+    if (code === 'CDK_TOOLKIT_I4002') {
+      // Per-stack diff — write as a clear section
+      this.appendLine('');
+      this.appendLine(`${'─'.repeat(80)}`);
+      for (const line of lines) {
+        this.appendLine(line);
+      }
+      this.appendLine(`${'─'.repeat(80)}`);
+    } else if (code === 'CDK_TOOLKIT_I4001') {
+      // Overall diff summary
+      this.appendLine('');
+      this.appendLine(clean);
+    } else if (lines.length > 1) {
+      // Other multi-line messages — log each line
+      for (const line of lines) {
+        if (line.trim()) {
+          this.appendLine(`[${this.formatTime()}] ${line}`);
+        }
+      }
+    } else {
+      this.appendLine(`[${this.formatTime()}] ${clean}`);
+    }
   }
 
   /**

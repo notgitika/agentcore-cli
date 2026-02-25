@@ -5,6 +5,7 @@ export interface DeployOptions {
   verbose?: boolean;
   json?: boolean;
   plan?: boolean;
+  diff?: boolean;
 }
 
 export interface DeployResult {

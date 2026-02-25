@@ -5,6 +5,7 @@ import {
   ConfirmPrompt,
   CredentialSourcePrompt,
   DeployStatus,
+  DiffSummaryView,
   LogLink,
   type NextStep,
   NextSteps,
@@ -17,7 +18,7 @@ import { BOOTSTRAP, HELP_TEXT } from '../../constants';
 import { useAwsTargetConfig } from '../../hooks';
 import { InvokeScreen } from '../invoke';
 import { type PreSynthesized, useDeployFlow } from './useDeployFlow';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput, useStdout } from 'ink';
 import React, { useEffect, useMemo, useState } from 'react';
 
 interface DeployScreenProps {
@@ -29,6 +30,8 @@ interface DeployScreenProps {
   onNavigate?: (command: string) => void;
   /** Skip preflight and use pre-synthesized context (from plan command) */
   preSynthesized?: PreSynthesized;
+  /** Run CDK diff instead of deploying */
+  diffMode?: boolean;
 }
 
 /** Next steps shown after successful deployment */
@@ -37,10 +40,19 @@ const DEPLOY_NEXT_STEPS: NextStep[] = [
   { command: 'status', label: 'View deployment status' },
 ];
 
-export function DeployScreen({ isInteractive, onExit, autoConfirm, onNavigate, preSynthesized }: DeployScreenProps) {
+export function DeployScreen({
+  isInteractive,
+  onExit,
+  autoConfirm,
+  onNavigate,
+  preSynthesized,
+  diffMode,
+}: DeployScreenProps) {
+  const { stdout } = useStdout();
   const awsConfig = useAwsTargetConfig();
   const [showInvoke, setShowInvoke] = useState(false);
   const [showResourceGraph, setShowResourceGraph] = useState(false);
+  const [showDiff, setShowDiff] = useState(diffMode ?? false);
   const [mcpSpec, setMcpSpec] = useState<AgentCoreMcpSpec | undefined>();
 
   // Load MCP spec for ResourceGraph
@@ -52,6 +64,10 @@ export function DeployScreen({ isInteractive, onExit, autoConfirm, onNavigate, p
     context,
     deployOutput,
     deployMessages,
+    diffSummaries,
+    numStacksWithChanges,
+    isDiffLoading,
+    requestDiff,
     hasError,
     hasTokenExpiredError,
     hasCredentialsError,
@@ -68,7 +84,7 @@ export function DeployScreen({ isInteractive, onExit, autoConfirm, onNavigate, p
     useEnvLocalCredentials,
     useManualCredentials,
     skipCredentials,
-  } = useDeployFlow({ preSynthesized, isInteractive });
+  } = useDeployFlow({ preSynthesized, isInteractive, diffMode });
   const allSuccess = !hasError && isComplete;
   const skipPreflight = !!preSynthesized;
 
@@ -91,6 +107,21 @@ export function DeployScreen({ isInteractive, onExit, autoConfirm, onNavigate, p
       }
     },
     { isActive: isInteractive && !!context }
+  );
+
+  // Toggle CDK diff with Ctrl+D
+  useInput(
+    (input, key) => {
+      if (input === 'd' && key.ctrl && context) {
+        setShowDiff(prev => {
+          if (!prev) {
+            requestDiff(); // Lazy: runs diff on first show
+          }
+          return !prev;
+        });
+      }
+    },
+    { isActive: isInteractive && !diffMode && !!context }
   );
 
   // Auto-start deploy when AWS target is configured (or immediately when preSynthesized)
@@ -228,7 +259,7 @@ export function DeployScreen({ isInteractive, onExit, autoConfirm, onNavigate, p
   const targetDisplay = context?.awsTargets.map(t => `${t.region}:${t.account}`).join(', ');
 
   // Show deploy status box once CloudFormation has started (after asset publishing)
-  const showDeployStatus = hasStartedCfn || isComplete;
+  const showDeployStatus = !diffMode && (hasStartedCfn || isComplete);
 
   // Filter out "Deploy to AWS" step when deploy status box is showing
   const displaySteps = showDeployStatus ? steps.filter(s => s.label !== 'Deploy to AWS') : steps;
@@ -248,15 +279,27 @@ export function DeployScreen({ isInteractive, onExit, autoConfirm, onNavigate, p
     </Box>
   );
 
-  // Build help text with Ctrl+G toggle hint when context is available
+  // Build help text with toggle hints when context is available
   const baseHelpText = allSuccess && isInteractive ? HELP_TEXT.NAVIGATE_SELECT : HELP_TEXT.EXIT;
-  const helpText =
-    context && isInteractive
-      ? `Ctrl+G ${showResourceGraph ? 'hide' : 'show'} resource graph · ${baseHelpText}`
-      : baseHelpText;
+  const toggleHints = [
+    !diffMode && diffSummaries.length > 0 && `Ctrl+D ${showDiff ? 'hide' : 'show'} diff`,
+    `Ctrl+G ${showResourceGraph ? 'hide' : 'show'} resource graph`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const helpText = context && isInteractive ? `${toggleHints} · ${baseHelpText}` : baseHelpText;
+
+  const screenTitle = diffMode ? 'AgentCore Diff' : 'AgentCore Deploy';
+
+  // Compute available height for diff view: terminal height minus chrome elements
+  // Chrome: ScreenLayout padding (2) + ScreenHeader (3) + Project/Target (2) + StepProgress (~3)
+  //       + margins (2) + scroll indicator (1) + "Diff complete" (2) + LogLink (2) + help text (2)
+  const terminalRows = stdout?.rows ?? 24;
+  const chromeLines = context ? 17 : 10; // more chrome when project info is visible
+  const diffMaxHeight = Math.max(6, terminalRows - chromeLines);
 
   return (
-    <Screen title="AgentCore Deploy" onExit={onExit} helpText={helpText} headerContent={headerContent}>
+    <Screen title={screenTitle} onExit={onExit} helpText={helpText} headerContent={headerContent}>
       <StepProgress steps={displaySteps} />
 
       {/* Toggleable ResourceGraph view */}
@@ -273,9 +316,32 @@ export function DeployScreen({ isInteractive, onExit, autoConfirm, onNavigate, p
         </Box>
       )}
 
-      {allSuccess && deployOutput && (
+      {/* Show diff output (diff mode: always; normal mode: Ctrl+D toggle) */}
+      {(diffMode === true || showDiff) && isDiffLoading && (
+        <Box marginTop={1}>
+          <Text dimColor>Loading diff...</Text>
+        </Box>
+      )}
+      {(diffMode === true || showDiff) && diffSummaries.length > 0 && (
+        <Box marginTop={1}>
+          <DiffSummaryView
+            summaries={diffSummaries}
+            numStacksWithChanges={numStacksWithChanges}
+            isActive={showDiff || diffMode === true}
+            maxHeight={diffMaxHeight}
+          />
+        </Box>
+      )}
+
+      {allSuccess && deployOutput && !diffMode && (
         <Box flexDirection="column" marginTop={1}>
           <Text color="green">{deployOutput}</Text>
+        </Box>
+      )}
+
+      {allSuccess && diffMode && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text color="green">Diff complete</Text>
         </Box>
       )}
 
@@ -285,7 +351,7 @@ export function DeployScreen({ isInteractive, onExit, autoConfirm, onNavigate, p
         </Box>
       )}
 
-      {allSuccess && (
+      {allSuccess && !diffMode && (
         <NextSteps
           steps={DEPLOY_NEXT_STEPS}
           isInteractive={isInteractive}

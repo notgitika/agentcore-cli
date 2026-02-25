@@ -27,3 +27,4 @@ export { AwsTargetConfigUI, getAwsConfigHelpText } from './AwsTargetConfigUI';
 export { ResourceGraph, type AgentStatusInfo } from './ResourceGraph';
 export { LogLink } from './LogLink';
 export { ScrollableText } from './ScrollableText';
+export { DiffSummaryView, parseStackDiff, parseDiffResult, type StackDiffSummary } from './DiffSummaryView';

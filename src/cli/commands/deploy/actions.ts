@@ -23,6 +23,7 @@ export interface ValidatedDeployOptions {
   autoConfirm?: boolean;
   verbose?: boolean;
   plan?: boolean;
+  diff?: boolean;
   onProgress?: (step: string, status: 'start' | 'success' | 'error') => void;
   onResourceEvent?: (message: string) => void;
 }
@@ -144,6 +145,39 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
 
     // Plan mode: stop after synth and checks, don't deploy
     if (options.plan) {
+      logger.finalize(true);
+      await toolkitWrapper.dispose();
+      toolkitWrapper = null;
+      return {
+        success: true,
+        targetName: target.name,
+        stackName,
+        logPath: logger.getRelativeLogPath(),
+      };
+    }
+
+    // Diff mode: run cdk diff and exit without deploying
+    if (options.diff) {
+      startStep('Run CDK diff');
+      const diffIoHost = switchableIoHost ?? createSwitchableIoHost();
+      let hasDiffContent = false;
+      diffIoHost.setOnRawMessage((code, _level, message) => {
+        if (!message) return;
+        // I4002: formatted diff per stack, I4001: overall diff summary
+        if (code === 'CDK_TOOLKIT_I4002' || code === 'CDK_TOOLKIT_I4001') {
+          hasDiffContent = true;
+          console.log(message);
+        }
+      });
+      diffIoHost.setVerbose(true);
+      await toolkitWrapper.diff();
+      if (!hasDiffContent) {
+        console.log('No stack differences detected.');
+      }
+      diffIoHost.setVerbose(false);
+      diffIoHost.setOnRawMessage(null);
+      endStep('success');
+
       logger.finalize(true);
       await toolkitWrapper.dispose();
       toolkitWrapper = null;
