@@ -30,12 +30,15 @@ const VALID_STRATEGIES = ['SEMANTIC', 'SUMMARIZATION', 'USER_PREFERENCE'];
 export function validateAddAgentOptions(options: AddAgentOptions): ValidationResult {
   // Normalize enum flag values (case-insensitive matching)
   if (options.framework)
-    options.framework = (matchEnumValue(SDKFrameworkSchema, options.framework) as typeof options.framework) ?? options.framework;
+    options.framework =
+      (matchEnumValue(SDKFrameworkSchema, options.framework) as typeof options.framework) ?? options.framework;
   if (options.modelProvider)
     options.modelProvider =
-      (matchEnumValue(ModelProviderSchema, options.modelProvider) as typeof options.modelProvider) ?? options.modelProvider;
+      (matchEnumValue(ModelProviderSchema, options.modelProvider) as typeof options.modelProvider) ??
+      options.modelProvider;
   if (options.language)
-    options.language = (matchEnumValue(TargetLanguageSchema, options.language) as typeof options.language) ?? options.language;
+    options.language =
+      (matchEnumValue(TargetLanguageSchema, options.language) as typeof options.language) ?? options.language;
   if (options.build) options.build = matchEnumValue(BuildTypeSchema, options.build) ?? options.build;
 
   if (!options.name) {
@@ -168,7 +171,8 @@ export function validateAddGatewayOptions(options: AddGatewayOptions): Validatio
 export function validateAddMcpToolOptions(options: AddMcpToolOptions): ValidationResult {
   // Normalize enum flag values (case-insensitive matching)
   if (options.language)
-    options.language = (matchEnumValue(TargetLanguageSchema, options.language) as typeof options.language) ?? options.language;
+    options.language =
+      (matchEnumValue(TargetLanguageSchema, options.language) as typeof options.language) ?? options.language;
 
   if (!options.name) {
     return { valid: false, error: '--name is required' };
