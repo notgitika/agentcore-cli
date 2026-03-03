@@ -131,6 +131,7 @@ Projects use JSON schema files in the `agentcore/` directory:
 - [CLI Commands Reference](docs/commands.md) - Full command reference for scripting and CI/CD
 - [Configuration](docs/configuration.md) - Schema reference for config files
 - [Frameworks](docs/frameworks.md) - Supported frameworks and model providers
+- [Gateway](docs/gateway.md) - Gateway setup, targets, and authentication
 - [Memory](docs/memory.md) - Memory strategies and sharing
 - [Local Development](docs/local-development.md) - Dev server and debugging
 

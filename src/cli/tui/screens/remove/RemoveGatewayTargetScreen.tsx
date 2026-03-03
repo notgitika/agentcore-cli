@@ -1,21 +1,21 @@
-import type { RemovableMcpTool } from '../../../operations/remove';
+import type { RemovableGatewayTarget } from '../../../operations/remove';
 import { SelectScreen } from '../../components';
 import React from 'react';
 
-interface RemoveMcpToolScreenProps {
-  /** List of MCP tools that can be removed */
-  tools: RemovableMcpTool[];
+interface RemoveGatewayTargetScreenProps {
+  /** List of gateway targets that can be removed */
+  tools: RemovableGatewayTarget[];
   /** Called when a tool is selected for removal */
-  onSelect: (tool: RemovableMcpTool) => void;
+  onSelect: (tool: RemovableGatewayTarget) => void;
   /** Called when user cancels */
   onExit: () => void;
 }
 
-export function RemoveMcpToolScreen({ tools, onSelect, onExit }: RemoveMcpToolScreenProps) {
+export function RemoveGatewayTargetScreen({ tools, onSelect, onExit }: RemoveGatewayTargetScreenProps) {
   const items = tools.map(tool => ({
     id: tool.name,
     title: tool.name,
-    description: tool.type === 'mcp-runtime' ? 'MCP Runtime tool' : `Gateway target (${tool.gatewayName})`,
+    description: `Gateway target (${tool.gatewayName})`,
   }));
 
   // Create a map for quick lookup
@@ -23,7 +23,7 @@ export function RemoveMcpToolScreen({ tools, onSelect, onExit }: RemoveMcpToolSc
 
   return (
     <SelectScreen
-      title="Select MCP Tool to Remove"
+      title="Select Gateway Target to Remove"
       items={items}
       onSelect={item => {
         const tool = toolMap.get(item.id);

@@ -1,7 +1,8 @@
 import { ConfigIO, SecureCredentials } from '../../../lib';
+import type { DeployedState } from '../../../schema';
 import { validateAwsCredentials } from '../../aws/account';
 import { createSwitchableIoHost } from '../../cdk/toolkit-lib';
-import { buildDeployedState, getStackOutputs, parseAgentOutputs } from '../../cloudformation';
+import { buildDeployedState, getStackOutputs, parseAgentOutputs, parseGatewayOutputs } from '../../cloudformation';
 import { getErrorMessage } from '../../errors';
 import { ExecLogger } from '../../logging';
 import {
@@ -10,12 +11,15 @@ import {
   checkBootstrapNeeded,
   checkStackDeployability,
   getAllCredentials,
-  hasOwnedIdentityApiProviders,
+  hasIdentityApiProviders,
+  hasIdentityOAuthProviders,
   performStackTeardown,
   setupApiKeyProviders,
+  setupOAuth2Providers,
   synthesizeCdk,
   validateProject,
 } from '../../operations/deploy';
+import { formatTargetStatus, getGatewayTargetStatuses } from '../../operations/deploy/gateway-status';
 import type { DeployResult } from './types';
 
 export interface ValidatedDeployOptions {
@@ -64,6 +68,15 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     }
     endStep('success');
 
+    // Read MCP spec for gateway information
+    let mcpSpec;
+    try {
+      mcpSpec = await configIO.readMcpSpec();
+    } catch {
+      // No mcp.json or invalid — no gateways
+      mcpSpec = null;
+    }
+
     // Preflight: validate project
     startStep('Validate project');
     const context = await validateProject();
@@ -91,6 +104,104 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     startStep('Build CDK project');
     await buildCdkProject(context.cdkProject);
     endStep('success');
+
+    // Set up identity providers before CDK synth (CDK needs credential ARNs)
+    let identityKmsKeyArn: string | undefined;
+
+    // Read runtime credentials from process.env (enables non-interactive deploy with -y)
+    const neededCredentials = getAllCredentials(context.projectSpec);
+    const envCredentials: Record<string, string> = {};
+    for (const cred of neededCredentials) {
+      const value = process.env[cred.envVarName];
+      if (value) {
+        envCredentials[cred.envVarName] = value;
+      }
+    }
+    const runtimeCredentials =
+      Object.keys(envCredentials).length > 0 ? new SecureCredentials(envCredentials) : undefined;
+
+    // Unified credentials map for deployed state (both API Key and OAuth)
+    const deployedCredentials: Record<
+      string,
+      { credentialProviderArn: string; clientSecretArn?: string; callbackUrl?: string }
+    > = {};
+
+    if (hasIdentityApiProviders(context.projectSpec)) {
+      startStep('Creating credentials...');
+
+      const identityResult = await setupApiKeyProviders({
+        projectSpec: context.projectSpec,
+        configBaseDir: configIO.getConfigRoot(),
+        region: target.region,
+        runtimeCredentials,
+        enableKmsEncryption: true,
+      });
+      if (identityResult.hasErrors) {
+        const errorResult = identityResult.results.find(r => r.status === 'error');
+        const errorMsg =
+          errorResult?.error && typeof errorResult.error === 'string' ? errorResult.error : 'Identity setup failed';
+        endStep('error', errorMsg);
+        logger.finalize(false);
+        return { success: false, error: errorMsg, logPath: logger.getRelativeLogPath() };
+      }
+      identityKmsKeyArn = identityResult.kmsKeyArn;
+
+      // Collect API Key credential ARNs for deployed state
+      for (const result of identityResult.results) {
+        if (result.credentialProviderArn) {
+          deployedCredentials[result.providerName] = {
+            credentialProviderArn: result.credentialProviderArn,
+          };
+        }
+      }
+      endStep('success');
+    }
+
+    // Set up OAuth credential providers if needed
+    if (hasIdentityOAuthProviders(context.projectSpec)) {
+      startStep('Creating OAuth credentials...');
+
+      const oauthResult = await setupOAuth2Providers({
+        projectSpec: context.projectSpec,
+        configBaseDir: configIO.getConfigRoot(),
+        region: target.region,
+        runtimeCredentials,
+      });
+      if (oauthResult.hasErrors) {
+        // Log detailed error internally, return sanitized message to avoid leaking OAuth details
+        const errorResult = oauthResult.results.find(r => r.status === 'error');
+        logger.log(`OAuth setup error: ${errorResult?.error ?? 'unknown'}`, 'error');
+        const errorMsg = 'OAuth credential setup failed. Check the log for details.';
+        endStep('error', errorMsg);
+        logger.finalize(false);
+        return { success: false, error: errorMsg, logPath: logger.getRelativeLogPath() };
+      }
+
+      // Collect OAuth credential ARNs for deployed state
+      for (const result of oauthResult.results) {
+        if (result.credentialProviderArn) {
+          deployedCredentials[result.providerName] = {
+            credentialProviderArn: result.credentialProviderArn,
+            clientSecretArn: result.clientSecretArn,
+            callbackUrl: result.callbackUrl,
+          };
+        }
+      }
+      endStep('success');
+    }
+
+    // Write credential ARNs to deployed state before CDK synth so the template can read them
+    if (Object.keys(deployedCredentials).length > 0) {
+      const existingPreSynthState = await configIO.readDeployedState().catch(() => ({ targets: {} }) as DeployedState);
+      const targetState = existingPreSynthState.targets?.[target.name] ?? { resources: {} };
+      targetState.resources ??= {};
+      targetState.resources.credentials = deployedCredentials;
+      if (identityKmsKeyArn) targetState.resources.identityKmsKeyArn = identityKmsKeyArn;
+      await configIO.writeDeployedState({
+        ...existingPreSynthState,
+        targets: { ...existingPreSynthState.targets, [target.name]: targetState },
+      });
+    }
 
     // Synthesize CloudFormation templates
     startStep('Synthesize CloudFormation');
@@ -155,42 +266,10 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       };
     }
 
-    // Set up identity providers if needed
-    let identityKmsKeyArn: string | undefined;
-    if (hasOwnedIdentityApiProviders(context.projectSpec)) {
-      startStep('Set up API key providers');
-
-      // In CLI mode, also check process.env for credentials (enables non-interactive deploy with -y)
-      const neededCredentials = getAllCredentials(context.projectSpec);
-      const envCredentials: Record<string, string> = {};
-      for (const cred of neededCredentials) {
-        const value = process.env[cred.envVarName];
-        if (value) {
-          envCredentials[cred.envVarName] = value;
-        }
-      }
-      const runtimeCredentials =
-        Object.keys(envCredentials).length > 0 ? new SecureCredentials(envCredentials) : undefined;
-
-      const identityResult = await setupApiKeyProviders({
-        projectSpec: context.projectSpec,
-        configBaseDir: configIO.getConfigRoot(),
-        region: target.region,
-        runtimeCredentials,
-        enableKmsEncryption: true,
-      });
-      if (identityResult.hasErrors) {
-        const errorMsg = identityResult.results.find(r => r.status === 'error')?.error ?? 'Identity setup failed';
-        endStep('error', errorMsg);
-        logger.finalize(false);
-        return { success: false, error: errorMsg, logPath: logger.getRelativeLogPath() };
-      }
-      identityKmsKeyArn = identityResult.kmsKeyArn;
-      endStep('success');
-    }
-
     // Deploy
-    startStep('Deploy to AWS');
+    const hasGateways = mcpSpec?.agentCoreGateways && mcpSpec.agentCoreGateways.length > 0;
+    const deployStepName = hasGateways ? 'Deploying gateways...' : 'Deploy to AWS';
+    startStep(deployStepName);
 
     // Enable verbose output for resource-level events
     if (switchableIoHost && options.onResourceEvent) {
@@ -215,11 +294,12 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       startStep('Tear down stack');
       const teardown = await performStackTeardown(target.name);
       if (!teardown.success) {
-        endStep('error', teardown.error);
+        const teardownError = typeof teardown.error === 'string' ? teardown.error : 'Unknown teardown error';
+        endStep('error', teardownError);
         logger.finalize(false);
         return {
           success: false,
-          error: `Stack teardown failed: ${teardown.error}`,
+          error: `Stack teardown failed: ${teardownError}`,
           logPath: logger.getRelativeLogPath(),
         };
       }
@@ -238,11 +318,48 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     // Get stack outputs and persist state
     startStep('Persist deployment state');
     const outputs = await getStackOutputs(target.region, stackName);
-    const agentNames = context.projectSpec.agents.map(a => a.name);
+    const agentNames = context.projectSpec.agents?.map(a => a.name) || [];
     const agents = parseAgentOutputs(outputs, agentNames, stackName);
+
+    // Parse gateway outputs
+    const gatewaySpecs =
+      mcpSpec?.agentCoreGateways?.reduce(
+        (acc, gateway) => {
+          acc[gateway.name] = gateway;
+          return acc;
+        },
+        {} as Record<string, unknown>
+      ) ?? {};
+    const gateways = parseGatewayOutputs(outputs, gatewaySpecs);
+
     const existingState = await configIO.readDeployedState().catch(() => undefined);
-    const deployedState = buildDeployedState(target.name, stackName, agents, existingState, identityKmsKeyArn);
+    const deployedState = buildDeployedState(
+      target.name,
+      stackName,
+      agents,
+      gateways,
+      existingState,
+      identityKmsKeyArn,
+      deployedCredentials
+    );
     await configIO.writeDeployedState(deployedState);
+
+    // Show gateway URLs and target sync status
+    if (Object.keys(gateways).length > 0) {
+      const gatewayUrls = Object.entries(gateways)
+        .map(([name, gateway]) => `${name}: ${gateway.gatewayArn}`)
+        .join(', ');
+      logger.log(`Gateway URLs: ${gatewayUrls}`);
+
+      // Query target sync statuses (non-blocking)
+      for (const [, gateway] of Object.entries(gateways)) {
+        const statuses = await getGatewayTargetStatuses(gateway.gatewayId, target.region);
+        for (const targetStatus of statuses) {
+          logger.log(`  ${targetStatus.name}: ${formatTargetStatus(targetStatus.status)}`);
+        }
+      }
+    }
+
     endStep('success');
 
     logger.finalize(true);
@@ -255,7 +372,7 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       logPath: logger.getRelativeLogPath(),
       nextSteps: NEXT_STEPS,
     };
-  } catch (err) {
+  } catch (err: unknown) {
     logger.log(getErrorMessage(err), 'error');
     logger.finalize(false);
     return { success: false, error: getErrorMessage(err), logPath: logger.getRelativeLogPath() };

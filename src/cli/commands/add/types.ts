@@ -31,6 +31,9 @@ export interface AddGatewayOptions {
   discoveryUrl?: string;
   allowedAudience?: string;
   allowedClients?: string;
+  allowedScopes?: string;
+  agentClientId?: string;
+  agentClientSecret?: string;
   agents?: string;
   json?: boolean;
 }
@@ -41,19 +44,26 @@ export interface AddGatewayResult {
   error?: string;
 }
 
-// MCP Tool types
-export interface AddMcpToolOptions {
+// Gateway Target types
+export interface AddGatewayTargetOptions {
   name?: string;
   description?: string;
+  type?: string;
+  source?: string;
+  endpoint?: string;
   language?: 'Python' | 'TypeScript' | 'Other';
-  exposure?: 'mcp-runtime' | 'behind-gateway';
-  agents?: string;
   gateway?: string;
   host?: 'Lambda' | 'AgentCoreRuntime';
+  outboundAuthType?: 'OAUTH' | 'API_KEY' | 'NONE';
+  credentialName?: string;
+  oauthClientId?: string;
+  oauthClientSecret?: string;
+  oauthDiscoveryUrl?: string;
+  oauthScopes?: string;
   json?: boolean;
 }
 
-export interface AddMcpToolResult {
+export interface AddGatewayTargetResult {
   success: boolean;
   toolName?: string;
   sourcePath?: string;
@@ -77,7 +87,12 @@ export interface AddMemoryResult {
 // Identity types (v2: credential, no owner/user concept)
 export interface AddIdentityOptions {
   name?: string;
+  type?: 'api-key' | 'oauth';
   apiKey?: string;
+  discoveryUrl?: string;
+  clientId?: string;
+  clientSecret?: string;
+  scopes?: string;
   json?: boolean;
 }
 

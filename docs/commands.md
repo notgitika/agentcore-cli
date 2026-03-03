@@ -151,21 +151,114 @@ agentcore add memory \
 | `--expiry <days>`      | Event expiry (default: 30)                                                |
 | `--json`               | JSON output                                                               |
 
-### add identity
+### add gateway
 
-Add a credential provider (API key). Credentials are top-level resources in the flat resource model.
+Add a gateway to the project. Gateways act as MCP-compatible proxies that route agent requests to backend tools.
 
 ```bash
+# Interactive mode (select 'Gateway' from the menu)
+agentcore add
+
+# No authorization (development/testing)
+agentcore add gateway --name MyGateway
+
+# CUSTOM_JWT authorization (production)
+agentcore add gateway \
+  --name MyGateway \
+  --authorizer-type CUSTOM_JWT \
+  --discovery-url https://idp.example.com/.well-known/openid-configuration \
+  --allowed-audience my-api \
+  --allowed-clients my-client-id \
+  --agent-client-id agent-client-id \
+  --agent-client-secret agent-client-secret
+```
+
+| Flag                             | Description                                                  |
+| -------------------------------- | ------------------------------------------------------------ |
+| `--name <name>`                  | Gateway name                                                 |
+| `--description <desc>`           | Gateway description                                          |
+| `--authorizer-type <type>`       | `NONE` (default) or `CUSTOM_JWT`                             |
+| `--discovery-url <url>`          | OIDC discovery URL (required for CUSTOM_JWT)                 |
+| `--allowed-audience <values>`    | Comma-separated allowed audiences (required for CUSTOM_JWT)  |
+| `--allowed-clients <values>`     | Comma-separated allowed client IDs (required for CUSTOM_JWT) |
+| `--allowed-scopes <scopes>`      | Comma-separated allowed scopes (optional for CUSTOM_JWT)     |
+| `--agent-client-id <id>`         | Agent OAuth client ID for Bearer token auth (CUSTOM_JWT)     |
+| `--agent-client-secret <secret>` | Agent OAuth client secret (CUSTOM_JWT)                       |
+| `--json`                         | JSON output                                                  |
+
+### add gateway-target
+
+Add a gateway target to the project. Targets are backend tools exposed through a gateway as an external MCP server
+endpoint.
+
+```bash
+# Interactive mode (select 'Gateway Target' from the menu)
+agentcore add
+
+# External MCP server endpoint
+agentcore add gateway-target \
+  --name WeatherTools \
+  --source existing-endpoint \
+  --endpoint https://mcp.example.com/mcp \
+  --gateway MyGateway
+
+# External endpoint with OAuth outbound auth
+agentcore add gateway-target \
+  --name SecureTools \
+  --source existing-endpoint \
+  --endpoint https://api.example.com/mcp \
+  --gateway MyGateway \
+  --outbound-auth oauth \
+  --oauth-client-id my-client \
+  --oauth-client-secret my-secret \
+  --oauth-discovery-url https://auth.example.com/.well-known/openid-configuration
+```
+
+| Flag                             | Description                                     |
+| -------------------------------- | ----------------------------------------------- |
+| `--name <name>`                  | Target name                                     |
+| `--description <desc>`           | Target description                              |
+| `--source <source>`              | `existing-endpoint`                             |
+| `--endpoint <url>`               | MCP server endpoint URL                         |
+| `--gateway <name>`               | Gateway to attach target to                     |
+| `--outbound-auth <type>`         | `oauth`, `api-key`, or `none`                   |
+| `--credential-name <name>`       | Existing credential name for outbound auth      |
+| `--oauth-client-id <id>`         | OAuth client ID (creates credential inline)     |
+| `--oauth-client-secret <secret>` | OAuth client secret (creates credential inline) |
+| `--oauth-discovery-url <url>`    | OAuth discovery URL (creates credential inline) |
+| `--oauth-scopes <scopes>`        | OAuth scopes, comma-separated                   |
+| `--json`                         | JSON output                                     |
+
+### add identity
+
+Add a credential to the project. Supports API key and OAuth credential types.
+
+```bash
+# API key credential
 agentcore add identity \
   --name OpenAI \
   --api-key sk-...
+
+# OAuth credential
+agentcore add identity \
+  --name MyOAuthProvider \
+  --type oauth \
+  --discovery-url https://idp.example.com/.well-known/openid-configuration \
+  --client-id my-client-id \
+  --client-secret my-client-secret \
+  --scopes read,write
 ```
 
-| Flag              | Description     |
-| ----------------- | --------------- |
-| `--name <name>`   | Credential name |
-| `--api-key <key>` | API key value   |
-| `--json`          | JSON output     |
+| Flag                       | Description                      |
+| -------------------------- | -------------------------------- |
+| `--name <name>`            | Credential name                  |
+| `--type <type>`            | `api-key` (default) or `oauth`   |
+| `--api-key <key>`          | API key value (api-key type)     |
+| `--discovery-url <url>`    | OAuth discovery URL (oauth type) |
+| `--client-id <id>`         | OAuth client ID (oauth type)     |
+| `--client-secret <secret>` | OAuth client secret (oauth type) |
+| `--scopes <scopes>`        | OAuth scopes, comma-separated    |
+| `--json`                   | JSON output                      |
 
 ### remove
 
@@ -175,6 +268,8 @@ Remove resources from project.
 agentcore remove agent --name MyAgent --force
 agentcore remove memory --name SharedMemory
 agentcore remove identity --name OpenAI
+agentcore remove gateway --name MyGateway
+agentcore remove gateway-target --name WeatherTools
 
 # Reset everything
 agentcore remove all --force
@@ -278,6 +373,18 @@ agentcore deploy -y --json
 agentcore create --name MyProject --defaults
 cd MyProject
 agentcore add memory --name SharedMemory --strategies SEMANTIC
+agentcore deploy -y
+```
+
+### Gateway Setup
+
+```bash
+agentcore add gateway --name MyGateway
+agentcore add gateway-target \
+  --name WeatherTools \
+  --source existing-endpoint \
+  --endpoint https://mcp.example.com/mcp \
+  --gateway MyGateway
 agentcore deploy -y
 ```
 

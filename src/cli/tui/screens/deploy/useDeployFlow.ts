@@ -1,9 +1,10 @@
 import { ConfigIO } from '../../../../lib';
 import type { CdkToolkitWrapper, DeployMessage, SwitchableIoHost } from '../../../cdk/toolkit-lib';
-import { buildDeployedState, getStackOutputs, parseAgentOutputs } from '../../../cloudformation';
+import { buildDeployedState, getStackOutputs, parseAgentOutputs, parseGatewayOutputs } from '../../../cloudformation';
 import { getErrorMessage, isChangesetInProgressError, isExpiredTokenError } from '../../../errors';
 import { ExecLogger } from '../../../logging';
 import { performStackTeardown } from '../../../operations/deploy';
+import { getGatewayTargetStatuses } from '../../../operations/deploy/gateway-status';
 import { type Step, areStepsComplete, hasStepError } from '../../components';
 import { type MissingCredential, type PreflightContext, useCdkPreflight } from '../../hooks';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -28,6 +29,7 @@ export interface PreSynthesized {
   stackNames: string[];
   switchableIoHost?: SwitchableIoHost;
   identityKmsKeyArn?: string;
+  oauthCredentials?: Record<string, { credentialProviderArn: string; clientSecretArn?: string; callbackUrl?: string }>;
 }
 
 interface DeployFlowOptions {
@@ -44,6 +46,7 @@ interface DeployFlowState {
   deployOutput: string | null;
   deployMessages: DeployMessage[];
   stackOutputs: Record<string, string>;
+  targetStatuses: { name: string; status: string }[];
   hasError: boolean;
   /** True if the error is specifically due to expired/invalid AWS credentials */
   hasTokenExpiredError: boolean;
@@ -88,12 +91,14 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
   const stackNames = preSynthesized?.stackNames ?? preflight.stackNames;
   const switchableIoHost = preSynthesized?.switchableIoHost ?? preflight.switchableIoHost;
   const identityKmsKeyArn = preSynthesized?.identityKmsKeyArn ?? preflight.identityKmsKeyArn;
+  const oauthCredentials = preSynthesized?.oauthCredentials ?? preflight.oauthCredentials;
 
   const [publishAssetsStep, setPublishAssetsStep] = useState<Step>({ label: 'Publish assets', status: 'pending' });
   const [deployStep, setDeployStep] = useState<Step>({ label: 'Deploy to AWS', status: 'pending' });
   const [deployOutput, setDeployOutput] = useState<string | null>(null);
   const [deployMessages, setDeployMessages] = useState<DeployMessage[]>([]);
   const [stackOutputs, setStackOutputs] = useState<Record<string, string>>({});
+  const [targetStatuses, setTargetStatuses] = useState<{ name: string; status: string }[]>([]);
   const [shouldStartDeploy, setShouldStartDeploy] = useState(false);
   const [hasTokenExpiredError, setHasTokenExpiredError] = useState(false);
   // Track if CloudFormation has started (received first resource event)
@@ -129,7 +134,7 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     if (!ctx || !currentStackName || !target) return;
 
     const configIO = new ConfigIO();
-    const agentNames = ctx.projectSpec.agents.map((a: { name: string }) => a.name);
+    const agentNames = ctx.projectSpec.agents?.map((a: { name: string }) => a.name) || [];
 
     // Try to get outputs from CDK stream first (immediate, no API call)
     let outputs = streamOutputsRef.current ?? {};
@@ -163,13 +168,48 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
       );
     }
 
+    // Parse gateway outputs from CDK stack
+    let gateways: Record<string, { gatewayId: string; gatewayArn: string }> = {};
+    try {
+      const mcpSpec = await configIO.readMcpSpec();
+      const gatewaySpecs =
+        mcpSpec?.agentCoreGateways?.reduce(
+          (acc: Record<string, unknown>, gateway: { name: string }) => {
+            acc[gateway.name] = gateway;
+            return acc;
+          },
+          {} as Record<string, unknown>
+        ) ?? {};
+      gateways = parseGatewayOutputs(outputs, gatewaySpecs);
+    } catch (error) {
+      logger.log(`Failed to read gateway configuration: ${getErrorMessage(error)}`, 'warn');
+    }
+
     // Expose outputs to UI
     setStackOutputs(outputs);
 
     const existingState = await configIO.readDeployedState().catch(() => undefined);
-    const deployedState = buildDeployedState(target.name, currentStackName, agents, existingState, identityKmsKeyArn);
+    const deployedState = buildDeployedState(
+      target.name,
+      currentStackName,
+      agents,
+      gateways,
+      existingState,
+      identityKmsKeyArn,
+      Object.keys(oauthCredentials).length > 0 ? oauthCredentials : undefined
+    );
     await configIO.writeDeployedState(deployedState);
-  }, [context, stackNames, logger, identityKmsKeyArn]);
+
+    // Query gateway target sync statuses (non-blocking)
+    const allStatuses: { name: string; status: string }[] = [];
+    for (const [, gateway] of Object.entries(gateways)) {
+      const statuses = await getGatewayTargetStatuses(gateway.gatewayId, target.region);
+      allStatuses.push(...statuses);
+    }
+    if (allStatuses.length > 0) {
+      setTargetStatuses(allStatuses);
+    }
+  }, [context, stackNames, logger, identityKmsKeyArn, oauthCredentials]);
 
   // Start deploy when preflight completes OR when shouldStartDeploy is set
   useEffect(() => {
@@ -373,6 +413,7 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     deployOutput,
     deployMessages,
     stackOutputs,
+    targetStatuses,
     hasError,
     hasTokenExpiredError: combinedTokenExpiredError,
     hasCredentialsError: preflight.hasCredentialsError,

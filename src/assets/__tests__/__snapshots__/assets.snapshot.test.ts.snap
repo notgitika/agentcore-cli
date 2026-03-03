@@ -48,6 +48,7 @@ import { AgentCoreStack } from '../lib/cdk-stack';
 import { ConfigIO, type AwsDeploymentTarget } from '@aws/agentcore-cdk';
 import { App, type Environment } from 'aws-cdk-lib';
 import * as path from 'path';
+import * as fs from 'fs';
 
 function toEnvironment(target: AwsDeploymentTarget): Environment {
   return {
@@ -72,6 +73,22 @@ async function main() {
   const spec = await configIO.readProjectSpec();
   const targets = await configIO.readAWSDeploymentTargets();
 
+  // Read MCP configuration if it exists
+  let mcpSpec;
+  try {
+    mcpSpec = await configIO.readMcpSpec();
+  } catch {
+    // MCP config is optional
+  }
+
+  // Read deployed state for credential ARNs (populated by pre-deploy identity setup)
+  let deployedState: Record<string, unknown> | undefined;
+  try {
+    deployedState = JSON.parse(fs.readFileSync(path.join(configRoot, '.cli', 'deployed-state.json'), 'utf8'));
+  } catch {
+    // Deployed state may not exist on first deploy
+  }
+
   if (targets.length === 0) {
     throw new Error('No deployment targets configured. Please define targets in agentcore/aws-targets.json');
   }
@@ -82,8 +99,19 @@ async function main() {
     const env = toEnvironment(target);
     const stackName = toStackName(spec.name, target.name);
 
+    // Extract credentials from deployed state for this target
+    const targetState = (deployedState as Record<string, unknown>)?.targets as
+      | Record<string, Record<string, unknown>>
+      | undefined;
+    const targetResources = targetState?.[target.name]?.resources as Record<string, unknown> | undefined;
+    const credentials = targetResources?.credentials as
+      | Record<string, { credentialProviderArn: string; clientSecretArn?: string }>
+      | undefined;
+
     new AgentCoreStack(app, stackName, {
       spec,
+      mcpSpec,
+      credentials,
       env,
       description: \`AgentCore stack for \${spec.name} deployed to \${target.name} (\${target.region})\`,
       tags: {
@@ -222,7 +250,12 @@ exports[`Assets Directory Snapshots > CDK assets > cdk/cdk/jest.config.js should
 `;
 
 exports[`Assets Directory Snapshots > CDK assets > cdk/cdk/lib/cdk-stack.ts should match snapshot 1`] = `
-"import { AgentCoreApplication, type AgentCoreProjectSpec } from '@aws/agentcore-cdk';
+"import {
+  AgentCoreApplication,
+  AgentCoreMcp,
+  type AgentCoreProjectSpec,
+  type AgentCoreMcpSpec,
+} from '@aws/agentcore-cdk';
 import { CfnOutput, Stack, type StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
@@ -231,6 +264,14 @@ export interface AgentCoreStackProps extends StackProps {
    * The AgentCore project specification containing agents, memories, and credentials.
    */
   spec: AgentCoreProjectSpec;
+  /**
+   * The MCP specification containing gateways and servers.
+   */
+  mcpSpec?: AgentCoreMcpSpec;
+  /**
+   * Credential provider ARNs from deployed state, keyed by credential name.
+   */
+  credentials?: Record<string, { credentialProviderArn: string; clientSecretArn?: string }>;
 }
 
 /**
@@ -246,12 +287,22 @@ export class AgentCoreStack extends Stack {
   constructor(scope: Construct, id: string, props: AgentCoreStackProps) {
     super(scope, id, props);
 
-    const { spec } = props;
+    const { spec, mcpSpec, credentials } = props;
 
     // Create AgentCoreApplication with all agents
     this.application = new AgentCoreApplication(this, 'Application', {
       spec,
     });
+
+    // Create AgentCoreMcp if there are gateways configured
+    if (mcpSpec?.agentCoreGateways && mcpSpec.agentCoreGateways.length > 0) {
+      new AgentCoreMcp(this, 'Mcp', {
+        projectName: spec.name,
+        mcpSpec,
+        agentCoreApplication: this.application,
+        credentials,
+      });
+    }
 
     // Stack-level output
     new CfnOutput(this, 'StackNameOutput', {
@@ -300,7 +351,7 @@ exports[`Assets Directory Snapshots > CDK assets > cdk/cdk/package.json should m
   },
   "dependencies": {
     "@aws/agentcore-cdk": "^0.1.0-alpha.1",
-    "aws-cdk-lib": "2.234.1",
+    "aws-cdk-lib": "2.239.0",
     "constructs": "^10.0.0"
   }
 }
@@ -1584,7 +1635,11 @@ from google.adk.sessions import InMemorySessionService
 from google.genai import types
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from model.load import load_model
+{{#if hasGateway}}
+from mcp_client.client import get_all_gateway_mcp_toolsets
+{{else}}
 from mcp_client.client import get_streamable_http_mcp_client
+{{/if}}
 
 app = BedrockAgentCoreApp()
 log = app.logger
@@ -1602,7 +1657,12 @@ def add_numbers(a: int, b: int) -> int:
 
 
 # Get MCP Toolset
-mcp_toolset = [get_streamable_http_mcp_client()]
+{{#if hasGateway}}
+mcp_toolset = get_all_gateway_mcp_toolsets()
+{{else}}
+mcp_client = get_streamable_http_mcp_client()
+mcp_toolset = [mcp_client] if mcp_client else []
+{{/if}}
 
 _credentials_loaded = False
 
@@ -1677,21 +1737,72 @@ exports[`Assets Directory Snapshots > Python framework assets > python/python/go
 `;
 
 exports[`Assets Directory Snapshots > Python framework assets > python/python/googleadk/base/mcp_client/client.py should match snapshot 1`] = `
-"from google.adk.tools.mcp_tool.mcp_toolset import MCPToolset
+"import os
+import logging
+from google.adk.tools.mcp_tool.mcp_toolset import MCPToolset
 from google.adk.tools.mcp_tool.mcp_session_manager import StreamableHTTPConnectionParams
 
+logger = logging.getLogger(__name__)
+
+{{#if hasGateway}}
+{{#if (includes gatewayAuthTypes "AWS_IAM")}}
+import httpx
+from mcp_proxy_for_aws.sigv4_helper import SigV4HTTPXAuth, create_aws_session
+{{/if}}
+{{#if (includes gatewayAuthTypes "CUSTOM_JWT")}}
+from bedrock_agentcore.identity import requires_access_token
+{{/if}}
+
+{{#each gatewayProviders}}
+{{#if (eq authType "CUSTOM_JWT")}}
+@requires_access_token(
+    provider_name="{{credentialProviderName}}",
+    scopes=[{{#if scopes}}"{{scopes}}"{{/if}}],
+    auth_flow="M2M",
+)
+def _get_bearer_token_{{snakeCase name}}(*, access_token: str):
+    """Obtain OAuth access token via AgentCore Identity for {{name}}."""
+    return access_token
+
+{{/if}}
+{{/each}}
+
+def get_all_gateway_mcp_toolsets() -> list[MCPToolset]:
+    """Returns MCP Toolsets for all configured gateways."""
+    toolsets = []
+    {{#each gatewayProviders}}
+    url = os.environ.get("{{envVarName}}")
+    if url:
+        {{#if (eq authType "AWS_IAM")}}
+        session = create_aws_session()
+        auth = SigV4HTTPXAuth(session.get_credentials(), "bedrock-agentcore", session.region_name)
+        toolsets.append(MCPToolset(connection_params=StreamableHTTPConnectionParams(
+            url=url,
+            httpx_client_factory=lambda **kwargs: httpx.AsyncClient(auth=auth, **kwargs)
+        )))
+        {{else if (eq authType "CUSTOM_JWT")}}
+        token = _get_bearer_token_{{snakeCase name}}()
+        headers = {"Authorization": f"Bearer {token}"} if token else None
+        toolsets.append(MCPToolset(connection_params=StreamableHTTPConnectionParams(url=url, headers=headers)))
+        {{else}}
+        toolsets.append(MCPToolset(connection_params=StreamableHTTPConnectionParams(url=url)))
+        {{/if}}
+    else:
+        logger.warning("{{envVarName}} not set — {{name}} gateway tools unavailable")
+    {{/each}}
+    return toolsets
+{{else}}
 # ExaAI provides information about code through web searches, crawling and code context searches through their platform. Requires no authentication
 EXAMPLE_MCP_ENDPOINT = "https://mcp.exa.ai/mcp"
 
 
 def get_streamable_http_mcp_client() -> MCPToolset:
-    """
-    Returns an MCP Toolset compatible with Google ADK.
-    """
+    """Returns an MCP Toolset compatible with Google ADK."""
     # to use an MCP server that supports bearer authentication, add headers={"Authorization": f"Bearer {access_token}"}
     return MCPToolset(
         connection_params=StreamableHTTPConnectionParams(url=EXAMPLE_MCP_ENDPOINT)
     )
+{{/if}}
 "
 `;
 
@@ -1762,6 +1873,8 @@ dependencies = [
     "google-adk >= 1.17.0",
     "bedrock-agentcore >= 1.0.3",
     "botocore[crt] >= 1.35.0",
+    {{#if hasGateway}}{{#if (includes gatewayAuthTypes "AWS_IAM")}}"mcp-proxy-for-aws >= 1.1.0",
+    {{/if}}{{/if}}
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -1864,7 +1977,11 @@ from langgraph.prebuilt import create_react_agent
 from langchain.tools import tool
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from model.load import load_model
+{{#if hasGateway}}
+from mcp_client.client import get_all_gateway_mcp_client
+{{else}}
 from mcp_client.client import get_streamable_http_mcp_client
+{{/if}}
 
 app = BedrockAgentCoreApp()
 log = app.logger
@@ -1894,10 +2011,16 @@ async def invoke(payload, context):
     log.info("Invoking Agent.....")
 
     # Get MCP Client
+    {{#if hasGateway}}
+    mcp_client = get_all_gateway_mcp_client()
+    {{else}}
     mcp_client = get_streamable_http_mcp_client()
+    {{/if}}
 
     # Load MCP Tools
-    mcp_tools = await mcp_client.get_tools()
+    mcp_tools = []
+    if mcp_client:
+        mcp_tools = await mcp_client.get_tools()
 
     # Define the agent using create_react_agent
     graph = create_react_agent(get_or_create_model(), tools=mcp_tools + tools)
@@ -1923,16 +2046,64 @@ exports[`Assets Directory Snapshots > Python framework assets > python/python/la
 `;
 
 exports[`Assets Directory Snapshots > Python framework assets > python/python/langchain_langgraph/base/mcp_client/client.py should match snapshot 1`] = `
-"from langchain_mcp_adapters.client import MultiServerMCPClient
+"import os
+import logging
+from langchain_mcp_adapters.client import MultiServerMCPClient
 
+logger = logging.getLogger(__name__)
+
+{{#if hasGateway}}
+{{#if (includes gatewayAuthTypes "AWS_IAM")}}
+from mcp_proxy_for_aws.sigv4_helper import SigV4HTTPXAuth, create_aws_session
+{{/if}}
+{{#if (includes gatewayAuthTypes "CUSTOM_JWT")}}
+from bedrock_agentcore.identity import requires_access_token
+{{/if}}
+
+{{#each gatewayProviders}}
+{{#if (eq authType "CUSTOM_JWT")}}
+@requires_access_token(
+    provider_name="{{credentialProviderName}}",
+    scopes=[{{#if scopes}}"{{scopes}}"{{/if}}],
+    auth_flow="M2M",
+)
+def _get_bearer_token_{{snakeCase name}}(*, access_token: str):
+    """Obtain OAuth access token via AgentCore Identity for {{name}}."""
+    return access_token
+
+{{/if}}
+{{/each}}
+
+def get_all_gateway_mcp_client() -> MultiServerMCPClient | None:
+    """Returns an MCP Client connected to all configured gateways."""
+    servers = {}
+    {{#each gatewayProviders}}
+    url = os.environ.get("{{envVarName}}")
+    if url:
+        {{#if (eq authType "AWS_IAM")}}
+        session = create_aws_session()
+        auth = SigV4HTTPXAuth(session.get_credentials(), "bedrock-agentcore", session.region_name)
+        servers["{{name}}"] = {"transport": "streamable_http", "url": url, "auth": auth}
+        {{else if (eq authType "CUSTOM_JWT")}}
+        token = _get_bearer_token_{{snakeCase name}}()
+        headers = {"Authorization": f"Bearer {token}"} if token else None
+        servers["{{name}}"] = {"transport": "streamable_http", "url": url, "headers": headers}
+        {{else}}
+        servers["{{name}}"] = {"transport": "streamable_http", "url": url}
+        {{/if}}
+    else:
+        logger.warning("{{envVarName}} not set — {{name}} gateway tools unavailable")
+    {{/each}}
+    if not servers:
+        return None
+    return MultiServerMCPClient(servers)
+{{else}}
 # ExaAI provides information about code through web searches, crawling and code context searches through their platform. Requires no authentication
 EXAMPLE_MCP_ENDPOINT = "https://mcp.exa.ai/mcp"
 
 
 def get_streamable_http_mcp_client() -> MultiServerMCPClient:
-    """
-    Returns an MCP Client compatible with LangChain/LangGraph.
-    """
+    """Returns an MCP Client compatible with LangChain/LangGraph."""
     # to use an MCP server that supports bearer authentication, add headers={"Authorization": f"Bearer {access_token}"}
     return MultiServerMCPClient(
         {
@@ -1942,6 +2113,7 @@ def get_streamable_http_mcp_client() -> MultiServerMCPClient:
             }
         }
     )
+{{/if}}
 "
 `;
 
@@ -2109,6 +2281,8 @@ dependencies = [
 {{#if (eq modelProvider "Gemini")}}
     "langchain-google-genai >= 3.0.3",
 {{/if}}
+    {{#if hasGateway}}{{#if (includes gatewayAuthTypes "AWS_IAM")}}"mcp-proxy-for-aws >= 1.1.0",
+    {{/if}}{{/if}}
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -2209,13 +2383,22 @@ exports[`Assets Directory Snapshots > Python framework assets > python/python/op
 from agents import Agent, Runner, function_tool
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from model.load import load_model
+{{#if hasGateway}}
+from mcp_client.client import get_all_gateway_mcp_servers
+{{else}}
 from mcp_client.client import get_streamable_http_mcp_client
+{{/if}}
 
 app = BedrockAgentCoreApp()
 log = app.logger
 
 # Get MCP Server
+{{#if hasGateway}}
+mcp_servers = get_all_gateway_mcp_servers()
+{{else}}
 mcp_server = get_streamable_http_mcp_client()
+mcp_servers = [mcp_server] if mcp_server else []
+{{/if}}
 
 _credentials_loaded = False
 
@@ -2237,16 +2420,47 @@ def add_numbers(a: int, b: int) -> int:
 async def main(query):
     ensure_credentials_loaded()
     try:
-        async with mcp_server as server:
-            active_servers = [server] if server else []
+        {{#if hasGateway}}
+        if mcp_servers:
             agent = Agent(
                 name="{{ name }}",
                 model="gpt-4.1",
-                mcp_servers=active_servers,
+                mcp_servers=mcp_servers,
                 tools=[add_numbers]
             )
             result = await Runner.run(agent, query)
             return result
+        else:
+            agent = Agent(
+                name="{{ name }}",
+                model="gpt-4.1",
+                mcp_servers=[],
+                tools=[add_numbers]
+            )
+            result = await Runner.run(agent, query)
+            return result
+        {{else}}
+        if mcp_servers:
+            async with mcp_servers[0] as server:
+                active_servers = [server]
+                agent = Agent(
+                    name="{{ name }}",
+                    model="gpt-4.1",
+                    mcp_servers=active_servers,
+                    tools=[add_numbers]
+                )
+                result = await Runner.run(agent, query)
+                return result
+        else:
+            agent = Agent(
+                name="{{ name }}",
+                model="gpt-4.1",
+                mcp_servers=[],
+                tools=[add_numbers]
+            )
+            result = await Runner.run(agent, query)
+            return result
+        {{/if}}
     except Exception as e:
         log.error(f"Error during agent execution: {e}", exc_info=True)
         raise e
@@ -2277,20 +2491,71 @@ exports[`Assets Directory Snapshots > Python framework assets > python/python/op
 `;
 
 exports[`Assets Directory Snapshots > Python framework assets > python/python/openaiagents/base/mcp_client/client.py should match snapshot 1`] = `
-"from agents.mcp import MCPServerStreamableHttp
+"import os
+import logging
+from agents.mcp import MCPServerStreamableHttp
 
+logger = logging.getLogger(__name__)
+
+{{#if hasGateway}}
+{{#if (includes gatewayAuthTypes "AWS_IAM")}}
+import httpx
+from mcp_proxy_for_aws.sigv4_helper import SigV4HTTPXAuth, create_aws_session
+{{/if}}
+{{#if (includes gatewayAuthTypes "CUSTOM_JWT")}}
+from bedrock_agentcore.identity import requires_access_token
+{{/if}}
+
+{{#each gatewayProviders}}
+{{#if (eq authType "CUSTOM_JWT")}}
+@requires_access_token(
+    provider_name="{{credentialProviderName}}",
+    scopes=[{{#if scopes}}"{{scopes}}"{{/if}}],
+    auth_flow="M2M",
+)
+def _get_bearer_token_{{snakeCase name}}(*, access_token: str):
+    """Obtain OAuth access token via AgentCore Identity for {{name}}."""
+    return access_token
+
+{{/if}}
+{{/each}}
+
+def get_all_gateway_mcp_servers() -> list[MCPServerStreamableHttp]:
+    """Returns MCP servers for all configured gateways."""
+    servers = []
+    {{#each gatewayProviders}}
+    url = os.environ.get("{{envVarName}}")
+    if url:
+        {{#if (eq authType "AWS_IAM")}}
+        session = create_aws_session()
+        auth = SigV4HTTPXAuth(session.get_credentials(), "bedrock-agentcore", session.region_name)
+        servers.append(MCPServerStreamableHttp(
+            name="{{name}}",
+            params={"url": url, "httpx_client_factory": lambda **kwargs: httpx.AsyncClient(auth=auth, **kwargs)}
+        ))
+        {{else if (eq authType "CUSTOM_JWT")}}
+        token = _get_bearer_token_{{snakeCase name}}()
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        servers.append(MCPServerStreamableHttp(name="{{name}}", params={"url": url, "headers": headers}))
+        {{else}}
+        servers.append(MCPServerStreamableHttp(name="{{name}}", params={"url": url}))
+        {{/if}}
+    else:
+        logger.warning("{{envVarName}} not set — {{name}} gateway tools unavailable")
+    {{/each}}
+    return servers
+{{else}}
 # ExaAI provides information about code through web searches, crawling and code context searches through their platform. Requires no authentication
 EXAMPLE_MCP_ENDPOINT = "https://mcp.exa.ai/mcp"
 
 
 def get_streamable_http_mcp_client() -> MCPServerStreamableHttp:
-    """
-    Returns an MCP Client compatible with OpenAI Agents SDK.
-    """
+    """Returns an MCP Client compatible with OpenAI Agents SDK."""
     # to use an MCP server that supports bearer authentication, add headers={"Authorization": f"Bearer {access_token}"}
     return MCPServerStreamableHttp(
         name="AgentCore Gateway MCP", params={"url": EXAMPLE_MCP_ENDPOINT}
     )
+{{/if}}
 "
 `;
 
@@ -2356,6 +2621,8 @@ dependencies = [
     "openai-agents >= 0.4.2",
     "bedrock-agentcore >= 1.0.3",
     "botocore[crt] >= 1.35.0",
+    {{#if hasGateway}}{{#if (includes gatewayAuthTypes "AWS_IAM")}}"mcp-proxy-for-aws >= 1.1.0",
+    {{/if}}{{/if}}
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -2454,7 +2721,11 @@ exports[`Assets Directory Snapshots > Python framework assets > python/python/st
 "from strands import Agent, tool
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from model.load import load_model
+{{#if hasGateway}}
+from mcp_client.client import get_all_gateway_mcp_clients
+{{else}}
 from mcp_client.client import get_streamable_http_mcp_client
+{{/if}}
 {{#if hasMemory}}
 from memory.session import get_memory_session_manager
 {{/if}}
@@ -2463,7 +2734,11 @@ app = BedrockAgentCoreApp()
 log = app.logger
 
 # Define a Streamable HTTP MCP Client
-mcp_client = get_streamable_http_mcp_client()
+{{#if hasGateway}}
+mcp_clients = get_all_gateway_mcp_clients()
+{{else}}
+mcp_clients = [get_streamable_http_mcp_client()]
+{{/if}}
 
 # Define a collection of tools used by the model
 tools = []
@@ -2474,6 +2749,11 @@ def add_numbers(a: int, b: int) -> int:
     """Return the sum of two numbers"""
     return a+b
 tools.append(add_numbers)
+
+# Add MCP client to tools if available
+for mcp_client in mcp_clients:
+    if mcp_client:
+        tools.append(mcp_client)
 
 
 {{#if hasMemory}}
@@ -2489,7 +2769,7 @@ def agent_factory():
                 system_prompt="""
                     You are a helpful assistant. Use tools when appropriate.
                 """,
-                tools=tools+[mcp_client]
+                tools=tools
             )
         return cache[key]
     return get_or_create_agent
@@ -2505,7 +2785,7 @@ def get_or_create_agent():
             system_prompt="""
                 You are a helpful assistant. Use tools when appropriate.
             """,
-            tools=tools+[mcp_client]
+            tools=tools
         )
     return _agent
 {{/if}}
@@ -2543,18 +2823,71 @@ exports[`Assets Directory Snapshots > Python framework assets > python/python/st
 `;
 
 exports[`Assets Directory Snapshots > Python framework assets > python/python/strands/base/mcp_client/client.py should match snapshot 1`] = `
-"from mcp.client.streamable_http import streamablehttp_client
+"import os
+import logging
+from mcp.client.streamable_http import streamablehttp_client
 from strands.tools.mcp.mcp_client import MCPClient
 
+logger = logging.getLogger(__name__)
+
+{{#if hasGateway}}
+{{#if (includes gatewayAuthTypes "AWS_IAM")}}
+from mcp_proxy_for_aws.client import aws_iam_streamablehttp_client
+{{/if}}
+{{#if (includes gatewayAuthTypes "CUSTOM_JWT")}}
+from bedrock_agentcore.identity import requires_access_token
+{{/if}}
+
+{{#each gatewayProviders}}
+{{#if (eq authType "CUSTOM_JWT")}}
+@requires_access_token(
+    provider_name="{{credentialProviderName}}",
+    scopes=[{{#if scopes}}"{{scopes}}"{{/if}}],
+    auth_flow="M2M",
+)
+def _get_bearer_token_{{snakeCase name}}(*, access_token: str):
+    """Obtain OAuth access token via AgentCore Identity for {{name}}."""
+    return access_token
+
+{{/if}}
+{{/each}}
+{{#each gatewayProviders}}
+def get_{{snakeCase name}}_mcp_client() -> MCPClient | None:
+    """Returns an MCP Client connected to the {{name}} gateway."""
+    url = os.environ.get("{{envVarName}}")
+    if not url:
+        logger.warning("{{envVarName}} not set — {{name}} gateway tools unavailable")
+        return None
+    {{#if (eq authType "AWS_IAM")}}
+    return MCPClient(lambda: aws_iam_streamablehttp_client(url, aws_service="bedrock-agentcore", aws_region=os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION"))))
+    {{else if (eq authType "CUSTOM_JWT")}}
+    token = _get_bearer_token_{{snakeCase name}}()
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    return MCPClient(lambda: streamablehttp_client(url, headers=headers))
+    {{else}}
+    return MCPClient(lambda: streamablehttp_client(url))
+    {{/if}}
+
+{{/each}}
+def get_all_gateway_mcp_clients() -> list[MCPClient]:
+    """Returns MCP clients for all configured gateways."""
+    clients = []
+    {{#each gatewayProviders}}
+    client = get_{{snakeCase name}}_mcp_client()
+    if client:
+        clients.append(client)
+    {{/each}}
+    return clients
+{{else}}
 # ExaAI provides information about code through web searches, crawling and code context searches through their platform. Requires no authentication
 EXAMPLE_MCP_ENDPOINT = "https://mcp.exa.ai/mcp"
 
 def get_streamable_http_mcp_client() -> MCPClient:
-    """
-    Returns an MCP Client compatible with Strands
-    """
+    """Returns an MCP Client compatible with Strands"""
     # to use an MCP server that supports bearer authentication, add headers={"Authorization": f"Bearer {access_token}"}
-    return MCPClient(lambda: streamablehttp_client(EXAMPLE_MCP_ENDPOINT))"
+    return MCPClient(lambda: streamablehttp_client(EXAMPLE_MCP_ENDPOINT))
+{{/if}}
+"
 `;
 
 exports[`Assets Directory Snapshots > Python framework assets > python/python/strands/base/model/__init__.py should match snapshot 1`] = `
@@ -2709,6 +3042,8 @@ dependencies = [
     {{/if}}"mcp >= 1.19.0",
     {{#if (eq modelProvider "OpenAI")}}"openai >= 1.0.0",
     {{/if}}"strands-agents >= 1.13.0",
+    {{#if hasGateway}}{{#if (includes gatewayAuthTypes "AWS_IAM")}}"mcp-proxy-for-aws >= 1.1.0",
+    {{/if}}{{/if}}
 ]
 
 [tool.hatch.build.targets.wheel]

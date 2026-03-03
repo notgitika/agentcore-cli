@@ -4,6 +4,7 @@ import {
   ConfirmReview,
   Panel,
   Screen,
+  SecretInput,
   StepIndicator,
   TextInput,
   WizardMultiSelect,
@@ -23,20 +24,23 @@ interface AddGatewayScreenProps {
   onComplete: (config: AddGatewayConfig) => void;
   onExit: () => void;
   existingGateways: string[];
-  availableAgents: string[];
+  unassignedTargets: string[];
 }
 
-export function AddGatewayScreen({ onComplete, onExit, existingGateways, availableAgents }: AddGatewayScreenProps) {
-  const wizard = useAddGatewayWizard();
+export function AddGatewayScreen({ onComplete, onExit, existingGateways, unassignedTargets }: AddGatewayScreenProps) {
+  const wizard = useAddGatewayWizard(unassignedTargets.length);
 
-  // JWT config sub-step tracking (0 = discoveryUrl, 1 = audience, 2 = clients)
+  // JWT config sub-step tracking (0=discoveryUrl, 1=audience, 2=clients, 3=scopes, 4=agentClientId, 5=agentClientSecret)
   const [jwtSubStep, setJwtSubStep] = useState(0);
   const [jwtDiscoveryUrl, setJwtDiscoveryUrl] = useState('');
   const [jwtAudience, setJwtAudience] = useState('');
+  const [jwtClients, setJwtClients] = useState('');
+  const [jwtScopes, setJwtScopes] = useState('');
+  const [jwtAgentClientId, setJwtAgentClientId] = useState('');
 
-  const agentItems: SelectableItem[] = useMemo(
-    () => availableAgents.map(name => ({ id: name, title: name })),
-    [availableAgents]
+  const unassignedTargetItems: SelectableItem[] = useMemo(
+    () => unassignedTargets.map(name => ({ id: name, title: name })),
+    [unassignedTargets]
   );
 
   const authorizerItems: SelectableItem[] = useMemo(
@@ -47,7 +51,7 @@ export function AddGatewayScreen({ onComplete, onExit, existingGateways, availab
   const isNameStep = wizard.step === 'name';
   const isAuthorizerStep = wizard.step === 'authorizer';
   const isJwtConfigStep = wizard.step === 'jwt-config';
-  const isAgentsStep = wizard.step === 'agents';
+  const isIncludeTargetsStep = wizard.step === 'include-targets';
   const isConfirmStep = wizard.step === 'confirm';
 
   const authorizerNav = useListNavigation({
@@ -57,12 +61,12 @@ export function AddGatewayScreen({ onComplete, onExit, existingGateways, availab
     isActive: isAuthorizerStep,
   });
 
-  const agentsNav = useMultiSelectNavigation({
-    items: agentItems,
+  const targetsNav = useMultiSelectNavigation({
+    items: unassignedTargetItems,
     getId: item => item.id,
-    onConfirm: ids => wizard.setAgents(ids),
+    onConfirm: ids => wizard.setSelectedTargets(ids),
     onExit: () => wizard.goBack(),
-    isActive: isAgentsStep,
+    isActive: isIncludeTargetsStep,
     requireSelection: false,
   });
 
@@ -85,12 +89,30 @@ export function AddGatewayScreen({ onComplete, onExit, existingGateways, availab
   };
 
   const handleJwtClients = (clients: string) => {
-    // Parse comma-separated values
+    setJwtClients(clients);
+    setJwtSubStep(3);
+  };
+
+  const handleJwtScopes = (scopes: string) => {
+    setJwtScopes(scopes);
+    setJwtSubStep(4);
+  };
+
+  const handleJwtAgentClientId = (clientId: string) => {
+    setJwtAgentClientId(clientId);
+    setJwtSubStep(5);
+  };
+
+  const handleJwtAgentClientSecret = (clientSecret: string) => {
     const audienceList = jwtAudience
       .split(',')
       .map(s => s.trim())
       .filter(Boolean);
-    const clientsList = clients
+    const clientsList = jwtClients
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+    const scopesList = jwtScopes
       .split(',')
       .map(s => s.trim())
       .filter(Boolean);
@@ -99,9 +121,10 @@ export function AddGatewayScreen({ onComplete, onExit, existingGateways, availab
       discoveryUrl: jwtDiscoveryUrl,
       allowedAudience: audienceList,
       allowedClients: clientsList,
+      ...(scopesList.length > 0 ? { allowedScopes: scopesList } : {}),
+      ...(jwtAgentClientId ? { agentClientId: jwtAgentClientId, agentClientSecret: clientSecret } : {}),
     });
 
-    // Reset sub-step counter only - preserve values for potential back navigation
     setJwtSubStep(0);
   };
 
@@ -113,7 +136,7 @@ export function AddGatewayScreen({ onComplete, onExit, existingGateways, availab
     }
   };
 
-  const helpText = isAgentsStep
+  const helpText = isIncludeTargetsStep
     ? 'Space toggle · Enter confirm · Esc back'
     : isConfirmStep
       ? HELP_TEXT.CONFIRM_CANCEL
@@ -139,12 +162,19 @@ export function AddGatewayScreen({ onComplete, onExit, existingGateways, availab
         )}
 
         {isAuthorizerStep && (
-          <WizardSelect
-            title="Select authorizer type"
-            description="How will clients authenticate to this gateway?"
-            items={authorizerItems}
-            selectedIndex={authorizerNav.selectedIndex}
-          />
+          <Box flexDirection="column">
+            <WizardSelect
+              title="Select authorizer type"
+              description="How will clients authenticate to this gateway?"
+              items={authorizerItems}
+              selectedIndex={authorizerNav.selectedIndex}
+            />
+            {authorizerItems[authorizerNav.selectedIndex]?.id === 'NONE' && (
+              <Box marginTop={1}>
+                <Text color="yellow">⚠️ Warning: Gateway will be publicly accessible without authorization</Text>
+              </Box>
+            )}
+          </Box>
         )}
 
         {isJwtConfigStep && (
@@ -153,22 +183,23 @@ export function AddGatewayScreen({ onComplete, onExit, existingGateways, availab
             onDiscoveryUrl={handleJwtDiscoveryUrl}
             onAudience={handleJwtAudience}
             onClients={handleJwtClients}
+            onScopes={handleJwtScopes}
+            onAgentClientId={handleJwtAgentClientId}
+            onAgentClientSecret={handleJwtAgentClientSecret}
             onCancel={handleJwtCancel}
           />
         )}
 
-        {isAgentsStep &&
-          (agentItems.length > 0 ? (
+        {isIncludeTargetsStep &&
+          (unassignedTargetItems.length > 0 ? (
             <WizardMultiSelect
-              title="Select agents to use this gateway"
-              items={agentItems}
-              cursorIndex={agentsNav.cursorIndex}
-              selectedIds={agentsNav.selectedIds}
+              title="Select unassigned targets to include in this gateway"
+              items={unassignedTargetItems}
+              cursorIndex={targetsNav.cursorIndex}
+              selectedIds={targetsNav.selectedIds}
             />
           ) : (
-            <Text dimColor>
-              No agents defined. Add agents first via `agentcore add agent`. Press Enter to continue.
-            </Text>
+            <Text dimColor>No unassigned targets available. Press Enter to continue.</Text>
           ))}
 
         {isConfirmStep && (
@@ -182,9 +213,21 @@ export function AddGatewayScreen({ onComplete, onExit, existingGateways, availab
                     { label: 'Discovery URL', value: wizard.config.jwtConfig.discoveryUrl },
                     { label: 'Allowed Audience', value: wizard.config.jwtConfig.allowedAudience.join(', ') },
                     { label: 'Allowed Clients', value: wizard.config.jwtConfig.allowedClients.join(', ') },
+                    ...(wizard.config.jwtConfig.allowedScopes?.length
+                      ? [{ label: 'Allowed Scopes', value: wizard.config.jwtConfig.allowedScopes.join(', ') }]
+                      : []),
+                    ...(wizard.config.jwtConfig.agentClientId
+                      ? [{ label: 'Agent Credential', value: `${wizard.config.name}-agent-oauth` }]
+                      : []),
                   ]
                 : []),
-              { label: 'Agents', value: wizard.config.agents.length > 0 ? wizard.config.agents.join(', ') : '(none)' },
+              {
+                label: 'Targets',
+                value:
+                  wizard.config.selectedTargets && wizard.config.selectedTargets.length > 0
+                    ? wizard.config.selectedTargets.join(', ')
+                    : '(none)',
+              },
             ]}
           />
         )}
@@ -198,6 +241,9 @@ interface JwtConfigInputProps {
   onDiscoveryUrl: (url: string) => void;
   onAudience: (audience: string) => void;
   onClients: (clients: string) => void;
+  onScopes: (scopes: string) => void;
+  onAgentClientId: (clientId: string) => void;
+  onAgentClientSecret: (clientSecret: string) => void;
   onCancel: () => void;
 }
 
@@ -216,16 +262,28 @@ function validateCommaSeparatedList(value: string, fieldName: string): true | st
   return true;
 }
 
-function JwtConfigInput({ subStep, onDiscoveryUrl, onAudience, onClients, onCancel }: JwtConfigInputProps) {
+function JwtConfigInput({
+  subStep,
+  onDiscoveryUrl,
+  onAudience,
+  onClients,
+  onScopes,
+  onAgentClientId,
+  onAgentClientSecret,
+  onCancel,
+}: JwtConfigInputProps) {
+  const totalSteps = 6;
   return (
     <Box flexDirection="column">
       <Text bold>Configure Custom JWT Authorizer</Text>
-      <Text dimColor>Step {subStep + 1} of 3</Text>
+      <Text dimColor>
+        Step {subStep + 1} of {totalSteps}
+      </Text>
       <Box marginTop={1}>
         {subStep === 0 && (
           <TextInput
-            prompt={`Discovery URL (e.g., https://cognito-idp.us-east-1.amazonaws.com/us-east-1_ABC123${OIDC_WELL_KNOWN_SUFFIX})`}
-            initialValue="https://"
+            prompt="Discovery URL"
+            placeholder="https://example.com/.well-known/openid-configuration"
             onSubmit={onDiscoveryUrl}
             onCancel={onCancel}
             customValidation={value => {
@@ -258,6 +316,33 @@ function JwtConfigInput({ subStep, onDiscoveryUrl, onAudience, onClients, onCanc
             onSubmit={onClients}
             onCancel={onCancel}
             customValidation={value => validateCommaSeparatedList(value, 'client')}
+          />
+        )}
+        {subStep === 3 && (
+          <TextInput
+            prompt="Allowed Scopes (comma-separated, optional)"
+            placeholder="press Enter to skip"
+            initialValue=""
+            onSubmit={onScopes}
+            onCancel={onCancel}
+            allowEmpty
+          />
+        )}
+        {subStep === 4 && (
+          <SecretInput
+            prompt="Agent OAuth Client ID (for Bearer token auth)"
+            onSubmit={onAgentClientId}
+            onCancel={onCancel}
+            revealChars={4}
+          />
+        )}
+        {subStep === 5 && (
+          <SecretInput
+            prompt="Agent OAuth Client Secret"
+            onSubmit={onAgentClientSecret}
+            onCancel={onCancel}
+            customValidation={value => value.trim().length > 0 || 'Client secret is required'}
+            revealChars={4}
           />
         )}
       </Box>

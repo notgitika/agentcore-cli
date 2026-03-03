@@ -4,7 +4,8 @@ import { useCallback, useMemo, useState } from 'react';
 
 /** Maps authorizer type to the next step after authorizer selection */
 const AUTHORIZER_NEXT_STEP: Record<GatewayAuthorizerType, AddGatewayStep> = {
-  NONE: 'agents',
+  NONE: 'confirm',
+  AWS_IAM: 'confirm',
   CUSTOM_JWT: 'jwt-config',
 };
 
@@ -12,23 +13,32 @@ function getDefaultConfig(): AddGatewayConfig {
   return {
     name: '',
     description: '',
-    agents: [],
     authorizerType: 'NONE',
     jwtConfig: undefined,
+    selectedTargets: [],
   };
 }
 
-export function useAddGatewayWizard() {
+export function useAddGatewayWizard(unassignedTargetsCount = 0) {
   const [config, setConfig] = useState<AddGatewayConfig>(getDefaultConfig);
   const [step, setStep] = useState<AddGatewayStep>('name');
 
-  // Dynamic steps based on authorizer type
+  // Dynamic steps based on authorizer type and unassigned targets
   const steps = useMemo<AddGatewayStep[]>(() => {
+    const baseSteps: AddGatewayStep[] = ['name', 'authorizer'];
+
     if (config.authorizerType === 'CUSTOM_JWT') {
-      return ['name', 'authorizer', 'jwt-config', 'agents', 'confirm'];
+      baseSteps.push('jwt-config');
     }
-    return ['name', 'authorizer', 'agents', 'confirm'];
-  }, [config.authorizerType]);
+
+    if (unassignedTargetsCount > 0) {
+      baseSteps.push('include-targets');
+    }
+
+    baseSteps.push('confirm');
+
+    return baseSteps;
+  }, [config.authorizerType, unassignedTargetsCount]);
 
   const currentIndex = steps.indexOf(step);
 
@@ -58,20 +68,27 @@ export function useAddGatewayWizard() {
   }, []);
 
   const setJwtConfig = useCallback(
-    (jwtConfig: { discoveryUrl: string; allowedAudience: string[]; allowedClients: string[] }) => {
+    (jwtConfig: {
+      discoveryUrl: string;
+      allowedAudience: string[];
+      allowedClients: string[];
+      allowedScopes?: string[];
+      agentClientId?: string;
+      agentClientSecret?: string;
+    }) => {
       setConfig(c => ({
         ...c,
         jwtConfig,
       }));
-      setStep('agents');
+      setStep(unassignedTargetsCount > 0 ? 'include-targets' : 'confirm');
     },
-    []
+    [unassignedTargetsCount]
   );
 
-  const setAgents = useCallback((agents: string[]) => {
+  const setSelectedTargets = useCallback((selectedTargets: string[]) => {
     setConfig(c => ({
       ...c,
-      agents,
+      selectedTargets,
     }));
     setStep('confirm');
   }, []);
@@ -90,7 +107,7 @@ export function useAddGatewayWizard() {
     setName,
     setAuthorizerType,
     setJwtConfig,
-    setAgents,
+    setSelectedTargets,
     reset,
   };
 }

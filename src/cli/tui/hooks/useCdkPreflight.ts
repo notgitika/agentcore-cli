@@ -1,4 +1,5 @@
-import { SecureCredentials } from '../../../lib';
+import { ConfigIO, SecureCredentials } from '../../../lib';
+import type { DeployedState } from '../../../schema';
 import { AwsCredentialsError, validateAwsCredentials } from '../../aws/account';
 import { type CdkToolkitWrapper, type SwitchableIoHost, createSwitchableIoHost } from '../../cdk/toolkit-lib';
 import { getErrorMessage, isExpiredTokenError, isNoCredentialsError } from '../../errors';
@@ -13,8 +14,10 @@ import {
   checkStackDeployability,
   formatError,
   getAllCredentials,
-  hasOwnedIdentityApiProviders,
+  hasIdentityApiProviders,
+  hasIdentityOAuthProviders,
   setupApiKeyProviders,
+  setupOAuth2Providers,
   synthesizeCdk,
   validateProject,
 } from '../../operations/deploy';
@@ -65,6 +68,8 @@ export interface PreflightResult {
   missingCredentials: MissingCredential[];
   /** KMS key ARN used for identity token vault encryption */
   identityKmsKeyArn?: string;
+  /** OAuth credential ARNs from pre-deploy setup */
+  oauthCredentials: Record<string, { credentialProviderArn: string; clientSecretArn?: string; callbackUrl?: string }>;
   startPreflight: () => Promise<void>;
   confirmTeardown: () => void;
   cancelTeardown: () => void;
@@ -86,9 +91,8 @@ export interface PreflightResult {
 const STEP_VALIDATE = 0;
 const STEP_DEPS = 1;
 const STEP_BUILD = 2;
-const STEP_SYNTH = 3;
-const STEP_STACK_STATUS = 4;
-// Note: Identity and Bootstrap steps are dynamically appended, use steps.length - 1 to find them
+// Note: Identity steps are inserted at index 3+ when needed, shifting synth and stack status down.
+// Use findStepIndex() to locate synth and stack status dynamically.
 
 const BASE_PREFLIGHT_STEPS: Step[] = [
   { label: 'Validate project', status: 'pending' },
@@ -98,7 +102,12 @@ const BASE_PREFLIGHT_STEPS: Step[] = [
   { label: 'Check stack status', status: 'pending' },
 ];
 
-const IDENTITY_STEP: Step = { label: 'Set up API key providers', status: 'pending' };
+const LABEL_SYNTH = 'Synthesize CloudFormation';
+const LABEL_STACK_STATUS = 'Check stack status';
+const LABEL_API_KEY = 'Set up API key providers';
+const LABEL_OAUTH = 'Set up OAuth providers';
+
+const IDENTITY_STEP: Step = { label: LABEL_API_KEY, status: 'pending' };
 const BOOTSTRAP_STEP: Step = { label: 'Bootstrap AWS environment', status: 'pending' };
 
 export function useCdkPreflight(options: PreflightOptions): PreflightResult {
@@ -119,6 +128,9 @@ export function useCdkPreflight(options: PreflightOptions): PreflightResult {
   const [runtimeCredentials, setRuntimeCredentials] = useState<SecureCredentials | null>(null);
   const [skipIdentitySetup, setSkipIdentitySetup] = useState(false);
   const [identityKmsKeyArn, setIdentityKmsKeyArn] = useState<string | undefined>(undefined);
+  const [oauthCredentials, setOauthCredentials] = useState<
+    Record<string, { credentialProviderArn: string; clientSecretArn?: string; callbackUrl?: string }>
+  >({});
   const [teardownConfirmed, setTeardownConfirmed] = useState(false);
 
   // Guard against concurrent runs (React StrictMode, re-renders, etc.)
@@ -128,6 +140,10 @@ export function useCdkPreflight(options: PreflightOptions): PreflightResult {
 
   const updateStep = (index: number, update: Partial<Step>) => {
     setSteps(prev => prev.map((s, i) => (i === index ? { ...s, ...update } : s)));
+  };
+
+  const updateStepByLabel = (label: string, update: Partial<Step>) => {
+    setSteps(prev => prev.map(s => (s.label === label ? { ...s, ...update } : s)));
   };
 
   const resetSteps = () => {
@@ -354,8 +370,25 @@ export function useCdkPreflight(options: PreflightOptions): PreflightResult {
           return;
         }
 
+        // Check if API key providers need setup before CDK synth (CDK needs credential ARNs)
+        // Skip this check if skipIdentityCheck is true (e.g., plan command only synthesizes)
+        const needsCredentialSetup =
+          !skipIdentityCheck &&
+          (hasIdentityApiProviders(preflightContext.projectSpec) ||
+            hasIdentityOAuthProviders(preflightContext.projectSpec));
+        if (needsCredentialSetup) {
+          // Get all credentials for the prompt (not just missing ones)
+          const allCredentials = getAllCredentials(preflightContext.projectSpec);
+
+          // Always show dialog when credentials exist
+          setMissingCredentials(allCredentials);
+          setPhase('credentials-prompt');
+          isRunningRef.current = false; // Reset so identity-setup can run after user input
+          return;
+        }
+
         // Step: Synthesize CloudFormation
-        updateStep(STEP_SYNTH, { status: 'running' });
+        updateStepByLabel(LABEL_SYNTH, { status: 'running' });
         logger.startStep('Synthesize CloudFormation');
         let synthStackNames: string[];
         try {
@@ -369,14 +402,17 @@ export function useCdkPreflight(options: PreflightOptions): PreflightResult {
           synthStackNames = synthResult.stackNames;
           logger.log(`Stacks: ${synthResult.stackNames.join(', ')}`);
           logger.endStep('success');
-          updateStep(STEP_SYNTH, { status: 'success' });
+          updateStepByLabel(LABEL_SYNTH, { status: 'success' });
         } catch (err) {
           const errorMsg = formatError(err);
           logger.endStep('error', errorMsg);
           if (isExpiredTokenError(err)) {
             setHasTokenExpiredError(true);
           }
-          updateStep(STEP_SYNTH, { status: 'error', error: logger.getFailureMessage('Synthesize CloudFormation') });
+          updateStepByLabel(LABEL_SYNTH, {
+            status: 'error',
+            error: logger.getFailureMessage('Synthesize CloudFormation'),
+          });
           setPhase('error');
           isRunningRef.current = false;
           return;
@@ -385,48 +421,37 @@ export function useCdkPreflight(options: PreflightOptions): PreflightResult {
         // Step: Check stack status (ensure stacks are not in UPDATE_IN_PROGRESS etc.)
         const target = preflightContext.awsTargets[0];
         if (target && synthStackNames.length > 0) {
-          updateStep(STEP_STACK_STATUS, { status: 'running' });
+          updateStepByLabel(LABEL_STACK_STATUS, { status: 'running' });
           logger.startStep('Check stack status');
           try {
             const stackStatus = await checkStackDeployability(target.region, synthStackNames);
             if (!stackStatus.canDeploy) {
               const errorMsg = stackStatus.message ?? `Stack ${stackStatus.blockingStack} is not in a deployable state`;
               logger.endStep('error', errorMsg);
-              updateStep(STEP_STACK_STATUS, { status: 'error', error: errorMsg });
+              updateStepByLabel(LABEL_STACK_STATUS, { status: 'error', error: errorMsg });
               setPhase('error');
               isRunningRef.current = false;
               return;
             }
             logger.endStep('success');
-            updateStep(STEP_STACK_STATUS, { status: 'success' });
+            updateStepByLabel(LABEL_STACK_STATUS, { status: 'success' });
           } catch (err) {
             const errorMsg = formatError(err);
             logger.endStep('error', errorMsg);
             if (isExpiredTokenError(err)) {
               setHasTokenExpiredError(true);
             }
-            updateStep(STEP_STACK_STATUS, { status: 'error', error: logger.getFailureMessage('Check stack status') });
+            updateStepByLabel(LABEL_STACK_STATUS, {
+              status: 'error',
+              error: logger.getFailureMessage('Check stack status'),
+            });
             setPhase('error');
             isRunningRef.current = false;
             return;
           }
         } else {
           // Skip stack status check if no target or no stacks
-          updateStep(STEP_STACK_STATUS, { status: 'success' });
-        }
-
-        // Check if API key providers need setup - always prompt user for credential source
-        // Skip this check if skipIdentityCheck is true (e.g., plan command only synthesizes)
-        const needsApiKeySetup = !skipIdentityCheck && hasOwnedIdentityApiProviders(preflightContext.projectSpec);
-        if (needsApiKeySetup) {
-          // Get all credentials for the prompt (not just missing ones)
-          const allCredentials = getAllCredentials(preflightContext.projectSpec);
-
-          // Always show dialog when credentials exist
-          setMissingCredentials(allCredentials);
-          setPhase('credentials-prompt');
-          isRunningRef.current = false; // Reset so identity-setup can run after user input
-          return;
+          updateStepByLabel(LABEL_STACK_STATUS, { status: 'success' });
         }
 
         // Check if bootstrap is needed
@@ -477,16 +502,78 @@ export function useCdkPreflight(options: PreflightOptions): PreflightResult {
     isRunningRef.current = true;
 
     const runIdentitySetup = async () => {
-      // If user chose to skip, go directly to bootstrap check
+      // If user chose to skip, go directly to synth
       if (skipIdentitySetup) {
-        logger.log('Skipping API key provider setup (user choice)');
+        logger.log('Skipping identity provider setup (user choice)');
         setSkipIdentitySetup(false); // Reset for next run
+
+        // Synthesize CloudFormation
+        updateStepByLabel(LABEL_SYNTH, { status: 'running' });
+        logger.startStep('Synthesize CloudFormation');
+        let synthStackNames: string[];
+        try {
+          const synthResult = await synthesizeCdk(context.cdkProject, {
+            ioHost: switchableIoHost.ioHost,
+            previousWrapper: wrapperRef.current,
+          });
+          wrapperRef.current = synthResult.toolkitWrapper;
+          setCdkToolkitWrapper(synthResult.toolkitWrapper);
+          setStackNames(synthResult.stackNames);
+          synthStackNames = synthResult.stackNames;
+          logger.endStep('success');
+          updateStepByLabel(LABEL_SYNTH, { status: 'success' });
+        } catch (err) {
+          const errorMsg = formatError(err);
+          logger.endStep('error', errorMsg);
+          updateStepByLabel(LABEL_SYNTH, {
+            status: 'error',
+            error: logger.getFailureMessage('Synthesize CloudFormation'),
+          });
+          setPhase('error');
+          isRunningRef.current = false;
+          return;
+        }
+
+        // Check stack status
+        const target = context.awsTargets[0];
+        if (target && synthStackNames.length > 0) {
+          updateStepByLabel(LABEL_STACK_STATUS, { status: 'running' });
+          logger.startStep('Check stack status');
+          try {
+            const stackStatus = await checkStackDeployability(target.region, synthStackNames);
+            if (!stackStatus.canDeploy) {
+              const errorMsg = stackStatus.message ?? `Stack ${stackStatus.blockingStack} is not in a deployable state`;
+              logger.endStep('error', errorMsg);
+              updateStepByLabel(LABEL_STACK_STATUS, { status: 'error', error: errorMsg });
+              setPhase('error');
+              isRunningRef.current = false;
+              return;
+            }
+            logger.endStep('success');
+            updateStepByLabel(LABEL_STACK_STATUS, { status: 'success' });
+          } catch (err) {
+            const errorMsg = formatError(err);
+            logger.endStep('error', errorMsg);
+            if (isExpiredTokenError(err)) {
+              setHasTokenExpiredError(true);
+            }
+            updateStepByLabel(LABEL_STACK_STATUS, {
+              status: 'error',
+              error: logger.getFailureMessage('Check stack status'),
+            });
+            setPhase('error');
+            isRunningRef.current = false;
+            return;
+          }
+        } else {
+          updateStepByLabel(LABEL_STACK_STATUS, { status: 'success' });
+        }
 
         // Check if bootstrap is needed
         const bootstrapCheck = await checkBootstrapNeeded(context.awsTargets);
         if (bootstrapCheck.needsBootstrap && bootstrapCheck.target) {
           setBootstrapContext({
-            toolkitWrapper: wrapperRef.current!,
+            toolkitWrapper: wrapperRef.current,
             target: bootstrapCheck.target,
           });
           setPhase('bootstrap-confirm');
@@ -499,15 +586,30 @@ export function useCdkPreflight(options: PreflightOptions): PreflightResult {
       }
 
       // Run identity setup with runtime credentials
-      setSteps(prev => [...prev, { ...IDENTITY_STEP, status: 'running' }]);
-      logger.startStep('Set up API key providers');
+      // Insert identity steps before synthesize in the step list
+      const hasApiKeys = hasIdentityApiProviders(context.projectSpec);
+      const hasOAuth = hasIdentityOAuthProviders(context.projectSpec);
+      setSteps(prev => {
+        const synthIndex = prev.findIndex(s => s.label === LABEL_SYNTH);
+        const identitySteps: Step[] = [];
+        if (hasApiKeys) identitySteps.push({ ...IDENTITY_STEP, status: 'running' });
+        if (hasOAuth) identitySteps.push({ label: LABEL_OAUTH, status: hasApiKeys ? 'pending' : 'running' });
+        return [...prev.slice(0, synthIndex), ...identitySteps, ...prev.slice(synthIndex)];
+      });
+
+      if (hasApiKeys) {
+        logger.startStep('Set up API key providers');
+      }
 
       const target = context.awsTargets[0];
       if (!target) {
-        logger.endStep('error', 'No AWS target configured');
-        setSteps(prev =>
-          prev.map((s, i) => (i === prev.length - 1 ? { ...s, status: 'error', error: 'No AWS target configured' } : s))
-        );
+        const errorMsg = 'No AWS target configured';
+        if (hasApiKeys) {
+          logger.endStep('error', errorMsg);
+          updateStepByLabel(LABEL_API_KEY, { status: 'error', error: errorMsg });
+        } else if (hasOAuth) {
+          updateStepByLabel(LABEL_OAUTH, { status: 'error', error: errorMsg });
+        }
         setPhase('error');
         isRunningRef.current = false;
         return;
@@ -515,58 +617,203 @@ export function useCdkPreflight(options: PreflightOptions): PreflightResult {
 
       try {
         const configBaseDir = path.dirname(context.cdkProject.projectDir);
-        const identityResult = await setupApiKeyProviders({
-          projectSpec: context.projectSpec,
-          configBaseDir,
-          region: target.region,
-          runtimeCredentials: runtimeCredentials ?? undefined,
-          enableKmsEncryption: true,
-        });
 
-        // Log KMS setup
-        if (identityResult.kmsKeyArn) {
-          logger.log(`Token vault encrypted with KMS key: ${identityResult.kmsKeyArn}`);
-          setIdentityKmsKeyArn(identityResult.kmsKeyArn);
-        }
+        // Collect credential ARNs for deployed state
+        const deployedCredentials: Record<
+          string,
+          { credentialProviderArn: string; clientSecretArn?: string; callbackUrl?: string }
+        > = {};
+        let kmsKeyArn: string | undefined;
 
-        // Log results
-        for (const result of identityResult.results) {
-          if (result.status === 'created') {
-            logger.log(`Created API key provider: ${result.providerName}`);
-          } else if (result.status === 'updated') {
-            logger.log(`Updated API key provider: ${result.providerName}`);
-          } else if (result.status === 'exists') {
-            logger.log(`API key provider exists: ${result.providerName}`);
-          } else if (result.status === 'skipped') {
-            logger.log(`Skipped ${result.providerName}: ${result.error}`);
-          } else if (result.status === 'error') {
-            logger.log(`Error for ${result.providerName}: ${result.error}`);
+        // Set up API key providers if needed
+        if (hasApiKeys) {
+          const identityResult = await setupApiKeyProviders({
+            projectSpec: context.projectSpec,
+            configBaseDir,
+            region: target.region,
+            runtimeCredentials: runtimeCredentials ?? undefined,
+            enableKmsEncryption: true,
+          });
+
+          // Log KMS setup
+          if (identityResult.kmsKeyArn) {
+            logger.log(`Token vault encrypted with KMS key: ${identityResult.kmsKeyArn}`);
+            kmsKeyArn = identityResult.kmsKeyArn;
+            setIdentityKmsKeyArn(identityResult.kmsKeyArn);
+          }
+
+          // Log results
+          for (const result of identityResult.results) {
+            if (result.status === 'created') {
+              logger.log(`Created API key provider: ${result.providerName}`);
+            } else if (result.status === 'updated') {
+              logger.log(`Updated API key provider: ${result.providerName}`);
+            } else if (result.status === 'exists') {
+              logger.log(`API key provider exists: ${result.providerName}`);
+            } else if (result.status === 'skipped') {
+              logger.log(`Skipped ${result.providerName}: ${result.error}`);
+            } else if (result.status === 'error') {
+              logger.log(`Error for ${result.providerName}: ${result.error}`);
+            }
+          }
+
+          if (identityResult.hasErrors) {
+            logger.endStep('error', 'Some API key providers failed to set up');
+            updateStepByLabel(LABEL_API_KEY, { status: 'error', error: 'Some API key providers failed' });
+            setPhase('error');
+            isRunningRef.current = false;
+            return;
+          }
+
+          logger.endStep('success');
+          updateStepByLabel(LABEL_API_KEY, { status: 'success' });
+
+          for (const result of identityResult.results) {
+            if (result.credentialProviderArn) {
+              deployedCredentials[result.providerName] = {
+                credentialProviderArn: result.credentialProviderArn,
+              };
+            }
           }
         }
 
-        if (identityResult.hasErrors) {
-          logger.endStep('error', 'Some API key providers failed to set up');
-          setSteps(prev =>
-            prev.map((s, i) =>
-              i === prev.length - 1 ? { ...s, status: 'error', error: 'Some API key providers failed' } : s
-            )
-          );
+        // Set up OAuth credential providers if needed
+        if (hasOAuth) {
+          updateStepByLabel(LABEL_OAUTH, { status: 'running' });
+          logger.startStep('Set up OAuth providers');
+
+          const oauthResult = await setupOAuth2Providers({
+            projectSpec: context.projectSpec,
+            configBaseDir,
+            region: target.region,
+            runtimeCredentials: runtimeCredentials ?? undefined,
+          });
+
+          for (const result of oauthResult.results) {
+            if (result.status === 'created') {
+              logger.log(`Created OAuth provider: ${result.providerName}`);
+            } else if (result.status === 'updated') {
+              logger.log(`Updated OAuth provider: ${result.providerName}`);
+            } else if (result.status === 'skipped') {
+              logger.log(`Skipped ${result.providerName}: ${result.error}`);
+            } else if (result.status === 'error') {
+              logger.log(`Error for ${result.providerName}: ${result.error}`);
+            }
+          }
+
+          if (oauthResult.hasErrors) {
+            logger.endStep('error', 'Some OAuth providers failed to set up');
+            updateStepByLabel(LABEL_OAUTH, { status: 'error', error: 'Some OAuth providers failed' });
+            setPhase('error');
+            isRunningRef.current = false;
+            return;
+          }
+
+          // Collect credential ARNs for deployed state
+          const creds: Record<
+            string,
+            { credentialProviderArn: string; clientSecretArn?: string; callbackUrl?: string }
+          > = {};
+          for (const result of oauthResult.results) {
+            if (result.credentialProviderArn) {
+              creds[result.providerName] = {
+                credentialProviderArn: result.credentialProviderArn,
+                clientSecretArn: result.clientSecretArn,
+                callbackUrl: result.callbackUrl,
+              };
+            }
+          }
+          setOauthCredentials(creds);
+          Object.assign(deployedCredentials, creds);
+
+          logger.endStep('success');
+          updateStepByLabel(LABEL_OAUTH, { status: 'success' });
+        }
+
+        // Write partial deployed state with credential ARNs before CDK synth
+        if (Object.keys(deployedCredentials).length > 0) {
+          const configIO = new ConfigIO();
+          const target = context.awsTargets[0];
+          const existingState = await configIO.readDeployedState().catch(() => ({ targets: {} }) as DeployedState);
+          const targetState = existingState.targets?.[target!.name] ?? { resources: {} };
+          targetState.resources ??= {};
+          targetState.resources.credentials = deployedCredentials;
+          if (kmsKeyArn) targetState.resources.identityKmsKeyArn = kmsKeyArn;
+          await configIO.writeDeployedState({
+            ...existingState,
+            targets: { ...existingState.targets, [target!.name]: targetState },
+          });
+        }
+
+        // Clear runtime credentials
+        setRuntimeCredentials(null);
+
+        // Synthesize CloudFormation now that credentials are in deployed state
+        updateStepByLabel(LABEL_SYNTH, { status: 'running' });
+        logger.startStep('Synthesize CloudFormation');
+        let synthStackNames: string[];
+        try {
+          const synthResult = await synthesizeCdk(context.cdkProject, {
+            ioHost: switchableIoHost.ioHost,
+            previousWrapper: wrapperRef.current,
+          });
+          wrapperRef.current = synthResult.toolkitWrapper;
+          setCdkToolkitWrapper(synthResult.toolkitWrapper);
+          setStackNames(synthResult.stackNames);
+          synthStackNames = synthResult.stackNames;
+          logger.endStep('success');
+          updateStepByLabel(LABEL_SYNTH, { status: 'success' });
+        } catch (err) {
+          const errorMsg = formatError(err);
+          logger.endStep('error', errorMsg);
+          updateStepByLabel(LABEL_SYNTH, {
+            status: 'error',
+            error: logger.getFailureMessage('Synthesize CloudFormation'),
+          });
           setPhase('error');
           isRunningRef.current = false;
           return;
         }
 
-        logger.endStep('success');
-        setSteps(prev => prev.map((s, i) => (i === prev.length - 1 ? { ...s, status: 'success' } : s)));
-
-        // Clear runtime credentials
-        setRuntimeCredentials(null);
+        // Check stack status
+        if (target && synthStackNames.length > 0) {
+          updateStepByLabel(LABEL_STACK_STATUS, { status: 'running' });
+          logger.startStep('Check stack status');
+          try {
+            const stackStatus = await checkStackDeployability(target.region, synthStackNames);
+            if (!stackStatus.canDeploy) {
+              const errorMsg = stackStatus.message ?? `Stack ${stackStatus.blockingStack} is not in a deployable state`;
+              logger.endStep('error', errorMsg);
+              updateStepByLabel(LABEL_STACK_STATUS, { status: 'error', error: errorMsg });
+              setPhase('error');
+              isRunningRef.current = false;
+              return;
+            }
+            logger.endStep('success');
+            updateStepByLabel(LABEL_STACK_STATUS, { status: 'success' });
+          } catch (err) {
+            const errorMsg = formatError(err);
+            logger.endStep('error', errorMsg);
+            if (isExpiredTokenError(err)) {
+              setHasTokenExpiredError(true);
+            }
+            updateStepByLabel(LABEL_STACK_STATUS, {
+              status: 'error',
+              error: logger.getFailureMessage('Check stack status'),
+            });
+            setPhase('error');
+            isRunningRef.current = false;
+            return;
+          }
+        } else {
+          updateStepByLabel(LABEL_STACK_STATUS, { status: 'success' });
+        }
 
         // Check if bootstrap is needed
         const bootstrapCheck = await checkBootstrapNeeded(context.awsTargets);
         if (bootstrapCheck.needsBootstrap && bootstrapCheck.target) {
           setBootstrapContext({
-            toolkitWrapper: wrapperRef.current!,
+            toolkitWrapper: wrapperRef.current,
             target: bootstrapCheck.target,
           });
           setPhase('bootstrap-confirm');
@@ -594,7 +841,7 @@ export function useCdkPreflight(options: PreflightOptions): PreflightResult {
     };
 
     void runIdentitySetup();
-  }, [phase, context, skipIdentitySetup, runtimeCredentials, logger]);
+  }, [phase, context, skipIdentitySetup, runtimeCredentials, logger, switchableIoHost.ioHost]);
 
   // Handle bootstrapping phase
   useEffect(() => {
@@ -643,6 +890,7 @@ export function useCdkPreflight(options: PreflightOptions): PreflightResult {
     hasCredentialsError,
     missingCredentials,
     identityKmsKeyArn,
+    oauthCredentials,
     startPreflight,
     confirmTeardown,
     cancelTeardown,

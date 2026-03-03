@@ -1,19 +1,25 @@
 import { COMMAND_DESCRIPTIONS } from '../../tui/copy';
 import { requireProject } from '../../tui/guards';
 import { AddFlow } from '../../tui/screens/add/AddFlow';
-import { handleAddAgent, handleAddGateway, handleAddIdentity, handleAddMcpTool, handleAddMemory } from './actions';
+import {
+  handleAddAgent,
+  handleAddGateway,
+  handleAddGatewayTarget,
+  handleAddIdentity,
+  handleAddMemory,
+} from './actions';
 import type {
   AddAgentOptions,
   AddGatewayOptions,
+  AddGatewayTargetOptions,
   AddIdentityOptions,
-  AddMcpToolOptions,
   AddMemoryOptions,
 } from './types';
 import {
   validateAddAgentOptions,
   validateAddGatewayOptions,
+  validateAddGatewayTargetOptions,
   validateAddIdentityOptions,
-  validateAddMcpToolOptions,
   validateAddMemoryOptions,
 } from './validate';
 import type { Command } from '@commander-js/extra-typings';
@@ -58,8 +64,7 @@ async function handleAddAgentCLI(options: AddAgentOptions): Promise<void> {
   process.exit(result.success ? 0 : 1);
 }
 
-// Gateway disabled - rename to _handleAddGatewayCLI until feature is re-enabled
-async function _handleAddGatewayCLI(options: AddGatewayOptions): Promise<void> {
+async function handleAddGatewayCLI(options: AddGatewayOptions): Promise<void> {
   const validation = validateAddGatewayOptions(options);
   if (!validation.valid) {
     if (options.json) {
@@ -77,6 +82,9 @@ async function _handleAddGatewayCLI(options: AddGatewayOptions): Promise<void> {
     discoveryUrl: options.discoveryUrl,
     allowedAudience: options.allowedAudience,
     allowedClients: options.allowedClients,
+    allowedScopes: options.allowedScopes,
+    agentClientId: options.agentClientId,
+    agentClientSecret: options.agentClientSecret,
     agents: options.agents,
   });
 
@@ -91,9 +99,8 @@ async function _handleAddGatewayCLI(options: AddGatewayOptions): Promise<void> {
   process.exit(result.success ? 0 : 1);
 }
 
-// MCP Tool disabled - prefix with underscore until feature is re-enabled
-async function _handleAddMcpToolCLI(options: AddMcpToolOptions): Promise<void> {
-  const validation = validateAddMcpToolOptions(options);
+async function handleAddGatewayTargetCLI(options: AddGatewayTargetOptions): Promise<void> {
+  const validation = await validateAddGatewayTargetOptions(options);
   if (!validation.valid) {
     if (options.json) {
       console.log(JSON.stringify({ success: false, error: validation.error }));
@@ -103,20 +110,31 @@ async function _handleAddMcpToolCLI(options: AddMcpToolOptions): Promise<void> {
     process.exit(1);
   }
 
-  const result = await handleAddMcpTool({
+  // Map CLI flag values to internal types
+  const outboundAuthMap: Record<string, 'OAUTH' | 'API_KEY' | 'NONE'> = {
+    oauth: 'OAUTH',
+    'api-key': 'API_KEY',
+    none: 'NONE',
+  };
+
+  const result = await handleAddGatewayTarget({
     name: options.name!,
     description: options.description,
     language: options.language! as 'Python' | 'TypeScript',
-    exposure: options.exposure!,
-    agents: options.agents,
     gateway: options.gateway,
     host: options.host,
+    outboundAuthType: options.outboundAuthType ? outboundAuthMap[options.outboundAuthType.toLowerCase()] : undefined,
+    credentialName: options.credentialName,
+    oauthClientId: options.oauthClientId,
+    oauthClientSecret: options.oauthClientSecret,
+    oauthDiscoveryUrl: options.oauthDiscoveryUrl,
+    oauthScopes: options.oauthScopes,
   });
 
   if (options.json) {
     console.log(JSON.stringify(result));
   } else if (result.success) {
-    console.log(`Added MCP tool '${result.toolName}'`);
+    console.log(`Added gateway target '${result.toolName}'`);
     if (result.sourcePath) {
       console.log(`Tool code: ${result.sourcePath}`);
     }
@@ -168,10 +186,22 @@ async function handleAddIdentityCLI(options: AddIdentityOptions): Promise<void> 
     process.exit(1);
   }
 
-  const result = await handleAddIdentity({
-    name: options.name!,
-    apiKey: options.apiKey!,
-  });
+  const identityType = options.type ?? 'api-key';
+  const result =
+    identityType === 'oauth'
+      ? await handleAddIdentity({
+          type: 'oauth',
+          name: options.name!,
+          discoveryUrl: options.discoveryUrl!,
+          clientId: options.clientId!,
+          clientSecret: options.clientSecret!,
+          scopes: options.scopes,
+        })
+      : await handleAddIdentity({
+          type: 'api-key',
+          name: options.name!,
+          apiKey: options.apiKey!,
+        });
 
   if (options.json) {
     console.log(JSON.stringify(result));
@@ -235,38 +265,47 @@ export function registerAdd(program: Command) {
       await handleAddAgentCLI(options as AddAgentOptions);
     });
 
-  // Subcommand: add gateway (disabled - coming soon)
+  // Subcommand: add gateway
   addCmd
-    .command('gateway', { hidden: true })
-    .description('Add an MCP gateway to the project')
+    .command('gateway')
+    .description('Add a gateway to the project')
     .option('--name <name>', 'Gateway name')
     .option('--description <desc>', 'Gateway description')
     .option('--authorizer-type <type>', 'Authorizer type: NONE or CUSTOM_JWT', 'NONE')
     .option('--discovery-url <url>', 'OIDC discovery URL (required for CUSTOM_JWT)')
     .option('--allowed-audience <values>', 'Comma-separated allowed audience values (required for CUSTOM_JWT)')
     .option('--allowed-clients <values>', 'Comma-separated allowed client IDs (required for CUSTOM_JWT)')
-    .option('--agents <names>', 'Comma-separated agent names to attach gateway to')
+    .option('--allowed-scopes <scopes>', 'Comma-separated allowed scopes (optional for CUSTOM_JWT)')
+    .option('--agent-client-id <id>', 'Agent OAuth client ID for Bearer token auth (CUSTOM_JWT)')
+    .option('--agent-client-secret <secret>', 'Agent OAuth client secret (CUSTOM_JWT)')
     .option('--json', 'Output as JSON')
-    .action(() => {
-      console.error('AgentCore Gateway integration is coming soon.');
-      process.exit(1);
+    .action(async options => {
+      requireProject();
+      await handleAddGatewayCLI(options as AddGatewayOptions);
     });
 
-  // Subcommand: add mcp-tool (disabled - coming soon)
+  // Subcommand: add gateway-target
   addCmd
-    .command('mcp-tool', { hidden: true })
-    .description('Add an MCP tool to the project')
+    .command('gateway-target')
+    .description('Add a gateway target to the project')
     .option('--name <name>', 'Tool name')
     .option('--description <desc>', 'Tool description')
+    .option('--type <type>', 'Target type: mcpServer or lambda')
+    .option('--source <source>', 'Source: existing-endpoint or create-new')
+    .option('--endpoint <url>', 'MCP server endpoint URL')
     .option('--language <lang>', 'Language: Python or TypeScript')
-    .option('--exposure <mode>', 'Exposure mode: mcp-runtime or behind-gateway')
-    .option('--agents <names>', 'Comma-separated agent names (for mcp-runtime)')
-    .option('--gateway <name>', 'Gateway name (for behind-gateway)')
-    .option('--host <host>', 'Compute host: Lambda or AgentCoreRuntime (for behind-gateway)')
+    .option('--gateway <name>', 'Gateway name')
+    .option('--host <host>', 'Compute host: Lambda or AgentCoreRuntime')
+    .option('--outbound-auth <type>', 'Outbound auth type: oauth, api-key, or none')
+    .option('--credential-name <name>', 'Existing credential name for outbound auth')
+    .option('--oauth-client-id <id>', 'OAuth client ID (creates credential inline)')
+    .option('--oauth-client-secret <secret>', 'OAuth client secret (creates credential inline)')
+    .option('--oauth-discovery-url <url>', 'OAuth discovery URL (creates credential inline)')
+    .option('--oauth-scopes <scopes>', 'OAuth scopes, comma-separated')
     .option('--json', 'Output as JSON')
-    .action(() => {
-      console.error('MCP Tool integration is coming soon.');
-      process.exit(1);
+    .action(async options => {
+      requireProject();
+      await handleAddGatewayTargetCLI(options as AddGatewayTargetOptions);
     });
 
   // Subcommand: add memory (v2: top-level resource)
@@ -290,7 +329,12 @@ export function registerAdd(program: Command) {
     .command('identity')
     .description('Add a credential to the project')
     .option('--name <name>', 'Credential name [non-interactive]')
+    .option('--type <type>', 'Credential type: api-key (default) or oauth')
     .option('--api-key <key>', 'The API key value [non-interactive]')
+    .option('--discovery-url <url>', 'OAuth discovery URL')
+    .option('--client-id <id>', 'OAuth client ID')
+    .option('--client-secret <secret>', 'OAuth client secret')
+    .option('--scopes <scopes>', 'OAuth scopes, comma-separated')
     .option('--json', 'Output as JSON [non-interactive]')
     .action(async options => {
       requireProject();

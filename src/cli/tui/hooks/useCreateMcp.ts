@@ -5,8 +5,9 @@ import {
   getAvailableAgents,
   getExistingGateways,
   getExistingToolNames,
+  getUnassignedTargets,
 } from '../../operations/mcp/create-mcp';
-import type { AddGatewayConfig, AddMcpToolConfig } from '../screens/mcp/types';
+import type { AddGatewayConfig, AddGatewayTargetConfig } from '../screens/mcp/types';
 import { useCallback, useEffect, useState } from 'react';
 
 interface CreateStatus<T> {
@@ -38,17 +39,17 @@ export function useCreateGateway() {
   return { status, createGateway, reset };
 }
 
-export function useCreateMcpTool() {
+export function useCreateGatewayTarget() {
   const [status, setStatus] = useState<CreateStatus<CreateToolResult>>({ state: 'idle' });
 
-  const createTool = useCallback(async (config: AddMcpToolConfig) => {
+  const createTool = useCallback(async (config: AddGatewayTargetConfig) => {
     setStatus({ state: 'loading' });
     try {
       const result = await createToolFromWizard(config);
       setStatus({ state: 'success', result });
       return { ok: true as const, result };
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to create MCP tool.';
+      const message = err instanceof Error ? err.message : 'Failed to create gateway target.';
       setStatus({ state: 'error', error: message });
       return { ok: false as const, error: message };
     }
@@ -116,4 +117,23 @@ export function useExistingToolNames() {
   }, []);
 
   return { toolNames, refresh };
+}
+
+export function useUnassignedTargets() {
+  const [targets, setTargets] = useState<string[]>([]);
+
+  useEffect(() => {
+    async function load() {
+      const result = await getUnassignedTargets();
+      setTargets(result.map(t => t.name));
+    }
+    void load();
+  }, []);
+
+  const refresh = useCallback(async () => {
+    const result = await getUnassignedTargets();
+    setTargets(result.map(t => t.name));
+  }, []);
+
+  return { targets, refresh };
 }
