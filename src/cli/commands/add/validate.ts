@@ -1,3 +1,4 @@
+import { ConfigIO } from '../../../lib';
 import {
   AgentNameSchema,
   BuildTypeSchema,
@@ -7,11 +8,12 @@ import {
   TargetLanguageSchema,
   getSupportedModelProviders,
 } from '../../../schema';
+import { getExistingGateways } from '../../operations/mcp/create-mcp';
 import type {
   AddAgentOptions,
   AddGatewayOptions,
+  AddGatewayTargetOptions,
   AddIdentityOptions,
-  AddMcpToolOptions,
   AddMemoryOptions,
 } from './types';
 
@@ -24,6 +26,35 @@ export interface ValidationResult {
 const MEMORY_OPTIONS = ['none', 'shortTerm', 'longAndShortTerm'] as const;
 const OIDC_WELL_KNOWN_SUFFIX = '/.well-known/openid-configuration';
 const VALID_STRATEGIES = ['SEMANTIC', 'SUMMARIZATION', 'USER_PREFERENCE'];
+
+/**
+ * Validate that a credential name exists in the project spec.
+ */
+async function validateCredentialExists(credentialName: string): Promise<ValidationResult> {
+  try {
+    const configIO = new ConfigIO();
+    const project = await configIO.readProjectSpec();
+
+    const credentialExists = project.credentials.some(c => c.name === credentialName);
+    if (!credentialExists) {
+      const availableCredentials = project.credentials.map(c => c.name);
+      if (availableCredentials.length === 0) {
+        return {
+          valid: false,
+          error: `Credential "${credentialName}" not found. No credentials are configured. Add credentials using 'agentcore add identity'.`,
+        };
+      }
+      return {
+        valid: false,
+        error: `Credential "${credentialName}" not found. Available credentials: ${availableCredentials.join(', ')}`,
+      };
+    }
+
+    return { valid: true };
+  } catch {
+    return { valid: false, error: 'Failed to read project configuration' };
+  }
+}
 
 // Agent validation
 export function validateAddAgentOptions(options: AddAgentOptions): ValidationResult {
@@ -150,13 +181,79 @@ export function validateAddGatewayOptions(options: AddGatewayOptions): Validatio
     }
   }
 
+  // Validate agent OAuth credentials
+  if (options.agentClientId && !options.agentClientSecret) {
+    return { valid: false, error: 'Both --agent-client-id and --agent-client-secret must be provided together' };
+  }
+  if (options.agentClientSecret && !options.agentClientId) {
+    return { valid: false, error: 'Both --agent-client-id and --agent-client-secret must be provided together' };
+  }
+  if (options.agentClientId && options.authorizerType !== 'CUSTOM_JWT') {
+    return { valid: false, error: 'Agent OAuth credentials are only valid with CUSTOM_JWT authorizer' };
+  }
+
   return { valid: true };
 }
 
-// MCP Tool validation
-export function validateAddMcpToolOptions(options: AddMcpToolOptions): ValidationResult {
+// Gateway Target validation
+export async function validateAddGatewayTargetOptions(options: AddGatewayTargetOptions): Promise<ValidationResult> {
   if (!options.name) {
     return { valid: false, error: '--name is required' };
+  }
+
+  if (options.type && options.type !== 'mcpServer' && options.type !== 'lambda') {
+    return { valid: false, error: 'Invalid type. Valid options: mcpServer, lambda' };
+  }
+
+  if (options.source && options.source !== 'existing-endpoint' && options.source !== 'create-new') {
+    return { valid: false, error: 'Invalid source. Valid options: existing-endpoint, create-new' };
+  }
+
+  // Gateway is required — a gateway target must be attached to a gateway
+  if (!options.gateway) {
+    return {
+      valid: false,
+      error:
+        "--gateway is required. A gateway target must be attached to a gateway. Create a gateway first with 'agentcore add gateway'.",
+    };
+  }
+
+  // Validate the specified gateway exists
+  const existingGateways = await getExistingGateways();
+  if (existingGateways.length === 0) {
+    return {
+      valid: false,
+      error: "No gateways found. Create a gateway first with 'agentcore add gateway' before adding a gateway target.",
+    };
+  }
+  if (!existingGateways.includes(options.gateway)) {
+    return {
+      valid: false,
+      error: `Gateway "${options.gateway}" not found. Available gateways: ${existingGateways.join(', ')}`,
+    };
+  }
+
+  if (options.source === 'existing-endpoint') {
+    if (options.host) {
+      return { valid: false, error: '--host is not applicable for existing endpoint targets' };
+    }
+    if (!options.endpoint) {
+      return { valid: false, error: '--endpoint is required when source is existing-endpoint' };
+    }
+
+    try {
+      const url = new URL(options.endpoint);
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+        return { valid: false, error: 'Endpoint must use http:// or https:// protocol' };
+      }
+    } catch {
+      return { valid: false, error: 'Endpoint must be a valid URL (e.g. https://example.com/mcp)' };
+    }
+
+    // Populate defaults for fields skipped by external endpoint flow
+    options.language ??= 'Other';
+
+    return { valid: true };
   }
 
   if (!options.language) {
@@ -167,32 +264,49 @@ export function validateAddMcpToolOptions(options: AddMcpToolOptions): Validatio
     return { valid: false, error: 'Invalid language. Valid options: Python, TypeScript, Other' };
   }
 
-  if (!options.exposure) {
-    return { valid: false, error: '--exposure is required' };
-  }
+  // Validate outbound auth configuration
+  if (options.outboundAuthType && options.outboundAuthType !== 'NONE') {
+    const hasInlineOAuth = !!(options.oauthClientId ?? options.oauthClientSecret ?? options.oauthDiscoveryUrl);
 
-  if (options.exposure !== 'mcp-runtime' && options.exposure !== 'behind-gateway') {
-    return { valid: false, error: 'Invalid exposure. Use mcp-runtime' };
-  }
-
-  // Gateway feature is disabled
-  if (options.exposure === 'behind-gateway') {
-    return {
-      valid: false,
-      error: "Behind-gateway exposure is coming soon. Use 'mcp-runtime' exposure instead.",
-    };
-  }
-
-  if (options.exposure === 'mcp-runtime') {
-    if (!options.agents) {
-      return { valid: false, error: '--agents is required for mcp-runtime exposure' };
+    // Reject inline OAuth fields with API_KEY auth type
+    if (options.outboundAuthType === 'API_KEY' && hasInlineOAuth) {
+      return {
+        valid: false,
+        error: 'Inline OAuth fields cannot be used with API_KEY outbound auth. Use --credential-name instead.',
+      };
     }
-    const agents = options.agents
-      .split(',')
-      .map(s => s.trim())
-      .filter(Boolean);
-    if (agents.length === 0) {
-      return { valid: false, error: 'At least one agent is required' };
+
+    if (!options.credentialName && !hasInlineOAuth) {
+      return {
+        valid: false,
+        error:
+          options.outboundAuthType === 'API_KEY'
+            ? '--credential-name is required when outbound auth type is API_KEY'
+            : `--credential-name or inline OAuth fields (--oauth-client-id, --oauth-client-secret, --oauth-discovery-url) required when outbound auth type is ${options.outboundAuthType}`,
+      };
+    }
+
+    // Validate inline OAuth fields are complete
+    if (hasInlineOAuth) {
+      if (!options.oauthClientId)
+        return { valid: false, error: '--oauth-client-id is required for inline OAuth credential creation' };
+      if (!options.oauthClientSecret)
+        return { valid: false, error: '--oauth-client-secret is required for inline OAuth credential creation' };
+      if (!options.oauthDiscoveryUrl)
+        return { valid: false, error: '--oauth-discovery-url is required for inline OAuth credential creation' };
+      try {
+        new URL(options.oauthDiscoveryUrl);
+      } catch {
+        return { valid: false, error: '--oauth-discovery-url must be a valid URL' };
+      }
+    }
+
+    // Validate that referenced credential exists
+    if (options.credentialName) {
+      const credentialValidation = await validateCredentialExists(options.credentialName);
+      if (!credentialValidation.valid) {
+        return credentialValidation;
+      }
     }
   }
 
@@ -225,6 +339,26 @@ export function validateAddMemoryOptions(options: AddMemoryOptions): ValidationR
 export function validateAddIdentityOptions(options: AddIdentityOptions): ValidationResult {
   if (!options.name) {
     return { valid: false, error: '--name is required' };
+  }
+
+  const identityType = options.type ?? 'api-key';
+
+  if (identityType === 'oauth') {
+    if (!options.discoveryUrl) {
+      return { valid: false, error: '--discovery-url is required for OAuth credentials' };
+    }
+    try {
+      new URL(options.discoveryUrl);
+    } catch {
+      return { valid: false, error: '--discovery-url must be a valid URL' };
+    }
+    if (!options.clientId) {
+      return { valid: false, error: '--client-id is required for OAuth credentials' };
+    }
+    if (!options.clientSecret) {
+      return { valid: false, error: '--client-secret is required for OAuth credentials' };
+    }
+    return { valid: true };
   }
 
   if (!options.apiKey) {

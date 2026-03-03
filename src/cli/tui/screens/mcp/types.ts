@@ -4,13 +4,11 @@ import type { GatewayAuthorizerType, NodeRuntime, PythonRuntime, ToolDefinition 
 // Gateway Flow Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type AddGatewayStep = 'name' | 'authorizer' | 'jwt-config' | 'agents' | 'confirm';
+export type AddGatewayStep = 'name' | 'authorizer' | 'jwt-config' | 'include-targets' | 'confirm';
 
 export interface AddGatewayConfig {
   name: string;
   description: string;
-  /** Agent names that will use this gateway */
-  agents: string[];
   /** Authorization type for the gateway */
   authorizerType: GatewayAuthorizerType;
   /** JWT authorizer configuration (when authorizerType is 'CUSTOM_JWT') */
@@ -18,62 +16,79 @@ export interface AddGatewayConfig {
     discoveryUrl: string;
     allowedAudience: string[];
     allowedClients: string[];
+    allowedScopes?: string[];
+    agentClientId?: string;
+    agentClientSecret?: string;
   };
+  /** Selected unassigned targets to include in this gateway */
+  selectedTargets?: string[];
 }
 
 export const GATEWAY_STEP_LABELS: Record<AddGatewayStep, string> = {
   name: 'Name',
   authorizer: 'Authorizer',
   'jwt-config': 'JWT Config',
-  agents: 'Agents',
+  'include-targets': 'Include Targets',
   confirm: 'Confirm',
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MCP Tool Flow Types
+// Gateway Target Flow Types
 // ─────────────────────────────────────────────────────────────────────────────
-
-export type ExposureMode = 'mcp-runtime' | 'behind-gateway';
 
 export type ComputeHost = 'Lambda' | 'AgentCoreRuntime';
 
 /**
- * MCP tool wizard steps.
+ * Gateway target wizard steps.
  * - name: Tool name input
  * - language: Target language (Python or TypeScript)
- * - exposure: MCP Runtime (standalone) or behind-gateway
- * - agents: Select agents to attach (only if mcp-runtime)
- * - gateway: Select existing gateway (only if behind-gateway)
- * - host: Select compute host (only if behind-gateway)
+ * - gateway: Select existing gateway
+ * - host: Select compute host
  * - confirm: Review and confirm
  */
-export type AddMcpToolStep = 'name' | 'language' | 'exposure' | 'agents' | 'gateway' | 'host' | 'confirm';
+export type AddGatewayTargetStep =
+  | 'name'
+  | 'source'
+  | 'endpoint'
+  | 'language'
+  | 'gateway'
+  | 'host'
+  | 'outbound-auth'
+  | 'confirm';
 
 export type TargetLanguage = 'Python' | 'TypeScript' | 'Other';
 
-export interface AddMcpToolConfig {
+export interface AddGatewayTargetConfig {
   name: string;
   description: string;
   sourcePath: string;
   language: TargetLanguage;
-  exposure: ExposureMode;
-  /** Gateway name (only when exposure = behind-gateway) */
+  /** Source type for external endpoints */
+  source?: 'existing-endpoint' | 'create-new';
+  /** External endpoint URL */
+  endpoint?: string;
+  /** Gateway name */
   gateway?: string;
-  /** Compute host (AgentCoreRuntime for mcp-runtime, Lambda or AgentCoreRuntime for behind-gateway) */
+  /** Compute host (Lambda or AgentCoreRuntime) */
   host: ComputeHost;
   /** Derived tool definition */
   toolDefinition: ToolDefinition;
-  /** Agent names to attach (only when exposure = mcp-runtime) */
-  selectedAgents: string[];
+  /** Outbound auth configuration */
+  outboundAuth?: {
+    type: 'OAUTH' | 'API_KEY' | 'NONE';
+    credentialName?: string;
+    scopes?: string[];
+  };
 }
 
-export const MCP_TOOL_STEP_LABELS: Record<AddMcpToolStep, string> = {
+export const MCP_TOOL_STEP_LABELS: Record<AddGatewayTargetStep, string> = {
   name: 'Name',
+  source: 'Source',
+  endpoint: 'Endpoint',
   language: 'Language',
-  exposure: 'Exposure',
-  agents: 'Agents',
   gateway: 'Gateway',
   host: 'Host',
+  'outbound-auth': 'Outbound Auth',
   confirm: 'Confirm',
 };
 
@@ -82,8 +97,16 @@ export const MCP_TOOL_STEP_LABELS: Record<AddMcpToolStep, string> = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const AUTHORIZER_TYPE_OPTIONS = [
-  { id: 'NONE', title: 'None', description: 'No authorization required' },
+  { id: 'AWS_IAM', title: 'AWS IAM', description: 'AWS Identity and Access Management authorization' },
   { id: 'CUSTOM_JWT', title: 'Custom JWT', description: 'JWT-based authorization via OIDC provider' },
+  { id: 'NONE', title: 'None', description: 'No authorization required — gateway is publicly accessible' },
+] as const;
+
+export const SKIP_FOR_NOW = 'skip-for-now' as const;
+
+export const SOURCE_OPTIONS = [
+  { id: 'existing-endpoint', title: 'Existing endpoint', description: 'Connect to an existing MCP server' },
+  { id: 'create-new', title: 'Create new', description: 'Scaffold a new MCP server' },
 ] as const;
 
 export const TARGET_LANGUAGE_OPTIONS = [
@@ -92,19 +115,14 @@ export const TARGET_LANGUAGE_OPTIONS = [
   { id: 'Other', title: 'Other', description: 'Container-based implementation' },
 ] as const;
 
-export const EXPOSURE_MODE_OPTIONS = [
-  { id: 'mcp-runtime', title: 'MCP Runtime', description: 'Deploy as AgentCore MCP Runtime (select agents to attach)' },
-  {
-    id: 'behind-gateway',
-    title: 'Behind Gateway (coming soon)',
-    description: 'Route through AgentCore Gateway',
-    disabled: true,
-  },
-] as const;
-
 export const COMPUTE_HOST_OPTIONS = [
   { id: 'Lambda', title: 'Lambda', description: 'AWS Lambda function' },
   { id: 'AgentCoreRuntime', title: 'AgentCore Runtime', description: 'AgentCore Runtime (Python only)' },
+] as const;
+
+export const OUTBOUND_AUTH_OPTIONS = [
+  { id: 'NONE', title: 'No authorization', description: 'No outbound authentication' },
+  { id: 'OAUTH', title: 'OAuth 2LO', description: 'OAuth 2.0 client credentials' },
 ] as const;
 
 export const PYTHON_VERSION_OPTIONS = [

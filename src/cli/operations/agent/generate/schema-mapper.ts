@@ -1,4 +1,4 @@
-import { APP_DIR } from '../../../../lib';
+import { APP_DIR, ConfigIO } from '../../../../lib';
 import type {
   AgentEnvSpec,
   Credential,
@@ -12,6 +12,7 @@ import type {
 import { DEFAULT_STRATEGY_NAMESPACES } from '../../../../schema';
 import type {
   AgentRenderConfig,
+  GatewayProviderRenderConfig,
   IdentityProviderRenderConfig,
   MemoryProviderRenderConfig,
 } from '../../../templates/types';
@@ -23,6 +24,7 @@ import {
 } from '../../../tui/screens/generate/defaults';
 import type { GenerateConfig, MemoryOption } from '../../../tui/screens/generate/types';
 import { computeDefaultCredentialEnvVarName } from '../../identity/create-identity';
+import { computeDefaultGatewayEnvVarName } from '../../mcp/create-mcp';
 
 /**
  * Result of mapping GenerateConfig to v2 schema.
@@ -177,14 +179,58 @@ export function mapModelProviderToIdentityProviders(
 }
 
 /**
+ * Maps MCP gateways to gateway providers for template rendering.
+ */
+async function mapMcpGatewaysToGatewayProviders(): Promise<GatewayProviderRenderConfig[]> {
+  try {
+    const configIO = new ConfigIO();
+    if (!configIO.configExists('mcp')) {
+      return [];
+    }
+    const mcpSpec = await configIO.readMcpSpec();
+    const project = await configIO.readProjectSpec();
+
+    return mcpSpec.agentCoreGateways.map(gateway => {
+      const config: GatewayProviderRenderConfig = {
+        name: gateway.name,
+        envVarName: computeDefaultGatewayEnvVarName(gateway.name),
+        authType: gateway.authorizerType,
+      };
+
+      if (gateway.authorizerType === 'CUSTOM_JWT' && gateway.authorizerConfiguration?.customJwtAuthorizer) {
+        const jwtConfig = gateway.authorizerConfiguration.customJwtAuthorizer;
+        const credName = `${gateway.name}-agent-oauth`;
+        const credential = project.credentials.find(c => c.name === credName);
+
+        if (credential) {
+          config.credentialProviderName = credName;
+          config.discoveryUrl = jwtConfig.discoveryUrl;
+          const scopes =
+            'allowedScopes' in jwtConfig ? (jwtConfig as { allowedScopes?: string[] }).allowedScopes : undefined;
+          if (scopes?.length) {
+            config.scopes = scopes.join(' ');
+          }
+        }
+      }
+
+      return config;
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Maps GenerateConfig to AgentRenderConfig for template rendering.
  * @param config - Generate config (note: config.projectName is actually the agent name)
  * @param identityProviders - Identity providers to include (caller controls credential naming)
  */
-export function mapGenerateConfigToRenderConfig(
+export async function mapGenerateConfigToRenderConfig(
   config: GenerateConfig,
   identityProviders: IdentityProviderRenderConfig[]
-): AgentRenderConfig {
+): Promise<AgentRenderConfig> {
+  const gatewayProviders = await mapMcpGatewaysToGatewayProviders();
+
   return {
     name: config.projectName,
     sdkFramework: config.sdk,
@@ -192,8 +238,11 @@ export function mapGenerateConfigToRenderConfig(
     modelProvider: config.modelProvider,
     hasMemory: config.memory !== 'none',
     hasIdentity: identityProviders.length > 0,
+    hasGateway: gatewayProviders.length > 0,
     buildType: config.buildType,
     memoryProviders: mapMemoryOptionToMemoryProviders(config.memory, config.projectName),
     identityProviders,
+    gatewayProviders,
+    gatewayAuthTypes: [...new Set(gatewayProviders.map(g => g.authType))],
   };
 }

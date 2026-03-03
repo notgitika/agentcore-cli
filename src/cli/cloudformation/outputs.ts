@@ -27,6 +27,53 @@ export async function getStackOutputs(region: string, stackName: string): Promis
 }
 
 /**
+ * Parse stack outputs into deployed state for gateways.
+ *
+ * Output key pattern for gateways:
+ * Gateway{GatewayName}UrlOutput{Hash}
+ *
+ * Examples:
+ * - GatewayMyGatewayUrlOutput3E11FAB4
+ */
+export function parseGatewayOutputs(
+  outputs: StackOutputs,
+  gatewaySpecs: Record<string, unknown>
+): Record<string, { gatewayId: string; gatewayArn: string; gatewayUrl?: string }> {
+  const gateways: Record<string, { gatewayId: string; gatewayArn: string; gatewayUrl?: string }> = {};
+
+  // Map PascalCase gateway names to original names for lookup
+  const gatewayNames = Object.keys(gatewaySpecs);
+  const gatewayIdMap = new Map(gatewayNames.map(name => [toPascalId(name), name]));
+
+  // Match patterns: Gateway{Name}{Type}Output or McpGateway{Name}{Type}Output
+  const outputPattern = /^(?:Mcp)?Gateway(.+?)(Id|Arn|Url)Output/;
+
+  for (const [key, value] of Object.entries(outputs)) {
+    const match = outputPattern.exec(key);
+    if (!match) continue;
+
+    const logicalGateway = match[1];
+    const outputType = match[2];
+    if (!logicalGateway || !outputType) continue;
+
+    // Look up original gateway name from PascalCase version
+    const gatewayName = gatewayIdMap.get(logicalGateway) ?? logicalGateway;
+
+    gateways[gatewayName] ??= { gatewayId: gatewayName, gatewayArn: '' };
+
+    if (outputType === 'Id') {
+      gateways[gatewayName].gatewayId = value;
+    } else if (outputType === 'Arn') {
+      gateways[gatewayName].gatewayArn = value;
+    } else if (outputType === 'Url') {
+      gateways[gatewayName].gatewayUrl = value;
+    }
+  }
+
+  return gateways;
+}
+
+/**
  * Parse stack outputs into deployed state for agents.
  *
  * Output key pattern after logical ID simplification:
@@ -132,8 +179,10 @@ export function buildDeployedState(
   targetName: string,
   stackName: string,
   agents: Record<string, AgentCoreDeployedState>,
+  gateways: Record<string, { gatewayId: string; gatewayArn: string; gatewayUrl?: string }>,
   existingState?: DeployedState,
-  identityKmsKeyArn?: string
+  identityKmsKeyArn?: string,
+  credentials?: Record<string, { credentialProviderArn: string; clientSecretArn?: string; callbackUrl?: string }>
 ): DeployedState {
   const targetState: TargetDeployedState = {
     resources: {
@@ -142,6 +191,18 @@ export function buildDeployedState(
       identityKmsKeyArn,
     },
   };
+
+  // Add MCP state if gateways exist
+  if (Object.keys(gateways).length > 0) {
+    targetState.resources!.mcp = {
+      gateways,
+    };
+  }
+
+  // Add credential state if credentials exist
+  if (credentials && Object.keys(credentials).length > 0) {
+    targetState.resources!.credentials = credentials;
+  }
 
   return {
     targets: {

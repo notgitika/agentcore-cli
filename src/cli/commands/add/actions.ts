@@ -23,13 +23,23 @@ import {
   createCredential,
   resolveCredentialStrategy,
 } from '../../operations/identity/create-identity';
-import { createGatewayFromWizard, createToolFromWizard } from '../../operations/mcp/create-mcp';
+import {
+  createExternalGatewayTarget,
+  createGatewayFromWizard,
+  createToolFromWizard,
+} from '../../operations/mcp/create-mcp';
 import { createMemory } from '../../operations/memory/create-memory';
 import { createRenderer } from '../../templates';
 import type { MemoryOption } from '../../tui/screens/generate/types';
-import type { AddGatewayConfig, AddMcpToolConfig } from '../../tui/screens/mcp/types';
+import type { AddGatewayConfig, AddGatewayTargetConfig } from '../../tui/screens/mcp/types';
 import { DEFAULT_EVENT_EXPIRY } from '../../tui/screens/memory/types';
-import type { AddAgentResult, AddGatewayResult, AddIdentityResult, AddMcpToolResult, AddMemoryResult } from './types';
+import type {
+  AddAgentResult,
+  AddGatewayResult,
+  AddGatewayTargetResult,
+  AddIdentityResult,
+  AddMemoryResult,
+} from './types';
 import { mkdirSync } from 'fs';
 import { dirname, join } from 'path';
 
@@ -54,17 +64,27 @@ export interface ValidatedAddGatewayOptions {
   discoveryUrl?: string;
   allowedAudience?: string;
   allowedClients?: string;
+  allowedScopes?: string;
+  agentClientId?: string;
+  agentClientSecret?: string;
   agents?: string;
 }
 
-export interface ValidatedAddMcpToolOptions {
+export interface ValidatedAddGatewayTargetOptions {
   name: string;
   description?: string;
+  type?: string;
+  source?: 'existing-endpoint' | 'create-new';
+  endpoint?: string;
   language: 'Python' | 'TypeScript' | 'Other';
-  exposure: 'mcp-runtime' | 'behind-gateway';
-  agents?: string;
   gateway?: string;
   host?: 'Lambda' | 'AgentCoreRuntime';
+  outboundAuthType?: 'OAUTH' | 'API_KEY' | 'NONE';
+  credentialName?: string;
+  oauthClientId?: string;
+  oauthClientSecret?: string;
+  oauthDiscoveryUrl?: string;
+  oauthScopes?: string;
 }
 
 export interface ValidatedAddMemoryOptions {
@@ -73,10 +93,9 @@ export interface ValidatedAddMemoryOptions {
   expiry?: number;
 }
 
-export interface ValidatedAddIdentityOptions {
-  name: string;
-  apiKey: string;
-}
+export type ValidatedAddIdentityOptions =
+  | { type: 'api-key'; name: string; apiKey: string }
+  | { type: 'oauth'; name: string; discoveryUrl: string; clientId: string; clientSecret: string; scopes?: string };
 
 // Agent handlers
 export async function handleAddAgent(options: ValidatedAddAgentOptions): Promise<AddAgentResult> {
@@ -148,7 +167,7 @@ async function handleCreatePath(options: ValidatedAddAgentOptions, configBaseDir
   }
 
   // Render templates with correct identity provider
-  const renderConfig = mapGenerateConfigToRenderConfig(generateConfig, identityProviders);
+  const renderConfig = await mapGenerateConfigToRenderConfig(generateConfig, identityProviders);
   const renderer = createRenderer(renderConfig);
   await renderer.render({ outputDir: projectRoot });
 
@@ -231,17 +250,9 @@ async function handleByoPath(
 
 // Gateway handler
 function buildGatewayConfig(options: ValidatedAddGatewayOptions): AddGatewayConfig {
-  const agents = options.agents
-    ? options.agents
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean)
-    : [];
-
   const config: AddGatewayConfig = {
     name: options.name,
     description: options.description ?? `Gateway for ${options.name}`,
-    agents,
     authorizerType: options.authorizerType,
     jwtConfig: undefined,
   };
@@ -259,6 +270,14 @@ function buildGatewayConfig(options: ValidatedAddGatewayOptions): AddGatewayConf
         .allowedClients!.split(',')
         .map(s => s.trim())
         .filter(Boolean),
+      allowedScopes: options.allowedScopes
+        ? options.allowedScopes
+            .split(',')
+            .map(s => s.trim())
+            .filter(Boolean)
+        : undefined,
+      agentClientId: options.agentClientId,
+      agentClientSecret: options.agentClientSecret,
     };
   }
 
@@ -275,37 +294,65 @@ export async function handleAddGateway(options: ValidatedAddGatewayOptions): Pro
   }
 }
 
-// MCP Tool handler
-function buildMcpToolConfig(options: ValidatedAddMcpToolOptions): AddMcpToolConfig {
+// Gateway Target handler
+export function buildGatewayTargetConfig(options: ValidatedAddGatewayTargetOptions): AddGatewayTargetConfig {
   const sourcePath = `${APP_DIR}/${MCP_APP_SUBDIR}/${options.name}`;
 
   const description = options.description ?? `Tool for ${options.name}`;
+
+  // Build outboundAuth configuration if provided
+  const outboundAuth =
+    options.outboundAuthType && options.outboundAuthType !== 'NONE'
+      ? {
+          type: options.outboundAuthType,
+          credentialName: options.credentialName,
+        }
+      : undefined;
+
   return {
     name: options.name,
     description,
     sourcePath,
     language: options.language,
-    exposure: options.exposure,
-    host: options.exposure === 'mcp-runtime' ? 'AgentCoreRuntime' : options.host!,
+    source: options.source,
+    endpoint: options.endpoint,
+    host: options.host!,
     toolDefinition: {
       name: options.name,
       description,
       inputSchema: { type: 'object' },
     },
-    selectedAgents:
-      options.exposure === 'mcp-runtime'
-        ? options
-            .agents!.split(',')
-            .map(s => s.trim())
-            .filter(Boolean)
-        : [],
-    gateway: options.exposure === 'behind-gateway' ? options.gateway : undefined,
+    gateway: options.gateway,
+    outboundAuth,
   };
 }
 
-export async function handleAddMcpTool(options: ValidatedAddMcpToolOptions): Promise<AddMcpToolResult> {
+export async function handleAddGatewayTarget(
+  options: ValidatedAddGatewayTargetOptions
+): Promise<AddGatewayTargetResult> {
   try {
-    const config = buildMcpToolConfig(options);
+    // Auto-create OAuth credential when inline fields provided
+    if (options.oauthClientId && options.oauthClientSecret && options.oauthDiscoveryUrl && !options.credentialName) {
+      const credName = `${options.name}-oauth`;
+      await createCredential({
+        type: 'OAuthCredentialProvider',
+        name: credName,
+        discoveryUrl: options.oauthDiscoveryUrl,
+        clientId: options.oauthClientId,
+        clientSecret: options.oauthClientSecret,
+        scopes: options.oauthScopes
+          ?.split(',')
+          .map(s => s.trim())
+          .filter(Boolean),
+      });
+      options.credentialName = credName;
+    }
+
+    const config = buildGatewayTargetConfig(options);
+    if (config.source === 'existing-endpoint') {
+      const result = await createExternalGatewayTarget(config);
+      return { success: true, toolName: result.toolName };
+    }
     const result = await createToolFromWizard(config);
     return { success: true, toolName: result.toolName, sourcePath: result.projectPath };
   } catch (err) {
@@ -339,10 +386,24 @@ export async function handleAddMemory(options: ValidatedAddMemoryOptions): Promi
 // Identity handler (v2: top-level credential resource, no owner/user)
 export async function handleAddIdentity(options: ValidatedAddIdentityOptions): Promise<AddIdentityResult> {
   try {
-    const result = await createCredential({
-      name: options.name,
-      apiKey: options.apiKey,
-    });
+    const result =
+      options.type === 'oauth'
+        ? await createCredential({
+            type: 'OAuthCredentialProvider',
+            name: options.name,
+            discoveryUrl: options.discoveryUrl,
+            clientId: options.clientId,
+            clientSecret: options.clientSecret,
+            scopes: options.scopes
+              ?.split(',')
+              .map(s => s.trim())
+              .filter(Boolean),
+          })
+        : await createCredential({
+            type: 'ApiKeyCredentialProvider',
+            name: options.name,
+            apiKey: options.apiKey,
+          });
 
     return { success: true, credentialName: result.name };
   } catch (err) {

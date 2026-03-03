@@ -6,8 +6,8 @@ const ADD_RESOURCES = [
   { id: 'agent', title: 'Agent', description: 'New or existing agent code' },
   { id: 'memory', title: 'Memory', description: 'Persistent context storage' },
   { id: 'identity', title: 'Identity', description: 'API key credential providers' },
-  { id: 'gateway', title: 'Gateway (coming soon)', description: 'Route and manage MCP tools', disabled: true },
-  { id: 'mcp-tool', title: 'MCP Tool (coming soon)', description: 'Extend agent capabilities', disabled: true },
+  { id: 'gateway', title: 'Gateway', description: 'Route and manage gateway targets' },
+  { id: 'gateway-target', title: 'Gateway Target', description: 'Extend agent capabilities' },
 ] as const;
 
 export type AddResourceType = (typeof ADD_RESOURCES)[number]['id'];
@@ -24,8 +24,8 @@ export function AddScreen({ onSelect, onExit, hasAgents }: AddScreenProps) {
     () =>
       ADD_RESOURCES.map(r => ({
         ...r,
-        disabled: ('disabled' in r && r.disabled) || ((r.id === 'memory' || r.id === 'identity') && !hasAgents),
-        description: (r.id === 'memory' || r.id === 'identity') && !hasAgents ? 'Add an agent first' : r.description,
+        disabled: Boolean('disabled' in r && r.disabled) || (r.id === 'memory' && !hasAgents),
+        description: r.id === 'memory' && !hasAgents ? 'Add an agent first' : r.description,
       })),
     [hasAgents]
   );

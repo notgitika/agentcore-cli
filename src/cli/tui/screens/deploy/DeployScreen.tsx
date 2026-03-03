@@ -1,5 +1,6 @@
 import { ConfigIO } from '../../../../lib';
 import type { AgentCoreMcpSpec } from '../../../../schema';
+import { formatTargetStatus } from '../../../operations/deploy/gateway-status';
 import {
   AwsTargetConfigUI,
   ConfirmPrompt,
@@ -74,6 +75,7 @@ export function DeployScreen({
     isComplete,
     hasStartedCfn,
     logFilePath,
+    targetStatuses,
     missingCredentials,
     startDeploy,
     confirmTeardown,
@@ -342,6 +344,18 @@ export function DeployScreen({
       {allSuccess && diffMode && (
         <Box flexDirection="column" marginTop={1}>
           <Text color="green">Diff complete</Text>
+        </Box>
+      )}
+
+      {allSuccess && targetStatuses.length > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold>Gateway Targets:</Text>
+          {targetStatuses.map(t => (
+            <Text key={t.name}>
+              {' '}
+              {t.name}: {formatTargetStatus(t.status)}
+            </Text>
+          ))}
         </Box>
       )}
 

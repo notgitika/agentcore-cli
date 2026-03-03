@@ -1,18 +1,31 @@
 import type {
   AddAgentOptions,
   AddGatewayOptions,
+  AddGatewayTargetOptions,
   AddIdentityOptions,
-  AddMcpToolOptions,
   AddMemoryOptions,
 } from '../types.js';
 import {
   validateAddAgentOptions,
   validateAddGatewayOptions,
+  validateAddGatewayTargetOptions,
   validateAddIdentityOptions,
-  validateAddMcpToolOptions,
   validateAddMemoryOptions,
 } from '../validate.js';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mockReadProjectSpec = vi.fn();
+const mockGetExistingGateways = vi.fn();
+
+vi.mock('../../../../lib/index.js', () => ({
+  ConfigIO: class {
+    readProjectSpec = mockReadProjectSpec;
+  },
+}));
+
+vi.mock('../../../operations/mcp/create-mcp.js', () => ({
+  getExistingGateways: (...args: unknown[]) => mockGetExistingGateways(...args),
+}));
 
 // Helper: valid base options for each type
 const validAgentOptionsByo: AddAgentOptions = {
@@ -46,17 +59,9 @@ const validGatewayOptionsJwt: AddGatewayOptions = {
   allowedClients: 'client1,client2',
 };
 
-const validMcpToolOptionsMcpRuntime: AddMcpToolOptions = {
+const validGatewayTargetOptions: AddGatewayTargetOptions = {
   name: 'test-tool',
   language: 'Python',
-  exposure: 'mcp-runtime',
-  agents: 'Agent1,Agent2',
-};
-
-const validMcpToolOptionsBehindGateway: AddMcpToolOptions = {
-  name: 'test-tool',
-  language: 'Python',
-  exposure: 'behind-gateway',
   gateway: 'my-gateway',
   host: 'Lambda',
 };
@@ -72,6 +77,8 @@ const validIdentityOptions: AddIdentityOptions = {
 };
 
 describe('validate', () => {
+  afterEach(() => vi.clearAllMocks());
+
   describe('validateAddAgentOptions', () => {
     // AC1: All required fields validated
     it('returns error for missing required fields', () => {
@@ -233,57 +240,283 @@ describe('validate', () => {
       expect(validateAddGatewayOptions(validGatewayOptionsNone)).toEqual({ valid: true });
       expect(validateAddGatewayOptions(validGatewayOptionsJwt)).toEqual({ valid: true });
     });
+
+    // AC15: agentClientId and agentClientSecret must be provided together
+    it('returns error when agentClientId provided without agentClientSecret', () => {
+      const result = validateAddGatewayOptions({
+        ...validGatewayOptionsJwt,
+        agentClientId: 'my-client-id',
+      });
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('Both --agent-client-id and --agent-client-secret must be provided together');
+    });
+
+    it('returns error when agentClientSecret provided without agentClientId', () => {
+      const result = validateAddGatewayOptions({
+        ...validGatewayOptionsJwt,
+        agentClientSecret: 'my-secret',
+      });
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('Both --agent-client-id and --agent-client-secret must be provided together');
+    });
+
+    // AC16: agent credentials only valid with CUSTOM_JWT
+    it('returns error when agent credentials used with non-CUSTOM_JWT authorizer', () => {
+      const result = validateAddGatewayOptions({
+        ...validGatewayOptionsNone,
+        agentClientId: 'my-client-id',
+        agentClientSecret: 'my-secret',
+      });
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('Agent OAuth credentials are only valid with CUSTOM_JWT authorizer');
+    });
+
+    // AC17: valid CUSTOM_JWT with agent credentials passes
+    it('passes for CUSTOM_JWT with agent credentials', () => {
+      const result = validateAddGatewayOptions({
+        ...validGatewayOptionsJwt,
+        agentClientId: 'my-client-id',
+        agentClientSecret: 'my-secret',
+        allowedScopes: 'scope1,scope2',
+      });
+      expect(result.valid).toBe(true);
+    });
   });
 
-  describe('validateAddMcpToolOptions', () => {
-    // AC15: Required fields validated
-    it('returns error for missing required fields', () => {
-      const requiredFields: { field: keyof AddMcpToolOptions; error: string }[] = [
-        { field: 'name', error: '--name is required' },
-        { field: 'language', error: '--language is required' },
-        { field: 'exposure', error: '--exposure is required' },
-      ];
+  describe('validateAddGatewayTargetOptions', () => {
+    beforeEach(() => {
+      // By default, mock that the gateway from validGatewayTargetOptions exists
+      mockGetExistingGateways.mockResolvedValue(['my-gateway']);
+    });
 
-      for (const { field, error } of requiredFields) {
-        const opts = { ...validMcpToolOptionsMcpRuntime, [field]: undefined };
-        const result = validateAddMcpToolOptions(opts);
-        expect(result.valid, `Should fail for missing ${String(field)}`).toBe(false);
-        expect(result.error).toBe(error);
-      }
+    // AC15: Required fields validated
+    it('returns error for missing name', async () => {
+      const opts = { ...validGatewayTargetOptions, name: undefined };
+      const result = await validateAddGatewayTargetOptions(opts);
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('--name is required');
+    });
+
+    it('returns error for missing language (non-existing-endpoint)', async () => {
+      const opts = { ...validGatewayTargetOptions, language: undefined };
+      const result = await validateAddGatewayTargetOptions(opts);
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('--language is required');
+    });
+
+    // Gateway is required
+    it('returns error when --gateway is missing', async () => {
+      const opts = { ...validGatewayTargetOptions, gateway: undefined };
+      const result = await validateAddGatewayTargetOptions(opts);
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('--gateway is required');
+    });
+
+    it('returns error when no gateways exist', async () => {
+      mockGetExistingGateways.mockResolvedValue([]);
+      const result = await validateAddGatewayTargetOptions(validGatewayTargetOptions);
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('No gateways found');
+      expect(result.error).toContain('agentcore add gateway');
+    });
+
+    it('returns error when specified gateway does not exist', async () => {
+      mockGetExistingGateways.mockResolvedValue(['other-gateway']);
+      const result = await validateAddGatewayTargetOptions(validGatewayTargetOptions);
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('Gateway "my-gateway" not found');
+      expect(result.error).toContain('other-gateway');
     });
 
     // AC16: Invalid values rejected
-    it('returns error for invalid values', () => {
-      let result = validateAddMcpToolOptions({ ...validMcpToolOptionsMcpRuntime, language: 'Java' as any });
+    it('returns error for invalid values', async () => {
+      const result = await validateAddGatewayTargetOptions({
+        ...validGatewayTargetOptions,
+        language: 'Java' as any,
+      });
       expect(result.valid).toBe(false);
       expect(result.error?.includes('Invalid language')).toBeTruthy();
-
-      result = validateAddMcpToolOptions({ ...validMcpToolOptionsMcpRuntime, exposure: 'invalid' as any });
-      expect(result.valid).toBe(false);
-      expect(result.error?.includes('Invalid exposure')).toBeTruthy();
     });
 
-    // AC17: mcp-runtime exposure requires agents
-    it('returns error for mcp-runtime without agents', () => {
-      let result = validateAddMcpToolOptions({ ...validMcpToolOptionsMcpRuntime, agents: undefined });
-      expect(result.valid).toBe(false);
-      expect(result.error).toBe('--agents is required for mcp-runtime exposure');
-
-      result = validateAddMcpToolOptions({ ...validMcpToolOptionsMcpRuntime, agents: ',,,' });
-      expect(result.valid).toBe(false);
-      expect(result.error).toBe('At least one agent is required');
+    // AC18: Valid options pass
+    it('passes for valid gateway target options', async () => {
+      const result = await validateAddGatewayTargetOptions({ ...validGatewayTargetOptions });
+      expect(result.valid).toBe(true);
+    });
+    // AC20: existing-endpoint source validation
+    it('passes for valid existing-endpoint with https', async () => {
+      const options: AddGatewayTargetOptions = {
+        name: 'test-tool',
+        source: 'existing-endpoint',
+        endpoint: 'https://example.com/mcp',
+        gateway: 'my-gateway',
+      };
+      const result = await validateAddGatewayTargetOptions(options);
+      expect(result.valid).toBe(true);
+      expect(options.language).toBe('Other');
     });
 
-    // AC18: behind-gateway exposure is disabled (coming soon)
-    it('returns coming soon error for behind-gateway exposure', () => {
-      const result = validateAddMcpToolOptions({ ...validMcpToolOptionsBehindGateway });
-      expect(result.valid).toBe(false);
-      expect(result.error).toContain('coming soon');
+    it('passes for valid existing-endpoint with http', async () => {
+      const options: AddGatewayTargetOptions = {
+        name: 'test-tool',
+        source: 'existing-endpoint',
+        endpoint: 'http://localhost:3000/mcp',
+        gateway: 'my-gateway',
+      };
+      const result = await validateAddGatewayTargetOptions(options);
+      expect(result.valid).toBe(true);
     });
 
-    // AC19: Valid options pass
-    it('passes for valid mcp-runtime options', () => {
-      expect(validateAddMcpToolOptions(validMcpToolOptionsMcpRuntime)).toEqual({ valid: true });
+    it('returns error for existing-endpoint without endpoint', async () => {
+      const options: AddGatewayTargetOptions = {
+        name: 'test-tool',
+        source: 'existing-endpoint',
+        gateway: 'my-gateway',
+      };
+      const result = await validateAddGatewayTargetOptions(options);
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('--endpoint is required when source is existing-endpoint');
+    });
+
+    it('returns error for existing-endpoint with non-http(s) URL', async () => {
+      const options: AddGatewayTargetOptions = {
+        name: 'test-tool',
+        source: 'existing-endpoint',
+        endpoint: 'ftp://example.com/mcp',
+        gateway: 'my-gateway',
+      };
+      const result = await validateAddGatewayTargetOptions(options);
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('Endpoint must use http:// or https:// protocol');
+    });
+
+    it('returns error for existing-endpoint with invalid URL', async () => {
+      const options: AddGatewayTargetOptions = {
+        name: 'test-tool',
+        source: 'existing-endpoint',
+        endpoint: 'not-a-url',
+        gateway: 'my-gateway',
+      };
+      const result = await validateAddGatewayTargetOptions(options);
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('Endpoint must be a valid URL (e.g. https://example.com/mcp)');
+    });
+
+    // AC21: credential validation through outbound auth
+    it('returns error when credential not found', async () => {
+      mockReadProjectSpec.mockResolvedValue({
+        credentials: [{ name: 'existing-cred', type: 'ApiKey' }],
+      });
+
+      const options: AddGatewayTargetOptions = {
+        name: 'test-tool',
+        language: 'Python',
+        gateway: 'my-gateway',
+        outboundAuthType: 'API_KEY',
+        credentialName: 'missing-cred',
+      };
+      const result = await validateAddGatewayTargetOptions(options);
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('Credential "missing-cred" not found');
+    });
+
+    it('returns error when no credentials configured', async () => {
+      mockReadProjectSpec.mockResolvedValue({
+        credentials: [],
+      });
+
+      const options: AddGatewayTargetOptions = {
+        name: 'test-tool',
+        language: 'Python',
+        gateway: 'my-gateway',
+        outboundAuthType: 'API_KEY',
+        credentialName: 'any-cred',
+      };
+      const result = await validateAddGatewayTargetOptions(options);
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('No credentials are configured');
+    });
+
+    it('passes when credential exists', async () => {
+      mockReadProjectSpec.mockResolvedValue({
+        credentials: [{ name: 'valid-cred', type: 'ApiKey' }],
+      });
+
+      const options: AddGatewayTargetOptions = {
+        name: 'test-tool',
+        language: 'Python',
+        gateway: 'my-gateway',
+        outboundAuthType: 'API_KEY',
+        credentialName: 'valid-cred',
+      };
+      const result = await validateAddGatewayTargetOptions(options);
+      expect(result.valid).toBe(true);
+    });
+
+    // Outbound auth inline OAuth validation
+    it('passes for OAUTH with inline OAuth fields', async () => {
+      const result = await validateAddGatewayTargetOptions({
+        ...validGatewayTargetOptions,
+        outboundAuthType: 'OAUTH',
+        oauthClientId: 'cid',
+        oauthClientSecret: 'csec',
+        oauthDiscoveryUrl: 'https://auth.example.com',
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('returns error for OAUTH without credential-name or inline fields', async () => {
+      const result = await validateAddGatewayTargetOptions({
+        ...validGatewayTargetOptions,
+        outboundAuthType: 'OAUTH',
+      });
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('--credential-name or inline OAuth fields');
+    });
+
+    it('returns error for incomplete inline OAuth (missing client-secret)', async () => {
+      const result = await validateAddGatewayTargetOptions({
+        ...validGatewayTargetOptions,
+        outboundAuthType: 'OAUTH',
+        oauthClientId: 'cid',
+        oauthDiscoveryUrl: 'https://auth.example.com',
+      });
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('--oauth-client-secret');
+    });
+
+    it('returns error for API_KEY with inline OAuth fields', async () => {
+      const result = await validateAddGatewayTargetOptions({
+        ...validGatewayTargetOptions,
+        outboundAuthType: 'API_KEY',
+        oauthClientId: 'cid',
+        oauthClientSecret: 'csec',
+        oauthDiscoveryUrl: 'https://auth.example.com',
+      });
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('cannot be used with API_KEY');
+    });
+
+    it('returns error for API_KEY without credential-name', async () => {
+      const result = await validateAddGatewayTargetOptions({
+        ...validGatewayTargetOptions,
+        outboundAuthType: 'API_KEY',
+      });
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('--credential-name is required');
+    });
+
+    it('rejects --host with existing-endpoint', async () => {
+      const options: AddGatewayTargetOptions = {
+        name: 'test-tool',
+        source: 'existing-endpoint',
+        endpoint: 'https://example.com/mcp',
+        host: 'Lambda',
+        gateway: 'my-gateway',
+      };
+      const result = await validateAddGatewayTargetOptions(options);
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('--host is not applicable for existing endpoint targets');
     });
   });
 
@@ -379,6 +612,58 @@ describe('validate', () => {
     // AC25: Valid options pass
     it('passes for valid options', () => {
       expect(validateAddIdentityOptions(validIdentityOptions)).toEqual({ valid: true });
+    });
+  });
+
+  describe('validateAddIdentityOptions OAuth', () => {
+    it('passes for valid OAuth identity', () => {
+      const result = validateAddIdentityOptions({
+        name: 'my-oauth',
+        type: 'oauth',
+        discoveryUrl: 'https://auth.example.com/.well-known/openid-configuration',
+        clientId: 'client123',
+        clientSecret: 'secret456',
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('returns error for OAuth without discovery-url', () => {
+      const result = validateAddIdentityOptions({
+        name: 'my-oauth',
+        type: 'oauth',
+        clientId: 'client123',
+        clientSecret: 'secret456',
+      });
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('--discovery-url');
+    });
+
+    it('returns error for OAuth without client-id', () => {
+      const result = validateAddIdentityOptions({
+        name: 'my-oauth',
+        type: 'oauth',
+        discoveryUrl: 'https://auth.example.com',
+        clientSecret: 'secret456',
+      });
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('--client-id');
+    });
+
+    it('returns error for OAuth without client-secret', () => {
+      const result = validateAddIdentityOptions({
+        name: 'my-oauth',
+        type: 'oauth',
+        discoveryUrl: 'https://auth.example.com',
+        clientId: 'client123',
+      });
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('--client-secret');
+    });
+
+    it('still requires api-key for default type', () => {
+      const result = validateAddIdentityOptions({ name: 'my-key' });
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('--api-key');
     });
   });
 });

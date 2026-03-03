@@ -7,7 +7,7 @@ import type { AddAgentConfig } from '../agent/types';
 import { FRAMEWORK_OPTIONS } from '../agent/types';
 import { useAddAgent } from '../agent/useAddAgent';
 import { AddIdentityFlow } from '../identity';
-import { AddGatewayFlow, AddMcpToolFlow } from '../mcp';
+import { AddGatewayFlow, AddGatewayTargetFlow } from '../mcp';
 import { AddMemoryFlow } from '../memory/AddMemoryFlow';
 import type { AddResourceType } from './AddScreen';
 import { AddScreen } from './AddScreen';
@@ -163,7 +163,7 @@ export function AddFlow(props: AddFlowProps) {
       case 'gateway':
         setFlow({ name: 'gateway-wizard' });
         break;
-      case 'mcp-tool':
+      case 'gateway-target':
         setFlow({ name: 'tool-wizard' });
         break;
       case 'memory':
@@ -325,7 +325,6 @@ export function AddFlow(props: AddFlowProps) {
     return (
       <AddGatewayFlow
         isInteractive={props.isInteractive}
-        availableAgents={agents}
         onExit={props.onExit}
         onBack={() => setFlow({ name: 'select' })}
         onDev={props.onDev}
@@ -334,12 +333,11 @@ export function AddFlow(props: AddFlowProps) {
     );
   }
 
-  // MCP Tool wizard - now uses AddMcpToolFlow with mode selection
+  // Gateway Target wizard - uses AddGatewayTargetFlow
   if (flow.name === 'tool-wizard') {
     return (
-      <AddMcpToolFlow
+      <AddGatewayTargetFlow
         isInteractive={props.isInteractive}
-        existingAgents={agents}
         onExit={props.onExit}
         onBack={() => setFlow({ name: 'select' })}
         onDev={props.onDev}
@@ -363,10 +361,6 @@ export function AddFlow(props: AddFlowProps) {
 
   // Identity wizard - now uses AddIdentityFlow with mode selection
   if (flow.name === 'identity-wizard') {
-    // Wait for agents to load before rendering wizard
-    if (agents.length === 0) {
-      return null;
-    }
     return (
       <AddIdentityFlow
         isInteractive={props.isInteractive}
