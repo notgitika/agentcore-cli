@@ -8,7 +8,6 @@ import {
   getSupportedModelProviders,
   matchEnumValue,
 } from '../../../schema';
-import { validateVpcOptions } from '../shared/vpc-utils';
 import type {
   AddAgentOptions,
   AddGatewayOptions,
@@ -116,9 +115,6 @@ export function validateAddAgentOptions(options: AddAgentOptions): ValidationRes
       };
     }
   }
-
-  const vpcResult = validateVpcOptions(options);
-  if (!vpcResult.valid) return vpcResult;
 
   return { valid: true };
 }
