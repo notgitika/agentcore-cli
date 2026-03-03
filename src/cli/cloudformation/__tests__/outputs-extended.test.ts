@@ -157,7 +157,7 @@ describe('buildDeployedState', () => {
       },
     };
 
-    const state = buildDeployedState('default', 'MyStack', agents, {});
+    const state = buildDeployedState({ targetName: 'default', stackName: 'MyStack', agents, gateways: {} });
     expect(state.targets.default).toBeDefined();
     expect(state.targets.default!.resources?.agents).toEqual(agents);
     expect(state.targets.default!.resources?.stackName).toBe('MyStack');
@@ -181,7 +181,13 @@ describe('buildDeployedState', () => {
       DevAgent: { runtimeId: 'rt-d', runtimeArn: 'arn:rt-d', roleArn: 'arn:role-d' },
     };
 
-    const state = buildDeployedState('dev', 'DevStack', devAgents, {}, existing);
+    const state = buildDeployedState({
+      targetName: 'dev',
+      stackName: 'DevStack',
+      agents: devAgents,
+      gateways: {},
+      existingState: existing,
+    });
     expect(state.targets.prod).toBeDefined();
     expect(state.targets.dev).toBeDefined();
     expect(state.targets.prod!.resources?.stackName).toBe('ProdStack');
@@ -197,22 +203,34 @@ describe('buildDeployedState', () => {
       },
     };
 
-    const state = buildDeployedState('default', 'NewStack', {}, {}, existing);
+    const state = buildDeployedState({
+      targetName: 'default',
+      stackName: 'NewStack',
+      agents: {},
+      gateways: {},
+      existingState: existing,
+    });
     expect(state.targets.default!.resources?.stackName).toBe('NewStack');
   });
 
   it('includes identityKmsKeyArn when provided', () => {
-    const state = buildDeployedState('default', 'Stack', {}, {}, undefined, 'arn:aws:kms:key');
+    const state = buildDeployedState({
+      targetName: 'default',
+      stackName: 'Stack',
+      agents: {},
+      gateways: {},
+      identityKmsKeyArn: 'arn:aws:kms:key',
+    });
     expect(state.targets.default!.resources?.identityKmsKeyArn).toBe('arn:aws:kms:key');
   });
 
   it('omits identityKmsKeyArn when undefined', () => {
-    const state = buildDeployedState('default', 'Stack', {}, {});
+    const state = buildDeployedState({ targetName: 'default', stackName: 'Stack', agents: {}, gateways: {} });
     expect(state.targets.default!.resources?.identityKmsKeyArn).toBeUndefined();
   });
 
   it('handles empty agents record', () => {
-    const state = buildDeployedState('default', 'Stack', {}, {});
-    expect(state.targets.default!.resources?.agents).toEqual({});
+    const state = buildDeployedState({ targetName: 'default', stackName: 'Stack', agents: {}, gateways: {} });
+    expect(state.targets.default!.resources?.agents).toBeUndefined();
   });
 });

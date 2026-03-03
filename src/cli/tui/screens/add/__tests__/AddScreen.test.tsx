@@ -8,10 +8,9 @@ describe('AddScreen', () => {
     const onSelect = vi.fn();
     const onExit = vi.fn();
 
-    const { lastFrame } = render(<AddScreen onSelect={onSelect} onExit={onExit} hasAgents={true} />);
+    const { lastFrame } = render(<AddScreen onSelect={onSelect} onExit={onExit} />);
 
     expect(lastFrame()).toContain('Gateway');
     expect(lastFrame()).toContain('Gateway Target');
-    expect(lastFrame()).not.toContain('Add an agent first');
   });
 });

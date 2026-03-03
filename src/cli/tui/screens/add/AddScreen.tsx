@@ -15,19 +15,17 @@ export type AddResourceType = (typeof ADD_RESOURCES)[number]['id'];
 interface AddScreenProps {
   onSelect: (resourceType: AddResourceType) => void;
   onExit: () => void;
-  /** Whether at least one agent exists in the project */
-  hasAgents: boolean;
 }
 
-export function AddScreen({ onSelect, onExit, hasAgents }: AddScreenProps) {
+export function AddScreen({ onSelect, onExit }: AddScreenProps) {
   const items: SelectableItem[] = useMemo(
     () =>
       ADD_RESOURCES.map(r => ({
         ...r,
-        disabled: Boolean('disabled' in r && r.disabled) || (r.id === 'memory' && !hasAgents),
-        description: r.id === 'memory' && !hasAgents ? 'Add an agent first' : r.description,
+        disabled: Boolean('disabled' in r && r.disabled),
+        description: r.description,
       })),
-    [hasAgents]
+    []
   );
 
   const isDisabled = (item: SelectableItem) => item.disabled ?? false;

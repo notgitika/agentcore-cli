@@ -18,6 +18,17 @@ export const AgentCoreDeployedStateSchema = z.object({
 export type AgentCoreDeployedState = z.infer<typeof AgentCoreDeployedStateSchema>;
 
 // ============================================================================
+// Memory Deployed State
+// ============================================================================
+
+export const MemoryDeployedStateSchema = z.object({
+  memoryId: z.string().min(1),
+  memoryArn: z.string().min(1),
+});
+
+export type MemoryDeployedState = z.infer<typeof MemoryDeployedStateSchema>;
+
+// ============================================================================
 // MCP Gateway Deployed State
 // ============================================================================
 
@@ -114,6 +125,7 @@ export type CredentialDeployedState = z.infer<typeof CredentialDeployedStateSche
 
 export const DeployedResourceStateSchema = z.object({
   agents: z.record(z.string(), AgentCoreDeployedStateSchema).optional(),
+  memories: z.record(z.string(), MemoryDeployedStateSchema).optional(),
   mcp: McpDeployedStateSchema.optional(),
   externallyManaged: ExternallyManagedStateSchema.optional(),
   credentials: z.record(z.string(), CredentialDeployedStateSchema).optional(),
