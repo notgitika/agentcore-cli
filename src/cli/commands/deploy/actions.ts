@@ -332,6 +332,13 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     const memoryNames = (context.projectSpec.memories ?? []).map(m => m.name);
     const memories = parseMemoryOutputs(outputs, memoryNames);
 
+    if (memoryNames.length > 0 && Object.keys(memories).length !== memoryNames.length) {
+      logger.log(
+        `Deployed-state missing outputs for ${memoryNames.length - Object.keys(memories).length} memory(ies).`,
+        'warn'
+      );
+    }
+
     // Parse gateway outputs
     const gatewaySpecs =
       mcpSpec?.agentCoreGateways?.reduce(
