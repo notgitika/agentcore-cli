@@ -161,7 +161,7 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
       }
     }
     if (Object.keys(outputs).length === 0) {
-      logger.log('Warning: Could not retrieve stack outputs after polling', 'warn');
+      throw new Error('Could not retrieve stack outputs after polling. Deployed state will not be recorded.');
     }
 
     const agents = parseAgentOutputs(outputs, agentNames, currentStackName);
@@ -193,6 +193,13 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     // Parse memory outputs
     const memoryNames = (ctx.projectSpec.memories ?? []).map((m: { name: string }) => m.name);
     const memories = parseMemoryOutputs(outputs, memoryNames);
+
+    if (memoryNames.length > 0 && Object.keys(memories).length !== memoryNames.length) {
+      logger.log(
+        `Deployed-state missing outputs for ${memoryNames.length - Object.keys(memories).length} memory(ies).`,
+        'warn'
+      );
+    }
 
     // Expose outputs to UI
     setStackOutputs(outputs);
