@@ -1,4 +1,4 @@
-import type { AgentCoreDeployedState, DeployedState, TargetDeployedState } from '../../schema';
+import type { AgentCoreDeployedState, DeployedState, MemoryDeployedState, TargetDeployedState } from '../../schema';
 import { getCredentialProvider } from '../aws';
 import { toPascalId } from './logical-ids';
 import { getStackName } from './stack-discovery';
@@ -173,20 +173,55 @@ export function parseAgentOutputs(
 }
 
 /**
+ * Parse stack outputs into deployed state for memories.
+ *
+ * Looks up outputs by constructing the expected key prefix from known memory names
+ *
+ * Output key pattern: ApplicationMemory{PascalName}(Id|Arn)Output{Hash}
+ */
+export function parseMemoryOutputs(outputs: StackOutputs, memoryNames: string[]): Record<string, MemoryDeployedState> {
+  const memories: Record<string, MemoryDeployedState> = {};
+  const outputKeys = Object.keys(outputs);
+
+  for (const memoryName of memoryNames) {
+    const pascal = toPascalId(memoryName);
+    const idPrefix = `ApplicationMemory${pascal}IdOutput`;
+    const arnPrefix = `ApplicationMemory${pascal}ArnOutput`;
+
+    const idKey = outputKeys.find(k => k.startsWith(idPrefix));
+    const arnKey = outputKeys.find(k => k.startsWith(arnPrefix));
+
+    if (idKey && arnKey) {
+      memories[memoryName] = {
+        memoryId: outputs[idKey]!,
+        memoryArn: outputs[arnKey]!,
+      };
+    }
+  }
+
+  return memories;
+}
+
+export interface BuildDeployedStateOptions {
+  targetName: string;
+  stackName: string;
+  agents: Record<string, AgentCoreDeployedState>;
+  gateways: Record<string, { gatewayId: string; gatewayArn: string; gatewayUrl?: string }>;
+  existingState?: DeployedState;
+  identityKmsKeyArn?: string;
+  credentials?: Record<string, { credentialProviderArn: string; clientSecretArn?: string; callbackUrl?: string }>;
+  memories?: Record<string, MemoryDeployedState>;
+}
+
+/**
  * Build deployed state from stack outputs.
  */
-export function buildDeployedState(
-  targetName: string,
-  stackName: string,
-  agents: Record<string, AgentCoreDeployedState>,
-  gateways: Record<string, { gatewayId: string; gatewayArn: string; gatewayUrl?: string }>,
-  existingState?: DeployedState,
-  identityKmsKeyArn?: string,
-  credentials?: Record<string, { credentialProviderArn: string; clientSecretArn?: string; callbackUrl?: string }>
-): DeployedState {
+export function buildDeployedState(opts: BuildDeployedStateOptions): DeployedState {
+  const { targetName, stackName, agents, gateways, existingState, identityKmsKeyArn, credentials, memories } = opts;
   const targetState: TargetDeployedState = {
     resources: {
-      agents,
+      agents: Object.keys(agents).length > 0 ? agents : undefined,
+      memories: memories && Object.keys(memories).length > 0 ? memories : undefined,
       stackName,
       identityKmsKeyArn,
     },

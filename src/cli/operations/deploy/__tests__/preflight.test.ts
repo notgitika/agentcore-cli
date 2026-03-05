@@ -81,8 +81,26 @@ describe('validateProject', () => {
     mockReadDeployedState.mockRejectedValue(new Error('No deployed state'));
 
     await expect(validateProject()).rejects.toThrow(
-      'No agents or gateways defined in project. Add at least one agent with "agentcore add agent" or gateway with "agentcore add gateway" before deploying.'
+      'No resources defined in project. Add an agent with "agentcore add agent", a memory with "agentcore add memory", or a gateway with "agentcore add gateway" before deploying.'
     );
+  });
+
+  it('allows deploy when memories exist but no agents or gateways', async () => {
+    mockRequireConfigRoot.mockReturnValue('/project/agentcore');
+    mockValidate.mockReturnValue(undefined);
+    mockReadProjectSpec.mockResolvedValue({
+      name: 'test-project',
+      agents: [],
+      memories: [{ name: 'test-memory', strategies: [] }],
+    });
+    mockReadAWSDeploymentTargets.mockResolvedValue([]);
+    mockReadMcpSpec.mockRejectedValue(new Error('No mcp.json'));
+    mockValidateAwsCredentials.mockResolvedValue(undefined);
+
+    const result = await validateProject();
+
+    expect(result.projectSpec.name).toBe('test-project');
+    expect(result.isTeardownDeploy).toBe(false);
   });
 
   it('allows deploy when both agents and gateways exist', async () => {

@@ -141,7 +141,7 @@ interface AddFlowProps {
 
 export function AddFlow(props: AddFlowProps) {
   const { addAgent, reset: resetAgent } = useAddAgent();
-  const { agents, isLoading: isLoadingAgents, refresh: refreshAgents } = useAvailableAgents();
+  const { agents, refresh: refreshAgents } = useAvailableAgents();
   const [flow, setFlow] = useState<FlowState>({ name: 'select' });
 
   // In non-interactive mode, exit after success (but not while loading)
@@ -215,13 +215,7 @@ export function AddFlow(props: AddFlowProps) {
 
   if (flow.name === 'select') {
     // Show screen immediately - loading is instant for local files
-    return (
-      <AddScreen
-        onSelect={handleSelectResource}
-        onExit={props.onExit}
-        hasAgents={!isLoadingAgents && agents.length > 0}
-      />
-    );
+    return <AddScreen onSelect={handleSelectResource} onExit={props.onExit} />;
   }
 
   // Agent wizard - now uses AddAgentFlow with mode selection

@@ -1,6 +1,12 @@
 import { ConfigIO } from '../../../../lib';
 import type { CdkToolkitWrapper, DeployMessage, SwitchableIoHost } from '../../../cdk/toolkit-lib';
-import { buildDeployedState, getStackOutputs, parseAgentOutputs, parseGatewayOutputs } from '../../../cloudformation';
+import {
+  buildDeployedState,
+  getStackOutputs,
+  parseAgentOutputs,
+  parseGatewayOutputs,
+  parseMemoryOutputs,
+} from '../../../cloudformation';
 import { getErrorMessage, isChangesetInProgressError, isExpiredTokenError } from '../../../errors';
 import { ExecLogger } from '../../../logging';
 import { performStackTeardown } from '../../../operations/deploy';
@@ -192,27 +198,26 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     const configIO = new ConfigIO();
     const agentNames = ctx.projectSpec.agents?.map((a: { name: string }) => a.name) || [];
 
-    // Try to get outputs from CDK stream first (immediate, no API call)
-    let outputs = streamOutputsRef.current ?? {};
+    // CDK stream (I5900) only includes outputs without exportName.
+    // Per-resource outputs (memory, agent, gateway) use exportName, so we
+    // always need DescribeStacks for the full set. Merge stream outputs as a base.
+    let outputs = { ...(streamOutputsRef.current ?? {}) };
 
-    // Fallback to DescribeStacks if stream outputs not available
+    for (let attempt = 1; attempt <= MAX_OUTPUT_POLL_ATTEMPTS; attempt += 1) {
+      logger.log(`Polling stack outputs (attempt ${attempt}/${MAX_OUTPUT_POLL_ATTEMPTS})...`);
+      const apiOutputs = await getStackOutputs(target.region, currentStackName);
+      if (Object.keys(apiOutputs).length > 0) {
+        outputs = { ...outputs, ...apiOutputs };
+        logger.log(`Retrieved ${Object.keys(apiOutputs).length} output(s) from stack`);
+        break;
+      }
+      if (attempt < MAX_OUTPUT_POLL_ATTEMPTS) {
+        logger.log(`No outputs yet, retrying in ${OUTPUT_POLL_DELAY_MS / 1000}s...`);
+        await new Promise(resolve => setTimeout(resolve, OUTPUT_POLL_DELAY_MS));
+      }
+    }
     if (Object.keys(outputs).length === 0) {
-      logger.log('Stream outputs not available, falling back to DescribeStacks API');
-      for (let attempt = 1; attempt <= MAX_OUTPUT_POLL_ATTEMPTS; attempt += 1) {
-        logger.log(`Polling stack outputs (attempt ${attempt}/${MAX_OUTPUT_POLL_ATTEMPTS})...`);
-        outputs = await getStackOutputs(target.region, currentStackName);
-        if (Object.keys(outputs).length > 0) {
-          logger.log(`Retrieved ${Object.keys(outputs).length} output(s) from stack`);
-          break;
-        }
-        if (attempt < MAX_OUTPUT_POLL_ATTEMPTS) {
-          logger.log(`No outputs yet, retrying in ${OUTPUT_POLL_DELAY_MS / 1000}s...`);
-          await new Promise(resolve => setTimeout(resolve, OUTPUT_POLL_DELAY_MS));
-        }
-      }
-      if (Object.keys(outputs).length === 0) {
-        logger.log('Warning: Could not retrieve stack outputs after polling', 'warn');
-      }
+      throw new Error('Could not retrieve stack outputs after polling. Deployed state will not be recorded.');
     }
 
     const agents = parseAgentOutputs(outputs, agentNames, currentStackName);
@@ -241,19 +246,31 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
       logger.log(`Failed to read gateway configuration: ${getErrorMessage(error)}`, 'warn');
     }
 
+    // Parse memory outputs
+    const memoryNames = (ctx.projectSpec.memories ?? []).map((m: { name: string }) => m.name);
+    const memories = parseMemoryOutputs(outputs, memoryNames);
+
+    if (memoryNames.length > 0 && Object.keys(memories).length !== memoryNames.length) {
+      logger.log(
+        `Deployed-state missing outputs for ${memoryNames.length - Object.keys(memories).length} memory(ies).`,
+        'warn'
+      );
+    }
+
     // Expose outputs to UI
     setStackOutputs(outputs);
 
     const existingState = await configIO.readDeployedState().catch(() => undefined);
-    const deployedState = buildDeployedState(
-      target.name,
-      currentStackName,
+    const deployedState = buildDeployedState({
+      targetName: target.name,
+      stackName: currentStackName,
       agents,
       gateways,
       existingState,
       identityKmsKeyArn,
-      Object.keys(oauthCredentials).length > 0 ? oauthCredentials : undefined
-    );
+      memories,
+      credentials: Object.keys(oauthCredentials).length > 0 ? oauthCredentials : undefined,
+    });
     await configIO.writeDeployedState(deployedState);
 
     // Query gateway target sync statuses (non-blocking)

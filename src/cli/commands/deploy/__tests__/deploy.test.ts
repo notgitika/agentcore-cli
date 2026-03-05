@@ -52,12 +52,12 @@ describe('deploy without agents', () => {
     await rm(noAgentTestDir, { recursive: true, force: true });
   });
 
-  it('rejects deploy when no agents are defined', async () => {
+  it('rejects deploy when no resources are defined', async () => {
     const result = await runCLI(['deploy', '--json'], noAgentProjectDir);
     expect(result.exitCode).toBe(1);
     const json = JSON.parse(result.stdout);
     expect(json.success).toBe(false);
     expect(json.error).toBeDefined();
-    expect(json.error.toLowerCase()).toContain('no agents');
+    expect(json.error.toLowerCase()).toContain('no resources defined');
   });
 });

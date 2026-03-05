@@ -8,6 +8,7 @@ import {
   McpDeployedStateSchema,
   McpLambdaDeployedStateSchema,
   McpRuntimeDeployedStateSchema,
+  MemoryDeployedStateSchema,
   VpcConfigSchema,
   createValidatedDeployedStateSchema,
 } from '../deployed-state.js';
@@ -48,6 +49,30 @@ describe('AgentCoreDeployedStateSchema', () => {
 
   it('rejects missing required fields', () => {
     expect(AgentCoreDeployedStateSchema.safeParse({ runtimeId: 'rt-123' }).success).toBe(false);
+  });
+});
+
+describe('MemoryDeployedStateSchema', () => {
+  it('accepts valid memory state', () => {
+    expect(
+      MemoryDeployedStateSchema.safeParse({
+        memoryId: 'mem-123',
+        memoryArn: 'arn:aws:bedrock:us-east-1:123:memory/mem-123',
+      }).success
+    ).toBe(true);
+  });
+
+  it('rejects empty memoryId', () => {
+    expect(
+      MemoryDeployedStateSchema.safeParse({
+        memoryId: '',
+        memoryArn: 'arn:valid',
+      }).success
+    ).toBe(false);
+  });
+
+  it('rejects missing required fields', () => {
+    expect(MemoryDeployedStateSchema.safeParse({ memoryId: 'mem-123' }).success).toBe(false);
   });
 });
 
@@ -201,6 +226,18 @@ describe('DeployedResourceStateSchema', () => {
   it('accepts resource state with identityKmsKeyArn', () => {
     const result = DeployedResourceStateSchema.safeParse({
       identityKmsKeyArn: 'arn:aws:kms:us-east-1:123:key/abc',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts resource state with memories', () => {
+    const result = DeployedResourceStateSchema.safeParse({
+      memories: {
+        MyMemory: {
+          memoryId: 'mem-123',
+          memoryArn: 'arn:aws:bedrock:us-east-1:123:memory/mem-123',
+        },
+      },
     });
     expect(result.success).toBe(true);
   });

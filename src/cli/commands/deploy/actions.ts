@@ -2,7 +2,13 @@ import { ConfigIO, SecureCredentials } from '../../../lib';
 import type { DeployedState } from '../../../schema';
 import { validateAwsCredentials } from '../../aws/account';
 import { createSwitchableIoHost } from '../../cdk/toolkit-lib';
-import { buildDeployedState, getStackOutputs, parseAgentOutputs, parseGatewayOutputs } from '../../cloudformation';
+import {
+  buildDeployedState,
+  getStackOutputs,
+  parseAgentOutputs,
+  parseGatewayOutputs,
+  parseMemoryOutputs,
+} from '../../cloudformation';
 import { getErrorMessage } from '../../errors';
 import { ExecLogger } from '../../logging';
 import {
@@ -32,7 +38,8 @@ export interface ValidatedDeployOptions {
   onResourceEvent?: (message: string) => void;
 }
 
-const NEXT_STEPS = ['agentcore invoke', 'agentcore status'];
+const AGENT_NEXT_STEPS = ['agentcore invoke', 'agentcore status'];
+const MEMORY_ONLY_NEXT_STEPS = ['agentcore add agent', 'agentcore status'];
 
 export async function handleDeploy(options: ValidatedDeployOptions): Promise<DeployResult> {
   let toolkitWrapper = null;
@@ -355,6 +362,17 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     const agentNames = context.projectSpec.agents?.map(a => a.name) || [];
     const agents = parseAgentOutputs(outputs, agentNames, stackName);
 
+    // Parse memory outputs
+    const memoryNames = (context.projectSpec.memories ?? []).map(m => m.name);
+    const memories = parseMemoryOutputs(outputs, memoryNames);
+
+    if (memoryNames.length > 0 && Object.keys(memories).length !== memoryNames.length) {
+      logger.log(
+        `Deployed-state missing outputs for ${memoryNames.length - Object.keys(memories).length} memory(ies).`,
+        'warn'
+      );
+    }
+
     // Parse gateway outputs
     const gatewaySpecs =
       mcpSpec?.agentCoreGateways?.reduce(
@@ -367,15 +385,16 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     const gateways = parseGatewayOutputs(outputs, gatewaySpecs);
 
     const existingState = await configIO.readDeployedState().catch(() => undefined);
-    const deployedState = buildDeployedState(
-      target.name,
+    const deployedState = buildDeployedState({
+      targetName: target.name,
       stackName,
       agents,
       gateways,
       existingState,
       identityKmsKeyArn,
-      deployedCredentials
-    );
+      credentials: deployedCredentials,
+      memories,
+    });
     await configIO.writeDeployedState(deployedState);
 
     // Show gateway URLs and target sync status
@@ -404,7 +423,7 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       stackName,
       outputs,
       logPath: logger.getRelativeLogPath(),
-      nextSteps: NEXT_STEPS,
+      nextSteps: agentNames.length > 0 ? AGENT_NEXT_STEPS : MEMORY_ONLY_NEXT_STEPS,
     };
   } catch (err: unknown) {
     logger.log(getErrorMessage(err), 'error');

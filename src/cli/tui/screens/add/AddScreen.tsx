@@ -1,6 +1,5 @@
 import type { SelectableItem } from '../../components';
 import { SelectScreen } from '../../components';
-import { useMemo } from 'react';
 
 const ADD_RESOURCES = [
   { id: 'agent', title: 'Agent', description: 'New or existing agent code' },
@@ -10,32 +9,26 @@ const ADD_RESOURCES = [
   { id: 'gateway-target', title: 'Gateway Target', description: 'Extend agent capabilities' },
 ] as const;
 
+const ADD_RESOURCE_ITEMS: SelectableItem[] = ADD_RESOURCES.map(r => ({
+  ...r,
+  disabled: Boolean('disabled' in r && r.disabled),
+  description: r.description,
+}));
+
 export type AddResourceType = (typeof ADD_RESOURCES)[number]['id'];
 
 interface AddScreenProps {
   onSelect: (resourceType: AddResourceType) => void;
   onExit: () => void;
-  /** Whether at least one agent exists in the project */
-  hasAgents: boolean;
 }
 
-export function AddScreen({ onSelect, onExit, hasAgents }: AddScreenProps) {
-  const items: SelectableItem[] = useMemo(
-    () =>
-      ADD_RESOURCES.map(r => ({
-        ...r,
-        disabled: Boolean('disabled' in r && r.disabled) || (r.id === 'memory' && !hasAgents),
-        description: r.id === 'memory' && !hasAgents ? 'Add an agent first' : r.description,
-      })),
-    [hasAgents]
-  );
-
+export function AddScreen({ onSelect, onExit }: AddScreenProps) {
   const isDisabled = (item: SelectableItem) => item.disabled ?? false;
 
   return (
     <SelectScreen
       title="Add Resource"
-      items={items}
+      items={ADD_RESOURCE_ITEMS}
       onSelect={item => onSelect(item.id as AddResourceType)}
       onExit={onExit}
       isDisabled={isDisabled}
