@@ -1,0 +1,136 @@
+name: Sync from Public Repo
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours
+  workflow_dispatch:  # Manual trigger via Actions tab
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch public main
+        run: |
+          git remote add public https://github.com/aws/agentcore-cli.git
+          git fetch public main
+
+      - name: Sync all private branches with public/main
+        run: |
+          synced=()
+          conflicts=()
+          skipped=()
+
+          for branch in $(git branch -r --list 'origin/*' | sed 's|^ *origin/||'); do
+            # Skip HEAD pointer and previous sync-conflict branches
+            if [ "$branch" = "HEAD" ] || [[ "$branch" == *"->"* ]] || [[ "$branch" == sync-conflict-* ]]; then
+              continue
+            fi
+
+            echo "=== Processing branch: $branch ==="
+
+            git checkout $branch
+            git reset --hard origin/$branch
+
+            # Check if public/main is already merged into this branch
+            if git merge-base --is-ancestor public/main HEAD; then
+              echo "✅ $branch is already up to date with public/main"
+              synced+=("$branch (already up to date)")
+              continue
+            fi
+
+            # Try to merge public/main
+            if git merge public/main -m "chore: sync $branch with public/main"; then
+              git push origin $branch
+              synced+=("$branch")
+              echo "✅ $branch synced successfully"
+            else
+              echo "⚠️  Conflict detected in $branch"
+
+              # Capture conflicted files before aborting
+              conflicted_files=$(git diff --name-only --diff-filter=U 2>/dev/null || echo "Unable to determine conflicted files")
+              git merge --abort
+
+              # Check if a sync PR already exists for this branch
+              existing_pr=$(gh pr list --base "$branch" --search "Sync public/main" --state open --json number --jq '.[0].number' 2>/dev/null || echo "")
+
+              if [ -n "$existing_pr" ]; then
+                echo "ℹ️  PR #$existing_pr already exists for $branch, skipping"
+                skipped+=("$branch (existing PR #$existing_pr)")
+                continue
+              fi
+
+              conflict_branch="sync-conflict-$branch-$(date +%Y%m%d-%H%M%S)"
+              git checkout -b "$conflict_branch"
+
+              git merge public/main --no-commit --no-ff || true
+              git add -A
+              git commit -m "chore: sync $branch with public/main (conflicts present)
+
+          This automated sync detected merge conflicts that require manual resolution.
+
+          Source: public/main (https://github.com/aws/agentcore-cli)
+          Target: $branch
+
+          Please resolve conflicts and merge this PR." || true
+
+              git push origin "$conflict_branch"
+
+              gh pr create \
+                --title "🔀 [Sync Conflict] Merge public/main → $branch" \
+                --body "## Automated Sync Conflict
+
+          This PR was automatically created because merging \`public/main\` into \`$branch\` encountered conflicts.
+
+          **Source:** \`main\` from [aws/agentcore-cli](https://github.com/aws/agentcore-cli)
+          **Target:** \`$branch\`
+
+          ### Action Required
+          1. \`git fetch origin && git checkout $conflict_branch\`
+          2. Resolve merge conflicts
+          3. \`git add . && git commit\`
+          4. \`git push origin $conflict_branch\`
+          5. Merge this PR
+
+          ### Files with Conflicts
+          \`\`\`
+          $conflicted_files
+          \`\`\`" \
+                --base "$branch" \
+                --head "$conflict_branch" || echo "⚠️  Failed to create PR for $branch"
+
+              conflicts+=("$branch")
+              git checkout "$branch"
+            fi
+          done
+
+          # Summary
+          echo ""
+          echo "=== Sync Summary ==="
+          echo "✅ Synced: ${#synced[@]} branches"
+          echo "⚠️  Conflicts: ${#conflicts[@]} branches"
+          echo "⏭️  Skipped: ${#skipped[@]} branches"
+
+          if [ ${#conflicts[@]} -gt 0 ]; then
+            echo "Branches with conflicts (PRs created):"
+            printf '  - %s\n' "${conflicts[@]}"
+          fi
+          if [ ${#skipped[@]} -gt 0 ]; then
+            echo "Branches skipped (existing PRs):"
+            printf '  - %s\n' "${skipped[@]}"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
