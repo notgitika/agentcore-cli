@@ -2,8 +2,8 @@ name: Sync from Public Repo
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # Every 6 hours
-  workflow_dispatch:  # Manual trigger via Actions tab
+    - cron: '0 */6 * * *' # Every 6 hours
+  workflow_dispatch: # Manual trigger via Actions tab
 
 permissions:
   contents: write
