@@ -8,6 +8,7 @@ import type {
 } from '../../../schema';
 import { getAgentRuntimeStatus } from '../../aws';
 import { getErrorMessage } from '../../errors';
+import { ExecLogger } from '../../logging';
 import type { ResourceDeploymentState } from './constants';
 
 export type { ResourceDeploymentState };
@@ -28,6 +29,7 @@ export interface ProjectStatusResult {
   targetRegion?: string;
   resources: ResourceStatusEntry[];
   error?: string;
+  logPath?: string;
 }
 
 export interface StatusContext {
@@ -43,6 +45,7 @@ export interface RuntimeLookupResult {
   runtimeId?: string;
   runtimeStatus?: string;
   error?: string;
+  logPath?: string;
 }
 
 /**
@@ -156,61 +159,102 @@ export async function handleProjectStatus(
   context: StatusContext,
   options: { targetName?: string } = {}
 ): Promise<ProjectStatusResult> {
+  const logger = new ExecLogger({ command: 'status' });
   const { project, deployedState, awsTargets, mcpSpec } = context;
 
+  logger.startStep('Resolve target');
   const deployedTargetNames = Object.keys(deployedState.targets);
   const targetNames = deployedTargetNames.length > 0 ? deployedTargetNames : awsTargets.map(t => t.name);
-
   const selectedTargetName = options.targetName ?? targetNames[0];
 
+  logger.log(`Project: ${project.name}`);
+  logger.log(`Available targets: ${targetNames.length > 0 ? targetNames.join(', ') : '(none)'}`);
+  logger.log(`Selected target: ${selectedTargetName ?? '(none)'}`);
+
   if (options.targetName && !targetNames.includes(options.targetName)) {
+    const error =
+      targetNames.length > 0
+        ? `Target '${options.targetName}' not found. Available: ${targetNames.join(', ')}`
+        : `Target '${options.targetName}' not found. No targets configured.`;
+    logger.endStep('error', error);
+    logger.finalize(false);
     return {
       success: false,
       projectName: project.name,
       targetName: options.targetName,
       resources: [],
-      error:
-        targetNames.length > 0
-          ? `Target '${options.targetName}' not found. Available: ${targetNames.join(', ')}`
-          : `Target '${options.targetName}' not found. No targets configured.`,
+      error,
+      logPath: logger.getRelativeLogPath(),
     };
   }
+  logger.endStep('success');
 
+  logger.startStep('Compute resource statuses');
   const targetConfig = selectedTargetName ? awsTargets.find(t => t.name === selectedTargetName) : undefined;
   const targetResources = selectedTargetName ? deployedState.targets[selectedTargetName]?.resources : undefined;
 
   const resources = computeResourceStatuses(project, targetResources, mcpSpec);
 
+  const deployed = resources.filter(r => r.deploymentState === 'deployed').length;
+  const localOnly = resources.filter(r => r.deploymentState === 'local-only').length;
+  const pendingRemoval = resources.filter(r => r.deploymentState === 'pending-removal').length;
+  logger.log(
+    `Resources: ${resources.length} total (${deployed} deployed, ${localOnly} local-only, ${pendingRemoval} pending-removal)`
+  );
+  for (const entry of resources) {
+    logger.log(
+      `  ${entry.resourceType}/${entry.name}: ${entry.deploymentState}${entry.identifier ? ` [${entry.identifier}]` : ''}`
+    );
+  }
+  logger.endStep('success');
+
   // Enrich deployed agents with live runtime status (parallel, entries replaced by index)
   if (targetConfig) {
     const agentStates = targetResources?.agents ?? {};
-
-    await Promise.all(
-      resources.map(async (entry, i) => {
-        if (entry.resourceType !== 'agent' || entry.deploymentState !== 'deployed') return;
-
-        const agentState = agentStates[entry.name];
-        if (!agentState) return;
-
-        try {
-          const runtimeStatus = await getAgentRuntimeStatus({
-            region: targetConfig.region,
-            runtimeId: agentState.runtimeId,
-          });
-          resources[i] = { ...entry, detail: runtimeStatus.status };
-        } catch (error) {
-          resources[i] = { ...entry, error: getErrorMessage(error) };
-        }
-      })
+    const deployedAgents = resources.filter(
+      (e, _i) => e.resourceType === 'agent' && e.deploymentState === 'deployed' && agentStates[e.name]
     );
+
+    if (deployedAgents.length > 0) {
+      logger.startStep(
+        `Fetch runtime status (${deployedAgents.length} agent${deployedAgents.length !== 1 ? 's' : ''})`
+      );
+
+      await Promise.all(
+        resources.map(async (entry, i) => {
+          if (entry.resourceType !== 'agent' || entry.deploymentState !== 'deployed') return;
+
+          const agentState = agentStates[entry.name];
+          if (!agentState) return;
+
+          try {
+            const runtimeStatus = await getAgentRuntimeStatus({
+              region: targetConfig.region,
+              runtimeId: agentState.runtimeId,
+            });
+            resources[i] = { ...entry, detail: runtimeStatus.status };
+            logger.log(`  ${entry.name}: ${runtimeStatus.status} (${agentState.runtimeId})`);
+          } catch (error) {
+            const errorMsg = getErrorMessage(error);
+            resources[i] = { ...entry, error: errorMsg };
+            logger.log(`  ${entry.name}: ERROR - ${errorMsg}`, 'error');
+          }
+        })
+      );
+
+      const hasErrors = resources.some(r => r.error);
+      logger.endStep(hasErrors ? 'error' : 'success');
+    }
   }
 
+  logger.finalize(true);
   return {
     success: true,
     projectName: project.name,
     targetName: selectedTargetName ?? '',
     targetRegion: targetConfig?.region,
     resources,
+    logPath: logger.getRelativeLogPath(),
   };
 }
 
@@ -218,38 +262,61 @@ export async function handleRuntimeLookup(
   context: StatusContext,
   options: { agentRuntimeId: string; targetName?: string }
 ): Promise<RuntimeLookupResult> {
+  const logger = new ExecLogger({ command: 'status' });
   const { awsTargets } = context;
 
+  logger.startStep('Resolve target');
   const targetNames = awsTargets.map(target => target.name);
   if (targetNames.length === 0) {
-    return { success: false, error: 'No deployment targets found. Run `agentcore create` first.' };
+    const error = 'No deployment targets found. Run `agentcore create` first.';
+    logger.endStep('error', error);
+    logger.finalize(false);
+    return { success: false, error, logPath: logger.getRelativeLogPath() };
   }
 
   const selectedTargetName = options.targetName ?? targetNames[0]!;
 
   if (options.targetName && !targetNames.includes(options.targetName)) {
-    return { success: false, error: `Target '${options.targetName}' not found. Available: ${targetNames.join(', ')}` };
+    const error = `Target '${options.targetName}' not found. Available: ${targetNames.join(', ')}`;
+    logger.endStep('error', error);
+    logger.finalize(false);
+    return { success: false, error, logPath: logger.getRelativeLogPath() };
   }
 
   const targetConfig = awsTargets.find(target => target.name === selectedTargetName);
 
   if (!targetConfig) {
-    return { success: false, error: `Target config '${selectedTargetName}' not found in aws-targets` };
+    const error = `Target config '${selectedTargetName}' not found in aws-targets`;
+    logger.endStep('error', error);
+    logger.finalize(false);
+    return { success: false, error, logPath: logger.getRelativeLogPath() };
   }
 
+  logger.log(`Target: ${selectedTargetName} (${targetConfig.region})`);
+  logger.endStep('success');
+
+  logger.startStep(`Lookup runtime ${options.agentRuntimeId}`);
   try {
     const runtimeStatus = await getAgentRuntimeStatus({
       region: targetConfig.region,
       runtimeId: options.agentRuntimeId,
     });
 
+    logger.log(`Runtime: ${runtimeStatus.runtimeId} — ${runtimeStatus.status}`);
+    logger.endStep('success');
+    logger.finalize(true);
+
     return {
       success: true,
       targetName: selectedTargetName,
       runtimeId: runtimeStatus.runtimeId,
       runtimeStatus: runtimeStatus.status,
+      logPath: logger.getRelativeLogPath(),
     };
   } catch (error) {
-    return { success: false, error: getErrorMessage(error) };
+    const errorMsg = getErrorMessage(error);
+    logger.endStep('error', errorMsg);
+    logger.finalize(false);
+    return { success: false, error: errorMsg, logPath: logger.getRelativeLogPath() };
   }
 }

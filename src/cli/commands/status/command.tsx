@@ -1,10 +1,44 @@
 import { getErrorMessage } from '../../errors';
 import { COMMAND_DESCRIPTIONS } from '../../tui/copy';
 import { requireProject } from '../../tui/guards';
+import type { ResourceStatusEntry } from './action';
 import { handleProjectStatus, handleRuntimeLookup, loadStatusConfig } from './action';
 import { DEPLOYMENT_STATE_COLORS, DEPLOYMENT_STATE_LABELS } from './constants';
 import type { Command } from '@commander-js/extra-typings';
 import { Box, Text, render } from 'ink';
+
+const VALID_RESOURCE_TYPES = ['agent', 'memory', 'credential', 'gateway'] as const;
+const VALID_STATES = ['deployed', 'local-only', 'pending-removal'] as const;
+
+interface StatusCliOptions {
+  agentRuntimeId?: string;
+  target?: string;
+  type?: string;
+  state?: string;
+  agent?: string;
+  json?: boolean;
+}
+
+function filterResources(
+  resources: ResourceStatusEntry[],
+  options: { type?: string; state?: string; agent?: string }
+): ResourceStatusEntry[] {
+  let filtered = resources;
+
+  if (options.type) {
+    filtered = filtered.filter(r => r.resourceType === options.type);
+  }
+
+  if (options.state) {
+    filtered = filtered.filter(r => r.deploymentState === options.state);
+  }
+
+  if (options.agent) {
+    filtered = filtered.filter(r => r.resourceType !== 'agent' || r.name === options.agent);
+  }
+
+  return filtered;
+}
 
 export const registerStatus = (program: Command) => {
   program
@@ -13,8 +47,32 @@ export const registerStatus = (program: Command) => {
     .description(COMMAND_DESCRIPTIONS.status)
     .option('--agent-runtime-id <id>', 'Look up a specific agent runtime by ID')
     .option('--target <name>', 'Select deployment target')
-    .action(async (cliOptions: { agentRuntimeId?: string; target?: string }) => {
+    .option('--type <type>', 'Filter by resource type (agent, memory, credential, gateway)')
+    .option('--state <state>', 'Filter by deployment state (deployed, local-only, pending-removal)')
+    .option('--agent <name>', 'Filter to a specific agent')
+    .option('--json', 'Output as JSON')
+    .action(async (cliOptions: StatusCliOptions) => {
       requireProject();
+
+      // Validate --type
+      if (cliOptions.type && !(VALID_RESOURCE_TYPES as readonly string[]).includes(cliOptions.type)) {
+        render(
+          <Text color="red">
+            Invalid resource type &apos;{cliOptions.type}&apos;. Valid types: {VALID_RESOURCE_TYPES.join(', ')}
+          </Text>
+        );
+        return;
+      }
+
+      // Validate --state
+      if (cliOptions.state && !(VALID_STATES as readonly string[]).includes(cliOptions.state)) {
+        render(
+          <Text color="red">
+            Invalid state &apos;{cliOptions.state}&apos;. Valid states: {VALID_STATES.join(', ')}
+          </Text>
+        );
+        return;
+      }
 
       try {
         const context = await loadStatusConfig();
@@ -25,6 +83,11 @@ export const registerStatus = (program: Command) => {
             agentRuntimeId: cliOptions.agentRuntimeId,
             targetName: cliOptions.target,
           });
+
+          if (cliOptions.json) {
+            console.log(JSON.stringify(result, null, 2));
+            return;
+          }
 
           if (!result.success) {
             render(<Text color="red">{result.error}</Text>);
@@ -47,15 +110,22 @@ export const registerStatus = (program: Command) => {
           targetName: cliOptions.target,
         });
 
+        if (cliOptions.json) {
+          const filtered = filterResources(result.resources, cliOptions);
+          console.log(JSON.stringify({ ...result, resources: filtered }, null, 2));
+          return;
+        }
+
         if (!result.success) {
           render(<Text color="red">{result.error}</Text>);
           return;
         }
 
-        const agents = result.resources.filter(r => r.resourceType === 'agent');
-        const credentials = result.resources.filter(r => r.resourceType === 'credential');
-        const memories = result.resources.filter(r => r.resourceType === 'memory');
-        const gateways = result.resources.filter(r => r.resourceType === 'gateway');
+        const filtered = filterResources(result.resources, cliOptions);
+        const agents = filtered.filter(r => r.resourceType === 'agent');
+        const credentials = filtered.filter(r => r.resourceType === 'credential');
+        const memories = filtered.filter(r => r.resourceType === 'memory');
+        const gateways = filtered.filter(r => r.resourceType === 'gateway');
 
         render(
           <Box flexDirection="column">
@@ -68,16 +138,7 @@ export const registerStatus = (program: Command) => {
               <Box flexDirection="column" marginTop={1}>
                 <Text bold>Agents</Text>
                 {agents.map(entry => (
-                  <Text key={`${entry.resourceType}-${entry.name}`}>
-                    {'  '}
-                    {entry.name}:{' '}
-                    <Text color={DEPLOYMENT_STATE_COLORS[entry.deploymentState] ?? 'gray'}>
-                      {DEPLOYMENT_STATE_LABELS[entry.deploymentState] ?? entry.deploymentState}
-                    </Text>
-                    {entry.detail && <Text> - Runtime: {entry.detail}</Text>}
-                    {entry.identifier && <Text dimColor> ({entry.identifier})</Text>}
-                    {entry.error && <Text color="red"> - Error: {entry.error}</Text>}
-                  </Text>
+                  <ResourceEntry key={`${entry.resourceType}-${entry.name}`} entry={entry} showRuntime />
                 ))}
               </Box>
             )}
@@ -86,14 +147,7 @@ export const registerStatus = (program: Command) => {
               <Box flexDirection="column" marginTop={1}>
                 <Text bold>Memories</Text>
                 {memories.map(entry => (
-                  <Text key={`${entry.resourceType}-${entry.name}`}>
-                    {'  '}
-                    {entry.name}:{' '}
-                    <Text color={DEPLOYMENT_STATE_COLORS[entry.deploymentState] ?? 'gray'}>
-                      {DEPLOYMENT_STATE_LABELS[entry.deploymentState] ?? entry.deploymentState}
-                    </Text>
-                    {entry.detail && <Text dimColor> ({entry.detail})</Text>}
-                  </Text>
+                  <ResourceEntry key={`${entry.resourceType}-${entry.name}`} entry={entry} />
                 ))}
               </Box>
             )}
@@ -102,15 +156,7 @@ export const registerStatus = (program: Command) => {
               <Box flexDirection="column" marginTop={1}>
                 <Text bold>Credentials</Text>
                 {credentials.map(entry => (
-                  <Text key={`${entry.resourceType}-${entry.name}`}>
-                    {'  '}
-                    {entry.name}:{' '}
-                    <Text color={DEPLOYMENT_STATE_COLORS[entry.deploymentState] ?? 'gray'}>
-                      {DEPLOYMENT_STATE_LABELS[entry.deploymentState] ?? entry.deploymentState}
-                    </Text>
-                    {entry.detail && <Text dimColor> ({entry.detail})</Text>}
-                    {entry.identifier && <Text dimColor> ({entry.identifier})</Text>}
-                  </Text>
+                  <ResourceEntry key={`${entry.resourceType}-${entry.name}`} entry={entry} />
                 ))}
               </Box>
             )}
@@ -119,20 +165,12 @@ export const registerStatus = (program: Command) => {
               <Box flexDirection="column" marginTop={1}>
                 <Text bold>Gateways</Text>
                 {gateways.map(entry => (
-                  <Text key={`${entry.resourceType}-${entry.name}`}>
-                    {'  '}
-                    {entry.name}:{' '}
-                    <Text color={DEPLOYMENT_STATE_COLORS[entry.deploymentState] ?? 'gray'}>
-                      {DEPLOYMENT_STATE_LABELS[entry.deploymentState] ?? entry.deploymentState}
-                    </Text>
-                    {entry.detail && <Text dimColor> ({entry.detail})</Text>}
-                    {entry.identifier && <Text dimColor> ({entry.identifier})</Text>}
-                  </Text>
+                  <ResourceEntry key={`${entry.resourceType}-${entry.name}`} entry={entry} />
                 ))}
               </Box>
             )}
 
-            {result.resources.length === 0 && <Text dimColor>No resources configured.</Text>}
+            {filtered.length === 0 && <Text dimColor>No resources match the given filters.</Text>}
           </Box>
         );
       } catch (error) {
@@ -141,3 +179,19 @@ export const registerStatus = (program: Command) => {
       }
     });
 };
+
+function ResourceEntry({ entry, showRuntime }: { entry: ResourceStatusEntry; showRuntime?: boolean }) {
+  return (
+    <Text>
+      {'  '}
+      {entry.name}:{' '}
+      <Text color={DEPLOYMENT_STATE_COLORS[entry.deploymentState] ?? 'gray'}>
+        {DEPLOYMENT_STATE_LABELS[entry.deploymentState] ?? entry.deploymentState}
+      </Text>
+      {entry.detail &&
+        (showRuntime ? <Text> - Runtime: {entry.detail}</Text> : <Text dimColor> ({entry.detail})</Text>)}
+      {entry.identifier && <Text dimColor> ({entry.identifier})</Text>}
+      {entry.error && <Text color="red"> - Error: {entry.error}</Text>}
+    </Text>
+  );
+}
