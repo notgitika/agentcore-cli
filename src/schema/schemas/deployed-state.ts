@@ -108,11 +108,22 @@ export const ExternallyManagedStateSchema = z.object({
 export type ExternallyManagedState = z.infer<typeof ExternallyManagedStateSchema>;
 
 // ============================================================================
+// Memory Deployed State
+// ============================================================================
+
+export const MemoryDeployedStateSchema = z.object({
+  memoryId: z.string().min(1),
+  memoryArn: z.string().min(1),
+});
+
+export type MemoryDeployedState = z.infer<typeof MemoryDeployedStateSchema>;
+
+// ============================================================================
 // Credential Deployed State
 // ============================================================================
 
 export const CredentialDeployedStateSchema = z.object({
-  credentialProviderArn: z.string(),
+  credentialProviderArn: z.string().min(1),
   clientSecretArn: z.string().optional(),
   callbackUrl: z.string().optional(),
 });

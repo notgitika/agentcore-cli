@@ -1,2 +1,10 @@
 export { registerStatus } from './command';
-export { handleStatus, loadStatusConfig, type StatusContext, type StatusResult } from './action';
+export {
+  handleProjectStatus,
+  handleRuntimeLookup,
+  loadStatusConfig,
+  type StatusContext,
+  type ProjectStatusResult,
+  type ResourceStatusEntry,
+  type ResourceDeploymentState,
+} from './action';

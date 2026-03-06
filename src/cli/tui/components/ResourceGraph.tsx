@@ -1,12 +1,13 @@
 import type {
-  AgentCoreDeployedState,
   AgentCoreGatewayTarget,
   AgentCoreMcpRuntimeTool,
   AgentCoreMcpSpec,
   AgentCoreProjectSpec,
 } from '../../../schema';
+import type { ResourceStatusEntry } from '../../commands/status/action';
+import { DEPLOYMENT_STATE_COLORS, DEPLOYMENT_STATE_LABELS } from '../../commands/status/constants';
 import { Box, Text } from 'ink';
-import React from 'react';
+import React, { useMemo } from 'react';
 
 const ICONS = {
   agent: '●',
@@ -17,17 +18,11 @@ const ICONS = {
   runtime: '▶',
 } as const;
 
-export interface AgentStatusInfo {
-  runtimeStatus?: string;
-  error?: string;
-}
-
 interface ResourceGraphProps {
   project: AgentCoreProjectSpec;
   mcp?: AgentCoreMcpSpec & { unassignedTargets?: AgentCoreGatewayTarget[] };
   agentName?: string;
-  agentStatuses?: Record<string, AgentStatusInfo>;
-  deployedAgents?: Record<string, AgentCoreDeployedState>;
+  resourceStatuses?: ResourceStatusEntry[];
 }
 
 function getStatusColor(status?: string): string {
@@ -47,6 +42,15 @@ function getStatusColor(status?: string): string {
   }
 }
 
+function getDeploymentBadge(
+  state: ResourceStatusEntry['deploymentState']
+): { text: string; color: string } | undefined {
+  if (state === 'pending-removal') return undefined;
+  const label = DEPLOYMENT_STATE_LABELS[state];
+  const color = DEPLOYMENT_STATE_COLORS[state];
+  return label && color ? { text: label, color } : undefined;
+}
+
 function SectionHeader({ children }: { children: string }) {
   return (
     <Box marginTop={1}>
@@ -62,6 +66,8 @@ function ResourceRow({
   detail,
   status,
   statusColor,
+  deploymentState,
+  identifier,
 }: {
   icon: string;
   color: string;
@@ -69,24 +75,30 @@ function ResourceRow({
   detail?: string;
   status?: string;
   statusColor?: string;
+  deploymentState?: ResourceStatusEntry['deploymentState'];
+  identifier?: string;
 }) {
+  const badge = deploymentState ? getDeploymentBadge(deploymentState) : undefined;
+
   return (
-    <Text>
-      {'  '}
-      <Text color={color}>{icon}</Text> {name}
-      {detail && <Text color="gray"> {detail}</Text>}
-      {status && <Text color={statusColor ?? 'gray'}> [{status}]</Text>}
-    </Text>
+    <Box flexDirection="column">
+      <Text>
+        {'  '}
+        <Text color={color}>{icon}</Text> {name}
+        {detail && <Text color="gray"> {detail}</Text>}
+        {status && <Text color={statusColor ?? 'gray'}> [{status}]</Text>}
+        {badge && <Text color={badge.color}> [{badge.text}]</Text>}
+      </Text>
+      {identifier && (
+        <Text dimColor>
+          {'      '}ID: {identifier}
+        </Text>
+      )}
+    </Box>
   );
 }
 
-export function ResourceGraph({
-  project,
-  mcp,
-  agentName,
-  agentStatuses,
-  deployedAgents: _deployedAgents,
-}: ResourceGraphProps) {
+export function ResourceGraph({ project, mcp, agentName, resourceStatuses }: ResourceGraphProps) {
   const allAgents = project.agents ?? [];
   const agents = agentName ? allAgents.filter(a => a.name === agentName) : allAgents;
   const memories = project.memories ?? [];
@@ -95,37 +107,59 @@ export function ResourceGraph({
   const mcpRuntimeTools = mcp?.mcpRuntimeTools ?? [];
   const unassignedTargets = mcp?.unassignedTargets ?? [];
 
+  // Build lookup map and collect pending-removal resources in a single pass
+  const { statusMap, pendingRemovals } = useMemo(() => {
+    const map = new Map<string, ResourceStatusEntry>();
+    const pending: ResourceStatusEntry[] = [];
+
+    if (resourceStatuses) {
+      for (const entry of resourceStatuses) {
+        map.set(`${entry.resourceType}:${entry.name}`, entry);
+        if (entry.deploymentState === 'pending-removal') {
+          pending.push(entry);
+        }
+      }
+    }
+
+    return { statusMap: map, pendingRemovals: pending };
+  }, [resourceStatuses]);
+
   const hasContent =
     agents.length > 0 ||
     memories.length > 0 ||
     credentials.length > 0 ||
     gateways.length > 0 ||
     mcpRuntimeTools.length > 0 ||
-    unassignedTargets.length > 0;
+    unassignedTargets.length > 0 ||
+    pendingRemovals.length > 0;
 
   return (
     <Box flexDirection="column">
-      {/* Project name */}
-      <Text bold color="cyan">
-        {project.name}
-      </Text>
+      {/* Project name — only when not embedded in a screen with its own header */}
+      {!resourceStatuses && (
+        <Text bold color="cyan">
+          {project.name}
+        </Text>
+      )}
 
       {/* Agents */}
       {agents.length > 0 && (
         <Box flexDirection="column">
           <SectionHeader>Agents</SectionHeader>
           {agents.map(agent => {
-            const statusInfo = agentStatuses?.[agent.name];
-            const status = statusInfo?.error ? 'error' : statusInfo?.runtimeStatus;
-            const color = statusInfo?.error ? 'red' : getStatusColor(status);
+            const rsEntry = statusMap.get(`agent:${agent.name}`);
+            const runtimeStatus = rsEntry?.error ? 'error' : rsEntry?.detail;
+            const runtimeStatusColor = rsEntry?.error ? 'red' : getStatusColor(runtimeStatus);
             return (
               <ResourceRow
                 key={agent.name}
                 icon={ICONS.agent}
                 color="green"
                 name={agent.name}
-                status={status}
-                statusColor={color}
+                status={runtimeStatus}
+                statusColor={runtimeStatusColor}
+                deploymentState={rsEntry?.deploymentState}
+                identifier={rsEntry?.identifier}
               />
             );
           })}
@@ -138,8 +172,17 @@ export function ResourceGraph({
           <SectionHeader>Memories</SectionHeader>
           {memories.map(memory => {
             const strategies = memory.strategies.map(s => s.type).join(', ');
+            const rsEntry = statusMap.get(`memory:${memory.name}`);
             return (
-              <ResourceRow key={memory.name} icon={ICONS.memory} color="blue" name={memory.name} detail={strategies} />
+              <ResourceRow
+                key={memory.name}
+                icon={ICONS.memory}
+                color="blue"
+                name={memory.name}
+                detail={rsEntry?.detail ?? strategies}
+                deploymentState={rsEntry?.deploymentState}
+                identifier={rsEntry?.identifier}
+              />
             );
           })}
         </Box>
@@ -149,13 +192,35 @@ export function ResourceGraph({
       {credentials.length > 0 && (
         <Box flexDirection="column">
           <SectionHeader>Credentials</SectionHeader>
-          {credentials.map(credential => (
+          {credentials.map(credential => {
+            const rsEntry = statusMap.get(`credential:${credential.name}`);
+            return (
+              <ResourceRow
+                key={credential.name}
+                icon={ICONS.credential}
+                color="yellow"
+                name={credential.name}
+                detail={rsEntry?.detail ?? credential.type.replace('CredentialProvider', '')}
+                deploymentState={rsEntry?.deploymentState}
+                identifier={rsEntry?.identifier}
+              />
+            );
+          })}
+        </Box>
+      )}
+
+      {/* Removed locally — still deployed in AWS, will be torn down on next deploy */}
+      {pendingRemovals.length > 0 && (
+        <Box flexDirection="column">
+          <SectionHeader>Removed Locally</SectionHeader>
+          <Text color="gray"> Still deployed — run `deploy` to tear down</Text>
+          {pendingRemovals.map(entry => (
             <ResourceRow
-              key={credential.name}
-              icon={ICONS.credential}
-              color="yellow"
-              name={credential.name}
-              detail={credential.type.replace('CredentialProvider', '')}
+              key={`removed-${entry.resourceType}-${entry.name}`}
+              icon={ICONS[entry.resourceType]}
+              color="red"
+              name={entry.name}
+              identifier={entry.identifier}
             />
           ))}
         </Box>
@@ -167,14 +232,16 @@ export function ResourceGraph({
           <SectionHeader>Gateways</SectionHeader>
           {gateways.map(gateway => {
             const targets = gateway.targets ?? [];
-            const tools = targets.flatMap(t => t.toolDefinitions ?? []);
+            const rsEntry = statusMap.get(`gateway:${gateway.name}`);
             return (
               <Box key={gateway.name} flexDirection="column">
                 <ResourceRow
                   icon={ICONS.gateway}
                   color="magenta"
                   name={gateway.name}
-                  detail={tools.length > 0 ? `${tools.length} tools` : undefined}
+                  detail={rsEntry?.detail}
+                  deploymentState={rsEntry?.deploymentState}
+                  identifier={rsEntry?.identifier}
                 />
                 {targets.map(target => {
                   const displayText =
@@ -233,8 +300,20 @@ export function ResourceGraph({
         <Text>
           <Text color="green">{ICONS.agent}</Text> agent{'  '}
           <Text color="blue">{ICONS.memory}</Text> memory{'  '}
-          <Text color="yellow">{ICONS.credential}</Text> credential
+          <Text color="yellow">{ICONS.credential}</Text> credential{'  '}
+          <Text color="magenta">{ICONS.gateway}</Text> gateway
         </Text>
+        {resourceStatuses && resourceStatuses.length > 0 && (
+          <Box flexDirection="column" marginTop={1}>
+            <Text>
+              <Text color="green">[Deployed]</Text>
+              <Text color="gray"> live in AWS</Text>
+              {'  '}
+              <Text color="yellow">[Local only]</Text>
+              <Text color="gray"> not yet deployed</Text>
+            </Text>
+          </Box>
+        )}
       </Box>
     </Box>
   );

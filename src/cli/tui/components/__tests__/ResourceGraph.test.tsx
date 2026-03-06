@@ -1,4 +1,5 @@
 import type { AgentCoreMcpSpec, AgentCoreProjectSpec } from '../../../../schema/index.js';
+import type { ResourceStatusEntry } from '../../../commands/status/action.js';
 import { ResourceGraph } from '../ResourceGraph.js';
 import { render } from 'ink-testing-library';
 import React from 'react';
@@ -74,33 +75,37 @@ describe('ResourceGraph', () => {
     expect(lastFrame()).not.toContain('agent-b');
   });
 
-  it('renders agent status when provided', () => {
+  it('renders agent runtime status from resourceStatuses', () => {
     const project = {
       ...baseProject,
       agents: [{ name: 'my-agent' }],
     } as unknown as AgentCoreProjectSpec;
 
-    const { lastFrame } = render(
-      <ResourceGraph project={project} agentStatuses={{ 'my-agent': { runtimeStatus: 'READY' } }} />
-    );
+    const resourceStatuses: ResourceStatusEntry[] = [
+      { resourceType: 'agent', name: 'my-agent', deploymentState: 'deployed', detail: 'READY' },
+    ];
+
+    const { lastFrame } = render(<ResourceGraph project={project} resourceStatuses={resourceStatuses} />);
 
     expect(lastFrame()).toContain('READY');
   });
 
-  it('renders agent error status', () => {
+  it('renders agent error status from resourceStatuses', () => {
     const project = {
       ...baseProject,
       agents: [{ name: 'my-agent' }],
     } as unknown as AgentCoreProjectSpec;
 
-    const { lastFrame } = render(
-      <ResourceGraph project={project} agentStatuses={{ 'my-agent': { error: 'timeout' } }} />
-    );
+    const resourceStatuses: ResourceStatusEntry[] = [
+      { resourceType: 'agent', name: 'my-agent', deploymentState: 'deployed', error: 'timeout' },
+    ];
+
+    const { lastFrame } = render(<ResourceGraph project={project} resourceStatuses={resourceStatuses} />);
 
     expect(lastFrame()).toContain('error');
   });
 
-  it('renders MCP gateways with tool counts', () => {
+  it('renders MCP gateways with targets', () => {
     const mcp: AgentCoreMcpSpec = {
       agentCoreGateways: [
         {
@@ -114,8 +119,35 @@ describe('ResourceGraph', () => {
 
     expect(lastFrame()).toContain('Gateways');
     expect(lastFrame()).toContain('my-gateway');
-    expect(lastFrame()).toContain('2 tools');
     expect(lastFrame()).toContain('target-a');
+  });
+
+  it('renders MCP gateway with deployment badge when resourceStatuses provided', () => {
+    const mcp: AgentCoreMcpSpec = {
+      agentCoreGateways: [
+        {
+          name: 'my-gateway',
+          targets: [{ name: 'target-a' }],
+        },
+      ],
+    } as unknown as AgentCoreMcpSpec;
+
+    const resourceStatuses: ResourceStatusEntry[] = [
+      {
+        resourceType: 'gateway',
+        name: 'my-gateway',
+        deploymentState: 'deployed',
+        detail: '1 target',
+        identifier: 'gw-123',
+      },
+    ];
+
+    const { lastFrame } = render(<ResourceGraph project={baseProject} mcp={mcp} resourceStatuses={resourceStatuses} />);
+
+    expect(lastFrame()).toContain('my-gateway');
+    expect(lastFrame()).toContain('1 target');
+    expect(lastFrame()).toContain('[Deployed]');
+    expect(lastFrame()).toContain('ID: gw-123');
   });
 
   it('renders MCP runtime tools', () => {
@@ -174,5 +206,123 @@ describe('ResourceGraph', () => {
     const { lastFrame } = render(<ResourceGraph project={baseProject} mcp={mcp} />);
 
     expect(lastFrame()).not.toContain('⚠ Unassigned Targets');
+  });
+
+  describe('deployment state badges', () => {
+    it('renders Deployed badge for deployed agents', () => {
+      const project = {
+        ...baseProject,
+        agents: [{ name: 'my-agent' }],
+      } as unknown as AgentCoreProjectSpec;
+
+      const resourceStatuses: ResourceStatusEntry[] = [
+        {
+          resourceType: 'agent',
+          name: 'my-agent',
+          deploymentState: 'deployed',
+          identifier: 'arn:aws:bedrock:us-east-1:123456789:agent-runtime/rt-123',
+        },
+      ];
+
+      const { lastFrame } = render(<ResourceGraph project={project} resourceStatuses={resourceStatuses} />);
+
+      expect(lastFrame()).toContain('[Deployed]');
+      expect(lastFrame()).toContain('ID: arn:aws:bedrock:us-east-1:123456789:agent-runtime/rt-123');
+    });
+
+    it('renders Local only badge for local-only resources', () => {
+      const project = {
+        ...baseProject,
+        agents: [{ name: 'my-agent' }],
+      } as unknown as AgentCoreProjectSpec;
+
+      const resourceStatuses: ResourceStatusEntry[] = [
+        { resourceType: 'agent', name: 'my-agent', deploymentState: 'local-only' },
+      ];
+
+      const { lastFrame } = render(<ResourceGraph project={project} resourceStatuses={resourceStatuses} />);
+
+      expect(lastFrame()).toContain('[Local only]');
+    });
+
+    it('renders Removed Locally section for resources removed from config', () => {
+      const resourceStatuses: ResourceStatusEntry[] = [
+        {
+          resourceType: 'agent',
+          name: 'removed-agent',
+          deploymentState: 'pending-removal',
+          identifier: 'arn:aws:removed',
+        },
+      ];
+
+      const { lastFrame } = render(<ResourceGraph project={baseProject} resourceStatuses={resourceStatuses} />);
+
+      expect(lastFrame()).toContain('Removed Locally');
+      expect(lastFrame()).toContain('removed-agent');
+      expect(lastFrame()).toContain('deploy');
+    });
+
+    it('renders deployment state legend when resourceStatuses provided', () => {
+      const project = {
+        ...baseProject,
+        agents: [{ name: 'my-agent' }],
+      } as unknown as AgentCoreProjectSpec;
+
+      const resourceStatuses: ResourceStatusEntry[] = [
+        { resourceType: 'agent', name: 'my-agent', deploymentState: 'deployed' },
+      ];
+
+      const { lastFrame } = render(<ResourceGraph project={project} resourceStatuses={resourceStatuses} />);
+
+      expect(lastFrame()).toContain('[Deployed]');
+      expect(lastFrame()).toContain('live in AWS');
+      expect(lastFrame()).toContain('[Local only]');
+      expect(lastFrame()).toContain('not yet deployed');
+    });
+
+    it('does not render deployment state legend when no resourceStatuses', () => {
+      const project = {
+        ...baseProject,
+        agents: [{ name: 'my-agent' }],
+      } as unknown as AgentCoreProjectSpec;
+
+      const { lastFrame } = render(<ResourceGraph project={project} />);
+
+      // Should have the base legend but not the deployment state legend
+      expect(lastFrame()).toContain('agent');
+      expect(lastFrame()).not.toContain('[Deployed]');
+    });
+
+    it('renders removed credentials in Removed Locally section', () => {
+      const resourceStatuses: ResourceStatusEntry[] = [
+        {
+          resourceType: 'credential',
+          name: 'old-cred',
+          deploymentState: 'pending-removal',
+          identifier: 'arn:aws:cred',
+        },
+      ];
+
+      const { lastFrame } = render(<ResourceGraph project={baseProject} resourceStatuses={resourceStatuses} />);
+
+      expect(lastFrame()).toContain('Removed Locally');
+      expect(lastFrame()).toContain('old-cred');
+    });
+
+    it('renders deployment badges on memory resources', () => {
+      const project = {
+        ...baseProject,
+        memories: [{ name: 'my-memory', strategies: [{ type: 'SEMANTIC' }] }],
+      } as unknown as AgentCoreProjectSpec;
+
+      const resourceStatuses: ResourceStatusEntry[] = [
+        { resourceType: 'memory', name: 'my-memory', deploymentState: 'deployed' },
+      ];
+
+      const { lastFrame } = render(<ResourceGraph project={project} resourceStatuses={resourceStatuses} />);
+
+      expect(lastFrame()).toContain('my-memory');
+      expect(lastFrame()).toContain('[Deployed]');
+    });
   });
 });
