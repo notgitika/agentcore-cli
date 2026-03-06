@@ -32,10 +32,18 @@ interface DeployScreenProps {
 }
 
 /** Next steps shown after successful deployment */
-const DEPLOY_NEXT_STEPS: NextStep[] = [
-  { command: 'invoke', label: 'Test your agent' },
-  { command: 'status', label: 'View deployment status' },
-];
+function getDeployNextSteps(hasAgents: boolean): NextStep[] {
+  if (hasAgents) {
+    return [
+      { command: 'invoke', label: 'Test your agent' },
+      { command: 'status', label: 'View deployment status' },
+    ];
+  }
+  return [
+    { command: 'add', label: 'Add an agent' },
+    { command: 'status', label: 'View deployment status' },
+  ];
+}
 
 export function DeployScreen({ isInteractive, onExit, autoConfirm, onNavigate, preSynthesized }: DeployScreenProps) {
   const awsConfig = useAwsTargetConfig();
@@ -287,7 +295,7 @@ export function DeployScreen({ isInteractive, onExit, autoConfirm, onNavigate, p
 
       {allSuccess && (
         <NextSteps
-          steps={DEPLOY_NEXT_STEPS}
+          steps={getDeployNextSteps((context?.projectSpec.agents.length ?? 0) > 0)}
           isInteractive={isInteractive}
           onSelect={step => {
             if (step.command === 'invoke') {
