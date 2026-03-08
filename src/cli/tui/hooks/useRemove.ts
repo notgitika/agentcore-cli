@@ -6,9 +6,11 @@ import type { RemovableMemory } from '../../primitives/MemoryPrimitive';
 import {
   agentPrimitive,
   credentialPrimitive,
+  evaluatorPrimitive,
   gatewayPrimitive,
   gatewayTargetPrimitive,
   memoryPrimitive,
+  onlineEvalConfigPrimitive,
 } from '../../primitives/registry';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -117,6 +119,16 @@ export function useRemovableIdentities() {
   return { identities, ...rest };
 }
 
+export function useRemovableEvaluators() {
+  const { items: evaluators, ...rest } = useRemovableResources(() => evaluatorPrimitive.getRemovable());
+  return { evaluators, ...rest };
+}
+
+export function useRemovableOnlineEvalConfigs() {
+  const { items: onlineEvalConfigs, ...rest } = useRemovableResources(() => onlineEvalConfigPrimitive.getRemovable());
+  return { onlineEvalConfigs, ...rest };
+}
+
 // ============================================================================
 // Preview Hook
 // ============================================================================
@@ -172,6 +184,14 @@ export function useRemovalPreview() {
     (name: string) => loadPreview(n => credentialPrimitive.previewRemove(n), name),
     [loadPreview]
   );
+  const loadEvaluatorPreview = useCallback(
+    (name: string) => loadPreview(n => evaluatorPrimitive.previewRemove(n), name),
+    [loadPreview]
+  );
+  const loadOnlineEvalPreview = useCallback(
+    (name: string) => loadPreview(n => onlineEvalConfigPrimitive.previewRemove(n), name),
+    [loadPreview]
+  );
 
   const reset = useCallback(() => {
     setState({ isLoading: false, preview: null, error: null });
@@ -184,6 +204,8 @@ export function useRemovalPreview() {
     loadGatewayTargetPreview,
     loadMemoryPreview,
     loadIdentityPreview,
+    loadEvaluatorPreview,
+    loadOnlineEvalPreview,
     reset,
   };
 }
@@ -235,6 +257,22 @@ export function useRemoveIdentity() {
   return useRemoveResource(
     (name: string) => credentialPrimitive.remove(name),
     'identity',
+    name => name
+  );
+}
+
+export function useRemoveEvaluator() {
+  return useRemoveResource(
+    (name: string) => evaluatorPrimitive.remove(name),
+    'evaluator',
+    name => name
+  );
+}
+
+export function useRemoveOnlineEvalConfig() {
+  return useRemoveResource(
+    (name: string) => onlineEvalConfigPrimitive.remove(name),
+    'online-eval',
     name => name
   );
 }

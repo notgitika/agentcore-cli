@@ -8,13 +8,20 @@
  */
 import { isReservedProjectName } from '../constants';
 import { AgentEnvSpecSchema } from './agent-env';
+import { EvaluationLevelSchema, EvaluatorConfigSchema, EvaluatorNameSchema } from './primitives/evaluator';
 import { DEFAULT_STRATEGY_NAMESPACES, MemoryStrategySchema, MemoryStrategyTypeSchema } from './primitives/memory';
+import { OnlineEvalConfigSchema } from './primitives/online-eval-config';
 import { uniqueBy } from './zod-util';
 import { z } from 'zod';
 
 // Re-export for convenience
 export { DEFAULT_STRATEGY_NAMESPACES, MemoryStrategySchema, MemoryStrategyTypeSchema };
+export { EvaluationLevelSchema };
 export type { MemoryStrategy, MemoryStrategyType } from './primitives/memory';
+export type { OnlineEvalConfig } from './primitives/online-eval-config';
+export { OnlineEvalConfigSchema, OnlineEvalConfigNameSchema } from './primitives/online-eval-config';
+export type { EvaluationLevel, EvaluatorConfig, LlmAsAJudgeConfig, RatingScale } from './primitives/evaluator';
+export { EvaluatorNameSchema } from './primitives/evaluator';
 
 // ============================================================================
 // Project Name Schema
@@ -112,42 +119,107 @@ export const CredentialSchema = z.discriminatedUnion('type', [ApiKeyCredentialSc
 export type Credential = z.infer<typeof CredentialSchema>;
 
 // ============================================================================
+// Evaluator Schema
+// ============================================================================
+
+export const EvaluatorTypeSchema = z.literal('CustomEvaluator');
+export type EvaluatorType = z.infer<typeof EvaluatorTypeSchema>;
+
+export const EvaluatorSchema = z.object({
+  type: EvaluatorTypeSchema,
+  name: EvaluatorNameSchema,
+  level: EvaluationLevelSchema,
+  description: z.string().optional(),
+  config: EvaluatorConfigSchema,
+});
+
+export type Evaluator = z.infer<typeof EvaluatorSchema>;
+
+// ============================================================================
 // Project Schema (Top Level)
 // ============================================================================
 
-export const AgentCoreProjectSpecSchema = z.object({
-  name: ProjectNameSchema,
-  version: z.number().int(),
+const BUILTIN_EVALUATOR_PREFIX = 'Builtin.';
 
-  agents: z
-    .array(AgentEnvSpecSchema)
-    .default([])
-    .superRefine(
-      uniqueBy(
-        agent => agent.name,
-        name => `Duplicate agent name: ${name}`
-      )
-    ),
+export const AgentCoreProjectSpecSchema = z
+  .object({
+    name: ProjectNameSchema,
+    version: z.number().int(),
 
-  memories: z
-    .array(MemorySchema)
-    .default([])
-    .superRefine(
-      uniqueBy(
-        memory => memory.name,
-        name => `Duplicate memory name: ${name}`
-      )
-    ),
+    agents: z
+      .array(AgentEnvSpecSchema)
+      .default([])
+      .superRefine(
+        uniqueBy(
+          agent => agent.name,
+          name => `Duplicate agent name: ${name}`
+        )
+      ),
 
-  credentials: z
-    .array(CredentialSchema)
-    .default([])
-    .superRefine(
-      uniqueBy(
-        credential => credential.name,
-        name => `Duplicate credential name: ${name}`
-      )
-    ),
-});
+    memories: z
+      .array(MemorySchema)
+      .default([])
+      .superRefine(
+        uniqueBy(
+          memory => memory.name,
+          name => `Duplicate memory name: ${name}`
+        )
+      ),
+
+    credentials: z
+      .array(CredentialSchema)
+      .default([])
+      .superRefine(
+        uniqueBy(
+          credential => credential.name,
+          name => `Duplicate credential name: ${name}`
+        )
+      ),
+
+    evaluators: z
+      .array(EvaluatorSchema)
+      .default([])
+      .superRefine(
+        uniqueBy(
+          evaluator => evaluator.name,
+          name => `Duplicate evaluator name: ${name}`
+        )
+      ),
+
+    onlineEvalConfigs: z
+      .array(OnlineEvalConfigSchema)
+      .default([])
+      .superRefine(
+        uniqueBy(
+          config => config.name,
+          name => `Duplicate online eval config name: ${name}`
+        )
+      ),
+  })
+  .superRefine((spec, ctx) => {
+    // Cross-field validation: onlineEvalConfigs reference valid agents and evaluators
+    const agentNames = new Set(spec.agents.map(a => a.name));
+    const evaluatorNames = new Set(spec.evaluators.map(e => e.name));
+
+    for (const config of spec.onlineEvalConfigs) {
+      for (const agentName of config.agents) {
+        if (!agentNames.has(agentName)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Online eval config "${config.name}" references unknown agent "${agentName}"`,
+          });
+        }
+      }
+
+      for (const evalName of config.evaluators) {
+        if (!evalName.startsWith(BUILTIN_EVALUATOR_PREFIX) && !evaluatorNames.has(evalName)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Online eval config "${config.name}" references unknown evaluator "${evalName}"`,
+          });
+        }
+      }
+    }
+  });
 
 export type AgentCoreProjectSpec = z.infer<typeof AgentCoreProjectSpecSchema>;

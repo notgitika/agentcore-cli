@@ -1,10 +1,12 @@
 export { RemoveAgentScreen } from './RemoveAgentScreen';
 export { RemoveAllScreen } from './RemoveAllScreen';
 export { RemoveConfirmScreen } from './RemoveConfirmScreen';
+export { RemoveEvaluatorScreen } from './RemoveEvaluatorScreen';
 export { RemoveFlow } from './RemoveFlow';
 export { RemoveGatewayScreen } from './RemoveGatewayScreen';
 export { RemoveIdentityScreen } from './RemoveIdentityScreen';
 export { RemoveGatewayTargetScreen } from './RemoveGatewayTargetScreen';
 export { RemoveMemoryScreen } from './RemoveMemoryScreen';
+export { RemoveOnlineEvalScreen } from './RemoveOnlineEvalScreen';
 export { RemoveScreen, type RemoveResourceType } from './RemoveScreen';
 export { RemoveSuccessScreen } from './RemoveSuccessScreen';

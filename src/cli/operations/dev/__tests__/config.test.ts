@@ -16,6 +16,8 @@ describe('getDevConfig', () => {
       agents: [],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     const config = getDevConfig(workingDir, project);
@@ -39,6 +41,8 @@ describe('getDevConfig', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     const config = getDevConfig(workingDir, project);
@@ -62,6 +66,8 @@ describe('getDevConfig', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     const config = getDevConfig(workingDir, project, '/test/project/agentcore');
@@ -91,6 +97,8 @@ describe('getDevConfig', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     expect(() => getDevConfig(workingDir, project, undefined, 'NonExistentAgent')).toThrow(
@@ -115,6 +123,8 @@ describe('getDevConfig', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     expect(() => getDevConfig(workingDir, project, undefined, 'NodeAgent')).toThrow('Dev mode only supports Python');
@@ -137,6 +147,8 @@ describe('getDevConfig', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     const config = getDevConfig(workingDir, project, '/test/project/agentcore');
@@ -162,6 +174,8 @@ describe('getDevConfig', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     // No configRoot provided
@@ -187,6 +201,8 @@ describe('getDevConfig', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     const config = getDevConfig(workingDir, project, '/test/project/agentcore');
@@ -212,6 +228,8 @@ describe('getDevConfig', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     const config = getDevConfig(workingDir, project, '/test/project/agentcore');
@@ -308,6 +326,8 @@ describe('getDevConfig', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     const config = getDevConfig(workingDir, project, '/test/project/agentcore');
@@ -347,6 +367,8 @@ describe('getAgentPort', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     expect(getAgentPort(project, 'Agent1', 8080)).toBe(8080);
@@ -360,6 +382,8 @@ describe('getAgentPort', () => {
       agents: [],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     expect(getAgentPort(project, 'NonExistent', 9000)).toBe(9000);
@@ -378,6 +402,8 @@ describe('getDevSupportedAgents', () => {
       agents: [],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     expect(getDevSupportedAgents(project)).toEqual([]);
@@ -400,6 +426,8 @@ describe('getDevSupportedAgents', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     expect(getDevSupportedAgents(project)).toEqual([]);
@@ -431,6 +459,8 @@ describe('getDevSupportedAgents', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     const supported = getDevSupportedAgents(project);
@@ -455,6 +485,8 @@ describe('getDevSupportedAgents', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     const supported = getDevSupportedAgents(project);
@@ -488,6 +520,8 @@ describe('getDevSupportedAgents', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     const supported = getDevSupportedAgents(project);

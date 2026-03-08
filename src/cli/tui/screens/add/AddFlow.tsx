@@ -7,9 +7,11 @@ import { AddAgentFlow } from '../agent/AddAgentFlow';
 import type { AddAgentConfig } from '../agent/types';
 import { FRAMEWORK_OPTIONS } from '../agent/types';
 import { useAddAgent } from '../agent/useAddAgent';
+import { AddEvaluatorFlow } from '../evaluator';
 import { AddIdentityFlow } from '../identity';
 import { AddGatewayFlow, AddGatewayTargetFlow } from '../mcp';
 import { AddMemoryFlow } from '../memory/AddMemoryFlow';
+import { AddOnlineEvalFlow } from '../online-eval';
 import type { AddResourceType } from './AddScreen';
 import { AddScreen } from './AddScreen';
 import { AddSuccessScreen } from './AddSuccessScreen';
@@ -24,6 +26,8 @@ type FlowState =
   | { name: 'tool-wizard' }
   | { name: 'memory-wizard' }
   | { name: 'identity-wizard' }
+  | { name: 'evaluator-wizard' }
+  | { name: 'online-eval-wizard' }
   | {
       name: 'agent-create-success';
       agentName: string;
@@ -177,6 +181,12 @@ export function AddFlow(props: AddFlowProps) {
         break;
       case 'identity':
         setFlow({ name: 'identity-wizard' });
+        break;
+      case 'evaluator':
+        setFlow({ name: 'evaluator-wizard' });
+        break;
+      case 'online-eval':
+        setFlow({ name: 'online-eval-wizard' });
         break;
     }
   }, []);
@@ -363,6 +373,32 @@ export function AddFlow(props: AddFlowProps) {
   if (flow.name === 'identity-wizard') {
     return (
       <AddIdentityFlow
+        isInteractive={props.isInteractive}
+        onExit={props.onExit}
+        onBack={() => setFlow({ name: 'select' })}
+        onDev={props.onDev}
+        onDeploy={props.onDeploy}
+      />
+    );
+  }
+
+  // Evaluator wizard
+  if (flow.name === 'evaluator-wizard') {
+    return (
+      <AddEvaluatorFlow
+        isInteractive={props.isInteractive}
+        onExit={props.onExit}
+        onBack={() => setFlow({ name: 'select' })}
+        onDev={props.onDev}
+        onDeploy={props.onDeploy}
+      />
+    );
+  }
+
+  // Online eval config wizard
+  if (flow.name === 'online-eval-wizard') {
+    return (
+      <AddOnlineEvalFlow
         isInteractive={props.isInteractive}
         onExit={props.onExit}
         onBack={() => setFlow({ name: 'select' })}

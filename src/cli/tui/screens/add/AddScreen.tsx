@@ -5,6 +5,8 @@ const ADD_RESOURCES = [
   { id: 'agent', title: 'Agent', description: 'Deploy an HTTP, MCP, or A2A agent' },
   { id: 'memory', title: 'Memory', description: 'Persistent context storage' },
   { id: 'identity', title: 'Identity', description: 'API key credential providers' },
+  { id: 'evaluator', title: 'Evaluator', description: 'Custom LLM-as-a-Judge evaluator' },
+  { id: 'online-eval', title: 'Online Eval Config', description: 'Continuous evaluation pipeline' },
   { id: 'gateway', title: 'Gateway', description: 'Route and manage gateway targets' },
   { id: 'gateway-target', title: 'Gateway Target', description: 'Extend agent capabilities' },
 ] as const;

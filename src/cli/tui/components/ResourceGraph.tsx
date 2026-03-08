@@ -16,6 +16,8 @@ const ICONS = {
   gateway: '◆',
   tool: '⚙',
   runtime: '▶',
+  evaluator: '✦',
+  'online-eval': '↻',
 } as const;
 
 interface ResourceGraphProps {
