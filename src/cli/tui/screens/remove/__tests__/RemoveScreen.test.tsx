@@ -17,6 +17,8 @@ describe('RemoveScreen', () => {
         mcpToolCount={1}
         memoryCount={1}
         identityCount={1}
+        evaluatorCount={1}
+        onlineEvalCount={1}
       />
     );
 
@@ -39,6 +41,8 @@ describe('RemoveScreen', () => {
         mcpToolCount={0}
         memoryCount={0}
         identityCount={0}
+        evaluatorCount={0}
+        onlineEvalCount={0}
       />
     );
 

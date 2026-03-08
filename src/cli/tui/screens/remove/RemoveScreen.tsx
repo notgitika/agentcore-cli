@@ -6,6 +6,8 @@ const REMOVE_RESOURCES = [
   { id: 'agent', title: 'Agent', description: 'Remove an agent from the project' },
   { id: 'memory', title: 'Memory', description: 'Remove a memory provider' },
   { id: 'identity', title: 'Identity', description: 'Remove an identity provider' },
+  { id: 'evaluator', title: 'Evaluator', description: 'Remove a custom evaluator' },
+  { id: 'online-eval', title: 'Online Eval Config', description: 'Remove an online eval config' },
   { id: 'gateway', title: 'Gateway', description: 'Remove a gateway' },
   { id: 'gateway-target', title: 'Gateway Target', description: 'Remove a gateway target' },
   { id: 'all', title: 'All', description: 'Reset entire agentcore project' },
@@ -26,6 +28,10 @@ interface RemoveScreenProps {
   memoryCount: number;
   /** Number of identities available for removal */
   identityCount: number;
+  /** Number of evaluators available for removal */
+  evaluatorCount: number;
+  /** Number of online eval configs available for removal */
+  onlineEvalCount: number;
 }
 
 export function RemoveScreen({
@@ -36,6 +42,8 @@ export function RemoveScreen({
   mcpToolCount,
   memoryCount,
   identityCount,
+  evaluatorCount,
+  onlineEvalCount,
 }: RemoveScreenProps) {
   const items: SelectableItem[] = useMemo(() => {
     return REMOVE_RESOURCES.map(r => {
@@ -73,6 +81,18 @@ export function RemoveScreen({
             description = 'No identities to remove';
           }
           break;
+        case 'evaluator':
+          if (evaluatorCount === 0) {
+            disabled = true;
+            description = 'No evaluators to remove';
+          }
+          break;
+        case 'online-eval':
+          if (onlineEvalCount === 0) {
+            disabled = true;
+            description = 'No online eval configs to remove';
+          }
+          break;
         case 'all':
           // 'all' is always available
           break;
@@ -80,7 +100,7 @@ export function RemoveScreen({
 
       return { ...r, disabled, description };
     });
-  }, [agentCount, gatewayCount, mcpToolCount, memoryCount, identityCount]);
+  }, [agentCount, gatewayCount, mcpToolCount, memoryCount, identityCount, evaluatorCount, onlineEvalCount]);
 
   const isDisabled = (item: SelectableItem) => item.disabled ?? false;
 

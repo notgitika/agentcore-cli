@@ -7,7 +7,7 @@ import { DEPLOYMENT_STATE_COLORS, DEPLOYMENT_STATE_LABELS } from './constants';
 import type { Command } from '@commander-js/extra-typings';
 import { Box, Text, render } from 'ink';
 
-const VALID_RESOURCE_TYPES = ['agent', 'memory', 'credential', 'gateway'] as const;
+const VALID_RESOURCE_TYPES = ['agent', 'memory', 'credential', 'gateway', 'evaluator', 'online-eval'] as const;
 const VALID_STATES = ['deployed', 'local-only', 'pending-removal'] as const;
 
 interface StatusCliOptions {
@@ -126,6 +126,8 @@ export const registerStatus = (program: Command) => {
         const credentials = filtered.filter(r => r.resourceType === 'credential');
         const memories = filtered.filter(r => r.resourceType === 'memory');
         const gateways = filtered.filter(r => r.resourceType === 'gateway');
+        const evaluators = filtered.filter(r => r.resourceType === 'evaluator');
+        const onlineEvals = filtered.filter(r => r.resourceType === 'online-eval');
 
         render(
           <Box flexDirection="column">
@@ -165,6 +167,24 @@ export const registerStatus = (program: Command) => {
               <Box flexDirection="column" marginTop={1}>
                 <Text bold>Gateways</Text>
                 {gateways.map(entry => (
+                  <ResourceEntry key={`${entry.resourceType}-${entry.name}`} entry={entry} />
+                ))}
+              </Box>
+            )}
+
+            {evaluators.length > 0 && (
+              <Box flexDirection="column" marginTop={1}>
+                <Text bold>Evaluators</Text>
+                {evaluators.map(entry => (
+                  <ResourceEntry key={`${entry.resourceType}-${entry.name}`} entry={entry} />
+                ))}
+              </Box>
+            )}
+
+            {onlineEvals.length > 0 && (
+              <Box flexDirection="column" marginTop={1}>
+                <Text bold>Online Eval Configs</Text>
+                {onlineEvals.map(entry => (
                   <ResourceEntry key={`${entry.resourceType}-${entry.name}`} entry={entry} />
                 ))}
               </Box>

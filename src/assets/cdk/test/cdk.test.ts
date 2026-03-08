@@ -11,6 +11,8 @@ test('AgentCoreStack synthesizes with empty spec', () => {
       agents: [],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     },
   });
   const template = Template.fromStack(stack);

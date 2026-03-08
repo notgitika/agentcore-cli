@@ -5,3 +5,24 @@ export {
   MemoryStrategySchema,
   MemoryStrategyTypeSchema,
 } from './memory';
+
+export type {
+  EvaluationLevel,
+  EvaluatorConfig,
+  LlmAsAJudgeConfig,
+  RatingScale,
+  NumericalRating,
+  CategoricalRating,
+} from './evaluator';
+export {
+  EvaluationLevelSchema,
+  EvaluatorConfigSchema,
+  EvaluatorNameSchema,
+  LlmAsAJudgeConfigSchema,
+  RatingScaleSchema,
+  NumericalRatingSchema,
+  CategoricalRatingSchema,
+} from './evaluator';
+
+export type { OnlineEvalConfig } from './online-eval-config';
+export { OnlineEvalConfigSchema, OnlineEvalConfigNameSchema } from './online-eval-config';

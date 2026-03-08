@@ -14,7 +14,7 @@ import type { ResourceDeploymentState } from './constants';
 export type { ResourceDeploymentState };
 
 export interface ResourceStatusEntry {
-  resourceType: 'agent' | 'memory' | 'credential' | 'gateway';
+  resourceType: 'agent' | 'memory' | 'credential' | 'gateway' | 'evaluator' | 'online-eval';
   name: string;
   deploymentState: ResourceDeploymentState;
   identifier?: string;
@@ -152,7 +152,21 @@ export function computeResourceStatuses(
     },
   });
 
-  return [...agents, ...credentials, ...memories, ...gateways];
+  const evaluators: ResourceStatusEntry[] = (project.evaluators ?? []).map(e => ({
+    resourceType: 'evaluator',
+    name: e.name,
+    deploymentState: 'local-only' as ResourceDeploymentState,
+    detail: `${e.level} — LLM-as-a-Judge`,
+  }));
+
+  const onlineEvalConfigs: ResourceStatusEntry[] = (project.onlineEvalConfigs ?? []).map(c => ({
+    resourceType: 'online-eval',
+    name: c.name,
+    deploymentState: 'local-only' as ResourceDeploymentState,
+    detail: `${c.agents.length} agent${c.agents.length !== 1 ? 's' : ''}, ${c.evaluators.length} evaluator${c.evaluators.length !== 1 ? 's' : ''}`,
+  }));
+
+  return [...agents, ...credentials, ...memories, ...gateways, ...evaluators, ...onlineEvalConfigs];
 }
 
 export async function handleProjectStatus(

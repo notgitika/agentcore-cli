@@ -55,6 +55,8 @@ describe('resolveAgentContext', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     },
     deployedState: {
       targets: {
@@ -111,6 +113,8 @@ describe('resolveAgentContext', () => {
         ],
         memories: [],
         credentials: [],
+        evaluators: [],
+        onlineEvalConfigs: [],
       },
     });
     const result = resolveAgentContext(context, {});
@@ -147,6 +151,8 @@ describe('resolveAgentContext', () => {
         ],
         memories: [],
         credentials: [],
+        evaluators: [],
+        onlineEvalConfigs: [],
       },
       deployedState: {
         targets: {
@@ -187,7 +193,15 @@ describe('resolveAgentContext', () => {
 
   it('errors when no agents defined', () => {
     const context = makeContext({
-      project: { name: 'TestProject', version: 1, agents: [], memories: [], credentials: [] },
+      project: {
+        name: 'TestProject',
+        version: 1,
+        agents: [],
+        memories: [],
+        credentials: [],
+        evaluators: [],
+        onlineEvalConfigs: [],
+      },
     });
     const result = resolveAgentContext(context, {});
     expect(result.success).toBe(false);

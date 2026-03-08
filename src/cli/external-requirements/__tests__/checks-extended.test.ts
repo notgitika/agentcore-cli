@@ -48,6 +48,8 @@ describe('requiresUv', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
     expect(requiresUv(project)).toBe(true);
   });
@@ -68,6 +70,8 @@ describe('requiresUv', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
     expect(requiresUv(project)).toBe(false);
   });
@@ -79,6 +83,8 @@ describe('requiresUv', () => {
       agents: [],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
     expect(requiresUv(project)).toBe(false);
   });
@@ -101,6 +107,8 @@ describe('requiresContainerRuntime', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
     expect(requiresContainerRuntime(project)).toBe(true);
   });
@@ -121,6 +129,8 @@ describe('requiresContainerRuntime', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
     expect(requiresContainerRuntime(project)).toBe(false);
   });
@@ -132,6 +142,8 @@ describe('requiresContainerRuntime', () => {
       agents: [],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
     expect(requiresContainerRuntime(project)).toBe(false);
   });
@@ -160,6 +172,8 @@ describe('requiresContainerRuntime', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
     expect(requiresContainerRuntime(project)).toBe(true);
   });
@@ -222,6 +236,8 @@ describe('checkDependencyVersions', () => {
       agents: [],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     const result = await checkDependencyVersions(project);
@@ -237,6 +253,8 @@ describe('checkDependencyVersions', () => {
       agents: [],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     const result = await checkDependencyVersions(project);
@@ -260,6 +278,8 @@ describe('checkDependencyVersions', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     const result = await checkDependencyVersions(project);
