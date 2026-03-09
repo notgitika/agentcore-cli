@@ -1,3 +1,4 @@
+import { getErrorMessage, isAccessDeniedError } from '../errors';
 import { getCredentialProvider } from './account';
 import { ApplicationSignalsClient, StartDiscoveryCommand } from '@aws-sdk/client-application-signals';
 import {
@@ -30,7 +31,8 @@ const RESOURCE_POLICY_NAME = 'TransactionSearchXRayAccess';
  */
 export async function enableTransactionSearch(
   region: string,
-  accountId: string
+  accountId: string,
+  indexPercentage = 100
 ): Promise<TransactionSearchEnableResult> {
   const credentials = getCredentialProvider();
 
@@ -39,9 +41,8 @@ export async function enableTransactionSearch(
     const appSignalsClient = new ApplicationSignalsClient({ region, credentials });
     await appSignalsClient.send(new StartDiscoveryCommand({}));
   } catch (err: unknown) {
-    const code = (err as { name?: string })?.name;
-    const message = (err as { message?: string })?.message ?? 'Unknown error';
-    if (code === 'AccessDeniedException' || code === 'AccessDenied') {
+    const message = getErrorMessage(err);
+    if (isAccessDeniedError(err)) {
       return { success: false, error: `Insufficient permissions to enable Application Signals: ${message}` };
     }
     return { success: false, error: `Failed to enable Application Signals: ${message}` };
@@ -76,9 +77,8 @@ export async function enableTransactionSearch(
       await logsClient.send(new PutResourcePolicyCommand({ policyName: RESOURCE_POLICY_NAME, policyDocument }));
     }
   } catch (err: unknown) {
-    const code = (err as { name?: string })?.name;
-    const message = (err as { message?: string })?.message ?? 'Unknown error';
-    if (code === 'AccessDeniedException' || code === 'AccessDenied') {
+    const message = getErrorMessage(err);
+    if (isAccessDeniedError(err)) {
       return { success: false, error: `Insufficient permissions to configure CloudWatch Logs policy: ${message}` };
     }
     return { success: false, error: `Failed to configure CloudWatch Logs policy: ${message}` };
@@ -93,9 +93,8 @@ export async function enableTransactionSearch(
       await xrayClient.send(new UpdateTraceSegmentDestinationCommand({ Destination: 'CloudWatchLogs' }));
     }
   } catch (err: unknown) {
-    const code = (err as { name?: string })?.name;
-    const message = (err as { message?: string })?.message ?? 'Unknown error';
-    if (code === 'AccessDeniedException' || code === 'AccessDenied') {
+    const message = getErrorMessage(err);
+    if (isAccessDeniedError(err)) {
       return { success: false, error: `Insufficient permissions to configure trace destination: ${message}` };
     }
     return { success: false, error: `Failed to configure trace destination: ${message}` };
@@ -106,13 +105,12 @@ export async function enableTransactionSearch(
     await xrayClient.send(
       new UpdateIndexingRuleCommand({
         Name: 'Default',
-        Rule: { Probabilistic: { DesiredSamplingPercentage: 100 } },
+        Rule: { Probabilistic: { DesiredSamplingPercentage: indexPercentage } },
       })
     );
   } catch (err: unknown) {
-    const code = (err as { name?: string })?.name;
-    const message = (err as { message?: string })?.message ?? 'Unknown error';
-    if (code === 'AccessDeniedException' || code === 'AccessDenied') {
+    const message = getErrorMessage(err);
+    if (isAccessDeniedError(err)) {
       return { success: false, error: `Insufficient permissions to configure indexing rules: ${message}` };
     }
     return { success: false, error: `Failed to configure indexing rules: ${message}` };
