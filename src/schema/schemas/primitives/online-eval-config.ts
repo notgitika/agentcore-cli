@@ -14,7 +14,7 @@ export const OnlineEvalConfigNameSchema = z
   );
 
 export const OnlineEvalConfigSchema = z.object({
-  type: z.literal('OnlineEvalConfig'),
+  type: z.literal('OnlineEvaluationConfig'),
   name: OnlineEvalConfigNameSchema,
   /** Agent names this online eval config monitors */
   agents: z.array(z.string().min(1)).min(1, 'At least one agent is required'),
@@ -22,8 +22,6 @@ export const OnlineEvalConfigSchema = z.object({
   evaluators: z.array(z.string().min(1)).min(1, 'At least one evaluator is required'),
   /** Sampling rate as a percentage (0.01 to 100) */
   samplingRate: z.number().min(0.01).max(100),
-  /** Whether to start the pipeline immediately on deploy */
-  enableOnCreate: z.boolean().default(true),
 });
 
 export type OnlineEvalConfig = z.infer<typeof OnlineEvalConfigSchema>;

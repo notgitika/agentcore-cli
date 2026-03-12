@@ -259,6 +259,116 @@ describe('computeResourceStatuses', () => {
     expect(gwEntry!.identifier).toBe('gw-456');
   });
 
+  it('marks evaluator as deployed when in both local and deployed state', () => {
+    const project = {
+      ...baseProject,
+      evaluators: [{ name: 'MyEval', level: 'SESSION', config: {} }],
+    } as unknown as AgentCoreProjectSpec;
+
+    const resources: DeployedResourceState = {
+      evaluators: {
+        MyEval: {
+          evaluatorId: 'proj_MyEval-abc123',
+          evaluatorArn: 'arn:aws:bedrock:us-east-1:123456789:evaluator/proj_MyEval-abc123',
+        },
+      },
+    };
+
+    const result = computeResourceStatuses(project, resources);
+    const evalEntry = result.find(r => r.resourceType === 'evaluator' && r.name === 'MyEval');
+
+    expect(evalEntry).toBeDefined();
+    expect(evalEntry!.deploymentState).toBe('deployed');
+    expect(evalEntry!.identifier).toBe('arn:aws:bedrock:us-east-1:123456789:evaluator/proj_MyEval-abc123');
+    expect(evalEntry!.detail).toBe('SESSION — LLM-as-a-Judge');
+  });
+
+  it('marks evaluator as local-only when not deployed', () => {
+    const project = {
+      ...baseProject,
+      evaluators: [{ name: 'MyEval', level: 'TRACE', config: {} }],
+    } as unknown as AgentCoreProjectSpec;
+
+    const result = computeResourceStatuses(project, undefined);
+    const evalEntry = result.find(r => r.resourceType === 'evaluator' && r.name === 'MyEval');
+
+    expect(evalEntry).toBeDefined();
+    expect(evalEntry!.deploymentState).toBe('local-only');
+    expect(evalEntry!.detail).toBe('TRACE — LLM-as-a-Judge');
+  });
+
+  it('marks evaluator as pending-removal when deployed but removed from schema', () => {
+    const resources: DeployedResourceState = {
+      evaluators: {
+        RemovedEval: {
+          evaluatorId: 'proj_RemovedEval-xyz',
+          evaluatorArn: 'arn:aws:bedrock:us-east-1:123456789:evaluator/proj_RemovedEval-xyz',
+        },
+      },
+    };
+
+    const result = computeResourceStatuses(baseProject, resources);
+    const evalEntry = result.find(r => r.resourceType === 'evaluator' && r.name === 'RemovedEval');
+
+    expect(evalEntry).toBeDefined();
+    expect(evalEntry!.deploymentState).toBe('pending-removal');
+  });
+
+  it('marks online-eval config as deployed when in both local and deployed state', () => {
+    const project = {
+      ...baseProject,
+      onlineEvalConfigs: [{ name: 'TestConfig', agents: ['Agent1'], evaluators: ['Builtin.Helpfulness'] }],
+    } as unknown as AgentCoreProjectSpec;
+
+    const resources: DeployedResourceState = {
+      onlineEvalConfigs: {
+        TestConfig: {
+          onlineEvaluationConfigId: 'proj_TestConfig-abc',
+          onlineEvaluationConfigArn: 'arn:aws:bedrock:us-east-1:123456789:online-evaluation-config/proj_TestConfig-abc',
+        },
+      },
+    };
+
+    const result = computeResourceStatuses(project, resources);
+    const configEntry = result.find(r => r.resourceType === 'online-eval' && r.name === 'TestConfig');
+
+    expect(configEntry).toBeDefined();
+    expect(configEntry!.deploymentState).toBe('deployed');
+    expect(configEntry!.detail).toBe('1 agent, 1 evaluator');
+  });
+
+  it('marks online-eval config as local-only when not deployed', () => {
+    const project = {
+      ...baseProject,
+      onlineEvalConfigs: [{ name: 'TestConfig', agents: ['A', 'B'], evaluators: ['Builtin.X', 'Builtin.Y', 'Custom'] }],
+    } as unknown as AgentCoreProjectSpec;
+
+    const result = computeResourceStatuses(project, undefined);
+    const configEntry = result.find(r => r.resourceType === 'online-eval' && r.name === 'TestConfig');
+
+    expect(configEntry).toBeDefined();
+    expect(configEntry!.deploymentState).toBe('local-only');
+    expect(configEntry!.detail).toBe('2 agents, 3 evaluators');
+  });
+
+  it('marks online-eval config as pending-removal when deployed but removed from schema', () => {
+    const resources: DeployedResourceState = {
+      onlineEvalConfigs: {
+        RemovedConfig: {
+          onlineEvaluationConfigId: 'proj_RemovedConfig-xyz',
+          onlineEvaluationConfigArn:
+            'arn:aws:bedrock:us-east-1:123456789:online-evaluation-config/proj_RemovedConfig-xyz',
+        },
+      },
+    };
+
+    const result = computeResourceStatuses(baseProject, resources);
+    const configEntry = result.find(r => r.resourceType === 'online-eval' && r.name === 'RemovedConfig');
+
+    expect(configEntry).toBeDefined();
+    expect(configEntry!.deploymentState).toBe('pending-removal');
+  });
+
   it('handles mixed deployed and local-only resources', () => {
     const project = {
       ...baseProject,

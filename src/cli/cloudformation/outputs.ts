@@ -1,4 +1,11 @@
-import type { AgentCoreDeployedState, DeployedState, MemoryDeployedState, TargetDeployedState } from '../../schema';
+import type {
+  AgentCoreDeployedState,
+  DeployedState,
+  EvaluatorDeployedState,
+  MemoryDeployedState,
+  OnlineEvalDeployedState,
+  TargetDeployedState,
+} from '../../schema';
 import { getCredentialProvider } from '../aws';
 import { toPascalId } from './logical-ids';
 import { getStackName } from './stack-discovery';
@@ -202,6 +209,68 @@ export function parseMemoryOutputs(outputs: StackOutputs, memoryNames: string[])
   return memories;
 }
 
+/**
+ * Parse stack outputs into deployed state for evaluators.
+ *
+ * Output key pattern: ApplicationEvaluator{PascalName}(Id|Arn)Output{Hash}
+ */
+export function parseEvaluatorOutputs(
+  outputs: StackOutputs,
+  evaluatorNames: string[]
+): Record<string, EvaluatorDeployedState> {
+  const evaluators: Record<string, EvaluatorDeployedState> = {};
+  const outputKeys = Object.keys(outputs);
+
+  for (const evalName of evaluatorNames) {
+    const pascal = toPascalId('Evaluator', evalName);
+    const idPrefix = `Application${pascal}IdOutput`;
+    const arnPrefix = `Application${pascal}ArnOutput`;
+
+    const idKey = outputKeys.find(k => k.startsWith(idPrefix));
+    const arnKey = outputKeys.find(k => k.startsWith(arnPrefix));
+
+    if (idKey && arnKey) {
+      evaluators[evalName] = {
+        evaluatorId: outputs[idKey]!,
+        evaluatorArn: outputs[arnKey]!,
+      };
+    }
+  }
+
+  return evaluators;
+}
+
+/**
+ * Parse stack outputs into deployed state for online evaluation configs.
+ *
+ * Output key pattern: ApplicationOnlineEval{PascalName}(Id|Arn)Output{Hash}
+ */
+export function parseOnlineEvalOutputs(
+  outputs: StackOutputs,
+  onlineEvalNames: string[]
+): Record<string, OnlineEvalDeployedState> {
+  const configs: Record<string, OnlineEvalDeployedState> = {};
+  const outputKeys = Object.keys(outputs);
+
+  for (const configName of onlineEvalNames) {
+    const pascal = toPascalId('OnlineEval', configName);
+    const idPrefix = `Application${pascal}IdOutput`;
+    const arnPrefix = `Application${pascal}ArnOutput`;
+
+    const idKey = outputKeys.find(k => k.startsWith(idPrefix));
+    const arnKey = outputKeys.find(k => k.startsWith(arnPrefix));
+
+    if (idKey && arnKey) {
+      configs[configName] = {
+        onlineEvaluationConfigId: outputs[idKey]!,
+        onlineEvaluationConfigArn: outputs[arnKey]!,
+      };
+    }
+  }
+
+  return configs;
+}
+
 export interface BuildDeployedStateOptions {
   targetName: string;
   stackName: string;
@@ -211,13 +280,26 @@ export interface BuildDeployedStateOptions {
   identityKmsKeyArn?: string;
   credentials?: Record<string, { credentialProviderArn: string; clientSecretArn?: string; callbackUrl?: string }>;
   memories?: Record<string, MemoryDeployedState>;
+  evaluators?: Record<string, EvaluatorDeployedState>;
+  onlineEvalConfigs?: Record<string, OnlineEvalDeployedState>;
 }
 
 /**
  * Build deployed state from stack outputs.
  */
 export function buildDeployedState(opts: BuildDeployedStateOptions): DeployedState {
-  const { targetName, stackName, agents, gateways, existingState, identityKmsKeyArn, credentials, memories } = opts;
+  const {
+    targetName,
+    stackName,
+    agents,
+    gateways,
+    existingState,
+    identityKmsKeyArn,
+    credentials,
+    memories,
+    evaluators,
+    onlineEvalConfigs,
+  } = opts;
   const targetState: TargetDeployedState = {
     resources: {
       agents: Object.keys(agents).length > 0 ? agents : undefined,
@@ -237,6 +319,16 @@ export function buildDeployedState(opts: BuildDeployedStateOptions): DeployedSta
   // Add credential state if credentials exist
   if (credentials && Object.keys(credentials).length > 0) {
     targetState.resources!.credentials = credentials;
+  }
+
+  // Add evaluator state if evaluators exist
+  if (evaluators && Object.keys(evaluators).length > 0) {
+    targetState.resources!.evaluators = evaluators;
+  }
+
+  // Add online eval config state if configs exist
+  if (onlineEvalConfigs && Object.keys(onlineEvalConfigs).length > 0) {
+    targetState.resources!.onlineEvalConfigs = onlineEvalConfigs;
   }
 
   return {

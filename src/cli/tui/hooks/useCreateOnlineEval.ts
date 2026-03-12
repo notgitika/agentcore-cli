@@ -6,7 +6,6 @@ interface CreateOnlineEvalConfig {
   agents: string[];
   evaluators: string[];
   samplingRate: number;
-  enableOnCreate?: boolean;
 }
 
 export function useCreateOnlineEval() {
@@ -22,7 +21,6 @@ export function useCreateOnlineEval() {
         agents: config.agents,
         evaluators: config.evaluators,
         samplingRate: config.samplingRate,
-        enableOnCreate: config.enableOnCreate,
       });
       if (!addResult.success) {
         throw new Error(addResult.error ?? 'Failed to create online eval config');

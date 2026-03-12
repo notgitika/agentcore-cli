@@ -4,8 +4,10 @@ import {
   buildDeployedState,
   getStackOutputs,
   parseAgentOutputs,
+  parseEvaluatorOutputs,
   parseGatewayOutputs,
   parseMemoryOutputs,
+  parseOnlineEvalOutputs,
 } from '../../../cloudformation';
 import { getErrorMessage, isChangesetInProgressError, isExpiredTokenError } from '../../../errors';
 import { ExecLogger } from '../../../logging';
@@ -260,6 +262,14 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
       );
     }
 
+    // Parse evaluator outputs
+    const evaluatorNames = (ctx.projectSpec.evaluators ?? []).map((e: { name: string }) => e.name);
+    const evaluators = parseEvaluatorOutputs(outputs, evaluatorNames);
+
+    // Parse online eval config outputs
+    const onlineEvalNames = (ctx.projectSpec.onlineEvalConfigs ?? []).map((c: { name: string }) => c.name);
+    const onlineEvalConfigs = parseOnlineEvalOutputs(outputs, onlineEvalNames);
+
     // Expose outputs to UI
     setStackOutputs(outputs);
 
@@ -272,6 +282,8 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
       existingState,
       identityKmsKeyArn,
       memories,
+      evaluators,
+      onlineEvalConfigs,
       credentials: Object.keys(allCredentials).length > 0 ? allCredentials : undefined,
     });
     await configIO.writeDeployedState(deployedState);
