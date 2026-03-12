@@ -1,0 +1,90 @@
+import { OnlineEvalConfigNameSchema, OnlineEvalConfigSchema } from '../online-eval-config';
+import { describe, expect, it } from 'vitest';
+
+describe('OnlineEvalConfigNameSchema', () => {
+  it('accepts valid names', () => {
+    expect(OnlineEvalConfigNameSchema.safeParse('MyConfig').success).toBe(true);
+    expect(OnlineEvalConfigNameSchema.safeParse('config_1').success).toBe(true);
+  });
+
+  it('rejects empty string', () => {
+    expect(OnlineEvalConfigNameSchema.safeParse('').success).toBe(false);
+  });
+
+  it('rejects names starting with a number', () => {
+    expect(OnlineEvalConfigNameSchema.safeParse('1config').success).toBe(false);
+  });
+
+  it('rejects names with hyphens', () => {
+    expect(OnlineEvalConfigNameSchema.safeParse('my-config').success).toBe(false);
+  });
+
+  it('rejects names longer than 48 characters', () => {
+    const longName = 'A' + 'a'.repeat(48);
+    expect(OnlineEvalConfigNameSchema.safeParse(longName).success).toBe(false);
+  });
+});
+
+describe('OnlineEvalConfigSchema', () => {
+  const validConfig = {
+    type: 'OnlineEvaluationConfig' as const,
+    name: 'TestConfig',
+    agents: ['agent1'],
+    evaluators: ['Builtin.GoalSuccessRate'],
+    samplingRate: 10,
+  };
+
+  it('accepts valid config', () => {
+    expect(OnlineEvalConfigSchema.safeParse(validConfig).success).toBe(true);
+  });
+
+  it('accepts multiple agents and evaluators', () => {
+    const config = { ...validConfig, agents: ['a1', 'a2'], evaluators: ['Builtin.X', 'CustomEval'] };
+    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(true);
+  });
+
+  it('rejects wrong type literal', () => {
+    const config = { ...validConfig, type: 'WrongType' };
+    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(false);
+  });
+
+  it('rejects empty agents array', () => {
+    const config = { ...validConfig, agents: [] };
+    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(false);
+  });
+
+  it('rejects empty evaluators array', () => {
+    const config = { ...validConfig, evaluators: [] };
+    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(false);
+  });
+
+  it('rejects sampling rate below 0.01', () => {
+    const config = { ...validConfig, samplingRate: 0.001 };
+    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(false);
+  });
+
+  it('rejects sampling rate above 100', () => {
+    const config = { ...validConfig, samplingRate: 101 };
+    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(false);
+  });
+
+  it('accepts minimum sampling rate of 0.01', () => {
+    const config = { ...validConfig, samplingRate: 0.01 };
+    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(true);
+  });
+
+  it('accepts maximum sampling rate of 100', () => {
+    const config = { ...validConfig, samplingRate: 100 };
+    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(true);
+  });
+
+  it('rejects empty string in agents array', () => {
+    const config = { ...validConfig, agents: [''] };
+    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(false);
+  });
+
+  it('rejects empty string in evaluators array', () => {
+    const config = { ...validConfig, evaluators: [''] };
+    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(false);
+  });
+});

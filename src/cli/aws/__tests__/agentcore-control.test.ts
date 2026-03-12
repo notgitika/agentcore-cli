@@ -1,4 +1,4 @@
-import { getAgentRuntimeStatus } from '../agentcore-control.js';
+import { getAgentRuntimeStatus, updateOnlineEvalExecutionStatus } from '../agentcore-control.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockSend } = vi.hoisted(() => ({
@@ -10,6 +10,9 @@ vi.mock('@aws-sdk/client-bedrock-agentcore-control', () => ({
     send = mockSend;
   },
   GetAgentRuntimeCommand: class {
+    constructor(public input: unknown) {}
+  },
+  UpdateOnlineEvaluationConfigCommand: class {
     constructor(public input: unknown) {}
   },
 }));
@@ -54,5 +57,90 @@ describe('getAgentRuntimeStatus', () => {
     await expect(getAgentRuntimeStatus({ region: 'us-east-1', runtimeId: 'rt-err' })).rejects.toThrow(
       'Service unavailable'
     );
+  });
+});
+
+describe('updateOnlineEvalExecutionStatus', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('sends DISABLED to pause and returns result', async () => {
+    mockSend.mockResolvedValue({
+      onlineEvaluationConfigId: 'cfg-123',
+      executionStatus: 'DISABLED',
+      status: 'ACTIVE',
+    });
+
+    const result = await updateOnlineEvalExecutionStatus({
+      region: 'us-east-1',
+      onlineEvaluationConfigId: 'cfg-123',
+      executionStatus: 'DISABLED',
+    });
+
+    expect(result.configId).toBe('cfg-123');
+    expect(result.executionStatus).toBe('DISABLED');
+    expect(result.status).toBe('ACTIVE');
+  });
+
+  it('sends ENABLED to resume', async () => {
+    mockSend.mockResolvedValue({
+      onlineEvaluationConfigId: 'cfg-456',
+      executionStatus: 'ENABLED',
+      status: 'ACTIVE',
+    });
+
+    const result = await updateOnlineEvalExecutionStatus({
+      region: 'us-west-2',
+      onlineEvaluationConfigId: 'cfg-456',
+      executionStatus: 'ENABLED',
+    });
+
+    expect(result.configId).toBe('cfg-456');
+    expect(result.executionStatus).toBe('ENABLED');
+  });
+
+  it('passes correct params in command', async () => {
+    mockSend.mockResolvedValue({
+      onlineEvaluationConfigId: 'cfg-789',
+      executionStatus: 'DISABLED',
+      status: 'ACTIVE',
+    });
+
+    await updateOnlineEvalExecutionStatus({
+      region: 'us-east-1',
+      onlineEvaluationConfigId: 'cfg-789',
+      executionStatus: 'DISABLED',
+    });
+
+    const command = mockSend.mock.calls[0]![0];
+    expect(command.input.onlineEvaluationConfigId).toBe('cfg-789');
+    expect(command.input.executionStatus).toBe('DISABLED');
+  });
+
+  it('falls back to input values when response fields are undefined', async () => {
+    mockSend.mockResolvedValue({});
+
+    const result = await updateOnlineEvalExecutionStatus({
+      region: 'us-east-1',
+      onlineEvaluationConfigId: 'cfg-fallback',
+      executionStatus: 'ENABLED',
+    });
+
+    expect(result.configId).toBe('cfg-fallback');
+    expect(result.executionStatus).toBe('ENABLED');
+    expect(result.status).toBe('UNKNOWN');
+  });
+
+  it('propagates SDK errors', async () => {
+    mockSend.mockRejectedValue(new Error('Throttling'));
+
+    await expect(
+      updateOnlineEvalExecutionStatus({
+        region: 'us-east-1',
+        onlineEvaluationConfigId: 'cfg-err',
+        executionStatus: 'DISABLED',
+      })
+    ).rejects.toThrow('Throttling');
   });
 });
