@@ -1,5 +1,6 @@
 import { parseTimeString } from '../../../lib/utils';
 import { searchLogs, streamLogs } from '../../aws/cloudwatch';
+import type { DeployedProjectConfig } from '../resolve-agent';
 import { loadDeployedProjectConfig, resolveAgent } from '../resolve-agent';
 
 export interface LogsEvalOptions {
@@ -28,11 +29,7 @@ function formatLogLine(event: { timestamp: number; message: string }, json: bool
  * Resolve the online eval config log group names for a given agent.
  * Online eval results are written to: /aws/bedrock-agentcore/evaluations/results/{onlineEvalConfigId}
  */
-function resolveEvalLogGroups(
-  context: ReturnType<typeof loadDeployedProjectConfig> extends Promise<infer T> ? T : never,
-  agentName: string,
-  targetName: string
-): string[] {
+function resolveEvalLogGroups(context: DeployedProjectConfig, agentName: string, targetName: string): string[] {
   const { project, deployedState } = context;
   const targetResources = deployedState.targets[targetName]?.resources;
 
