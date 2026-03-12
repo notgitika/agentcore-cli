@@ -6,24 +6,25 @@ import type { Command } from '@commander-js/extra-typings';
 import { Text, render } from 'ink';
 import React from 'react';
 
-export const registerPause = (program: Command) => {
-  const pauseCmd = program.command('pause').description(COMMAND_DESCRIPTIONS.pause);
+function registerOnlineEvalSubcommand(parent: Command, action: 'pause' | 'resume') {
+  const description = action === 'pause' ? 'Pause a deployed online eval config' : 'Resume a paused online eval config';
+  const pastTense = action === 'pause' ? 'Paused' : 'Resumed';
 
-  pauseCmd
+  parent
     .command('online-eval')
-    .description('Pause a deployed online eval config')
+    .description(description)
     .argument('<name>', 'Online eval config name')
     .option('--json', 'Output as JSON')
     .action(async (name: string, cliOptions: { json?: boolean }) => {
       requireProject();
 
       try {
-        const result = await handlePauseResume({ name, json: cliOptions.json }, 'pause');
+        const result = await handlePauseResume({ name, json: cliOptions.json }, action);
 
         if (cliOptions.json) {
           console.log(JSON.stringify(result));
         } else if (result.success) {
-          console.log(`Paused online eval config "${name}" (status: ${result.executionStatus})`);
+          console.log(`${pastTense} online eval config "${name}" (status: ${result.executionStatus})`);
         } else {
           render(<Text color="red">{result.error}</Text>);
         }
@@ -38,4 +39,14 @@ export const registerPause = (program: Command) => {
         process.exit(1);
       }
     });
+}
+
+export const registerPause = (program: Command) => {
+  const pauseCmd = program.command('pause').description(COMMAND_DESCRIPTIONS.pause);
+  registerOnlineEvalSubcommand(pauseCmd, 'pause');
+};
+
+export const registerResume = (program: Command) => {
+  const resumeCmd = program.command('resume').description(COMMAND_DESCRIPTIONS.resume);
+  registerOnlineEvalSubcommand(resumeCmd, 'resume');
 };

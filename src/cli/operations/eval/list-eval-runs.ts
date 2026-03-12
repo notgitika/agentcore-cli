@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../../errors';
 import { listEvalRuns } from './storage';
 import type { EvalRunResult, ListEvalRunsOptions } from './types';
 
@@ -21,6 +22,6 @@ export function handleListEvalRuns(options: ListEvalRunsOptions): ListEvalRunsRe
 
     return { success: true, runs };
   } catch (err) {
-    return { success: false, error: (err as Error).message };
+    return { success: false, error: getErrorMessage(err) };
   }
 }

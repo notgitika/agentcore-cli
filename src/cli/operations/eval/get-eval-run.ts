@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../../errors';
 import { loadEvalRun } from './storage';
 import type { EvalRunResult, GetEvalRunOptions } from './types';
 
@@ -12,6 +13,6 @@ export function handleGetEvalRun(options: GetEvalRunOptions): GetEvalRunResult {
     const run = loadEvalRun(options.runId);
     return { success: true, run };
   } catch (err) {
-    return { success: false, error: (err as Error).message };
+    return { success: false, error: getErrorMessage(err) };
   }
 }

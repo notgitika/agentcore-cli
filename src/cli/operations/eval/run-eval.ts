@@ -8,6 +8,7 @@ import type { EvalEvaluatorResult, EvalRunResult, EvalSessionScore, RunEvalOptio
 import { CloudWatchLogsClient, GetQueryResultsCommand, StartQueryCommand } from '@aws-sdk/client-cloudwatch-logs';
 import type { ResultField } from '@aws-sdk/client-cloudwatch-logs';
 import type { DocumentType } from '@smithy/types';
+import { writeFileSync } from 'fs';
 
 const SPANS_LOG_GROUP = 'aws/spans';
 
@@ -162,6 +163,11 @@ function isRelevantForEval(doc: Record<string, unknown>): boolean {
   return false;
 }
 
+/** Sanitize a value for use in CloudWatch Insights query strings by removing single quotes. */
+function sanitizeQueryValue(value: string): string {
+  return value.replace(/'/g, '');
+}
+
 interface SessionSpans {
   sessionId: string;
   spans: DocumentType[];
@@ -195,7 +201,7 @@ async function fetchSessionSpans(
     SPANS_LOG_GROUP,
     `fields @message, attributes.session.id as sessionId, traceId
      | parse resource.attributes.cloud.resource_id "runtime/*/" as parsedAgentId
-     | filter parsedAgentId = '${runtimeId}'
+     | filter parsedAgentId = '${sanitizeQueryValue(runtimeId)}'
      | sort startTimeUnixNano asc
      | limit 10000`,
     startTimeSec,
@@ -237,7 +243,7 @@ async function fetchSessionSpans(
 
   // 2. Query runtime logs from the agent's log group for the trace IDs found
   if (traceIds.size > 0) {
-    const traceFilter = [...traceIds].map(t => `'${t}'`).join(', ');
+    const traceFilter = [...traceIds].map(t => `'${sanitizeQueryValue(t)}'`).join(', ');
     let logRows: ResultField[][] = [];
     try {
       logRows = await executeQuery(
@@ -381,7 +387,13 @@ export async function handleRunEval(options: RunEvalOptions): Promise<RunEvalRes
   };
 
   // Save to disk
-  const filePath = options.output ?? saveEvalRun(run);
+  let filePath: string;
+  if (options.output) {
+    writeFileSync(options.output, JSON.stringify(run, null, 2));
+    filePath = options.output;
+  } else {
+    filePath = saveEvalRun(run);
+  }
 
   return { success: true, run, filePath };
 }
