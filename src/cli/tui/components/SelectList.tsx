@@ -29,7 +29,7 @@ export function SelectList<T extends SelectableItem>(props: {
         const disabled = item.disabled ?? false;
         return (
           <Box key={item.id}>
-            <Text wrap="truncate">
+            <Text wrap="wrap">
               <Text color={selected && !disabled ? 'cyan' : undefined} dimColor={disabled}>
                 {selected ? '❯' : ' '}{' '}
               </Text>

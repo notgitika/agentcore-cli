@@ -693,6 +693,47 @@ describe('handleRunEval', () => {
     );
   });
 
+  it('batches targetSpanIds into chunks of 10 for TOOL_CALL evaluators', async () => {
+    const ctx = makeDeployedContext();
+    mockLoadDeployedProjectConfig.mockResolvedValue(ctx);
+    mockResolveAgent.mockReturnValue({
+      success: true,
+      agent: {
+        agentName: 'my-agent',
+        targetName: 'dev',
+        region: 'us-east-1',
+        accountId: '111222333444',
+        runtimeId: 'rt-123',
+      },
+    });
+
+    // Create 12 tool call spans in one session
+    const spanRows = Array.from({ length: 12 }, (_, i) =>
+      makeToolCallSpanRow('session-1', 'trace-1', `span-tool-${i}`, `tool-${i}`)
+    );
+    setupCloudWatchToReturn(spanRows);
+
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 5.0, context: { spanContext: { sessionId: 'session-1' } } }],
+    });
+
+    const result = await handleRunEval({ evaluator: ['Builtin.ToolSelectionAccuracy'], days: 7 });
+
+    expect(result.success).toBe(true);
+    // Should be called twice: first batch of 10, second batch of 2
+    expect(mockEvaluate).toHaveBeenCalledTimes(2);
+    expect(mockEvaluate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetSpanIds: expect.arrayContaining(['span-tool-0']) as string[],
+      })
+    );
+
+    const firstCallSpanIds = (mockEvaluate.mock.calls[0] as [{ targetSpanIds: string[] }])[0].targetSpanIds;
+    const secondCallSpanIds = (mockEvaluate.mock.calls[1] as [{ targetSpanIds: string[] }])[0].targetSpanIds;
+    expect(firstCallSpanIds).toHaveLength(10);
+    expect(secondCallSpanIds).toHaveLength(2);
+  });
+
   it('fetches level from API for custom evaluators', async () => {
     const ctx = makeDeployedContext({
       evaluators: { MyTraceEval: { evaluatorId: 'eval-trace-custom' } },

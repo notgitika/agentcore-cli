@@ -239,16 +239,44 @@ function extractToolCallSpanIds(spans: DocumentType[]): string[] {
     const spanId = doc.spanId as string | undefined;
     if (!spanId) continue;
 
-    // Tool call spans have kind=CLIENT or attributes indicating tool usage
-    const kind = doc.kind as string | undefined;
+    // Tool call spans must have a tool name attribute — kind=CLIENT alone is too broad
     const attrs = doc.attributes as Record<string, unknown> | undefined;
-    const hasToolAttr = attrs?.['gen_ai.tool.name'] ?? attrs?.['tool.name'];
-
-    if (kind === 'CLIENT' || hasToolAttr) {
+    if (attrs?.['gen_ai.tool.name'] ?? attrs?.['tool.name']) {
       spanIds.push(spanId);
     }
   }
   return spanIds;
+}
+
+const EVALUATE_TARGET_BATCH_SIZE = 10;
+
+interface TargetIdBatch {
+  traceIds?: string[];
+  spanIds?: string[];
+}
+
+/**
+ * Batch targetTraceIds / targetSpanIds into chunks of EVALUATE_TARGET_BATCH_SIZE.
+ * The Evaluate API limits these arrays to 10 items per call.
+ * For SESSION-level evaluators (both undefined), returns a single batch with no IDs.
+ */
+function batchTargetIds(traceIds?: string[], spanIds?: string[]): TargetIdBatch[] {
+  if (spanIds) {
+    return chunk(spanIds, EVALUATE_TARGET_BATCH_SIZE).map(batch => ({ spanIds: batch }));
+  }
+  if (traceIds) {
+    return chunk(traceIds, EVALUATE_TARGET_BATCH_SIZE).map(batch => ({ traceIds: batch }));
+  }
+  // SESSION level — single call with no target IDs
+  return [{}];
+}
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const batches: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    batches.push(arr.slice(i, i + size));
+  }
+  return batches;
 }
 
 /**
@@ -543,28 +571,34 @@ export async function handleRunEval(options: RunEvalOptions): Promise<RunEvalRes
         if (targetSpanIds.length === 0) continue;
       }
 
-      const response = await evaluate({
-        region: ctx.region,
-        evaluatorId,
-        sessionSpans: session.spans,
-        targetTraceIds,
-        targetSpanIds,
-      });
+      // The Evaluate API limits targetSpanIds and targetTraceIds to 10 per call.
+      // Batch into chunks and merge results.
+      const batches = batchTargetIds(targetTraceIds, targetSpanIds);
 
-      for (const r of response.evaluationResults) {
-        sessionScores.push({
-          sessionId: r.context?.sessionId ?? session.sessionId,
-          traceId: r.context?.traceId,
-          spanId: r.context?.spanId,
-          value: r.value ?? 0,
-          label: r.label,
-          explanation: r.explanation,
-          errorMessage: r.errorMessage,
+      for (const batch of batches) {
+        const response = await evaluate({
+          region: ctx.region,
+          evaluatorId,
+          sessionSpans: session.spans,
+          targetTraceIds: batch.traceIds,
+          targetSpanIds: batch.spanIds,
         });
 
-        totalInputTokens += r.tokenUsage?.inputTokens ?? 0;
-        totalOutputTokens += r.tokenUsage?.outputTokens ?? 0;
-        totalTokens += r.tokenUsage?.totalTokens ?? 0;
+        for (const r of response.evaluationResults) {
+          sessionScores.push({
+            sessionId: r.context?.sessionId ?? session.sessionId,
+            traceId: r.context?.traceId,
+            spanId: r.context?.spanId,
+            value: r.value ?? 0,
+            label: r.label,
+            explanation: r.explanation,
+            errorMessage: r.errorMessage,
+          });
+
+          totalInputTokens += r.tokenUsage?.inputTokens ?? 0;
+          totalOutputTokens += r.tokenUsage?.outputTokens ?? 0;
+          totalTokens += r.tokenUsage?.totalTokens ?? 0;
+        }
       }
     }
 

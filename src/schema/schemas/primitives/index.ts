@@ -15,6 +15,7 @@ export type {
   CategoricalRating,
 } from './evaluator';
 export {
+  BedrockModelIdSchema,
   EvaluationLevelSchema,
   EvaluatorConfigSchema,
   EvaluatorNameSchema,

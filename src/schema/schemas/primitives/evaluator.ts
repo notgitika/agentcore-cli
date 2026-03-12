@@ -55,8 +55,16 @@ export type RatingScale = z.infer<typeof RatingScaleSchema>;
 // LLM-as-a-Judge Config
 // ============================================================================
 
+export const BedrockModelIdSchema = z
+  .string()
+  .min(1, 'Model ID is required')
+  .regex(
+    /^(arn:aws(-[a-z]+)?:bedrock:[a-z0-9-]+:\d{12}:(inference-profile|foundation-model)\/[a-zA-Z0-9._:-]+|([a-z]{2}(-[a-z]+)?\.)?[a-z0-9]+\.[a-zA-Z0-9._-]+(:[0-9]+)?)$/,
+    'Must be a valid Bedrock model ID (e.g. us.anthropic.claude-sonnet-4-5-20250929-v1:0) or model ARN'
+  );
+
 export const LlmAsAJudgeConfigSchema = z.object({
-  model: z.string().min(1, 'Model ID is required'),
+  model: BedrockModelIdSchema,
   instructions: z.string().min(1, 'Evaluation instructions are required'),
   ratingScale: RatingScaleSchema,
 });
