@@ -1,5 +1,6 @@
 import { getCredentialProvider } from '../../aws';
 import { evaluate } from '../../aws/agentcore';
+import { getEvaluator } from '../../aws/agentcore-control';
 import { DEFAULT_ENDPOINT_NAME } from '../../constants';
 import type { DeployedProjectConfig } from '../resolve-agent';
 import { loadDeployedProjectConfig, resolveAgent } from '../resolve-agent';
@@ -166,6 +167,90 @@ function resolveFromProject(context: DeployedProjectConfig, options: RunEvalOpti
   };
 }
 
+type EvaluatorLevel = 'SESSION' | 'TRACE' | 'TOOL_CALL';
+
+const BUILTIN_EVALUATOR_LEVELS: Record<string, EvaluatorLevel> = {
+  'Builtin.GoalSuccessRate': 'SESSION',
+  'Builtin.Correctness': 'TRACE',
+  'Builtin.Faithfulness': 'TRACE',
+  'Builtin.Helpfulness': 'TRACE',
+  'Builtin.ResponseRelevance': 'TRACE',
+  'Builtin.Conciseness': 'TRACE',
+  'Builtin.Coherence': 'TRACE',
+  'Builtin.InstructionFollowing': 'TRACE',
+  'Builtin.Refusal': 'TRACE',
+  'Builtin.ToolSelectionAccuracy': 'TOOL_CALL',
+};
+
+/**
+ * Resolve the evaluation level for each evaluator.
+ * Builtin evaluators use a known mapping; custom evaluators are fetched via the API.
+ */
+async function resolveEvaluatorLevels(evaluatorIds: string[], region: string): Promise<Map<string, EvaluatorLevel>> {
+  const levels = new Map<string, EvaluatorLevel>();
+
+  for (const id of evaluatorIds) {
+    const builtinLevel = BUILTIN_EVALUATOR_LEVELS[id];
+    if (builtinLevel) {
+      levels.set(id, builtinLevel);
+      continue;
+    }
+
+    // Unknown builtin — default to SESSION
+    if (id.startsWith('Builtin.')) {
+      levels.set(id, 'SESSION');
+      continue;
+    }
+
+    // Custom evaluator — fetch level from API
+    try {
+      const evaluator = await getEvaluator({ region, evaluatorId: id });
+      levels.set(id, (evaluator.level as EvaluatorLevel) ?? 'SESSION');
+    } catch {
+      // If we can't determine the level, default to SESSION (most permissive)
+      levels.set(id, 'SESSION');
+    }
+  }
+
+  return levels;
+}
+
+/**
+ * Extract distinct trace IDs from session spans.
+ */
+function extractTraceIds(spans: DocumentType[]): string[] {
+  const traceIds = new Set<string>();
+  for (const span of spans) {
+    const traceId = (span as Record<string, unknown>).traceId as string | undefined;
+    if (traceId) {
+      traceIds.add(traceId);
+    }
+  }
+  return [...traceIds];
+}
+
+/**
+ * Extract span IDs that represent tool calls from session spans.
+ */
+function extractToolCallSpanIds(spans: DocumentType[]): string[] {
+  const spanIds: string[] = [];
+  for (const span of spans) {
+    const doc = span as Record<string, unknown>;
+    const spanId = doc.spanId as string | undefined;
+    if (!spanId) continue;
+
+    // Tool call spans have kind=CLIENT or attributes indicating tool usage
+    const kind = doc.kind as string | undefined;
+    const attrs = doc.attributes as Record<string, unknown> | undefined;
+    const hasToolAttr = attrs?.['gen_ai.tool.name'] ?? attrs?.['tool.name'];
+
+    if (kind === 'CLIENT' || hasToolAttr) {
+      spanIds.push(spanId);
+    }
+  }
+  return spanIds;
+}
+
 /**
  * Execute a CloudWatch Logs Insights query and wait for results.
  */
@@ -255,18 +340,23 @@ interface SessionSpans {
   spans: DocumentType[];
 }
 
+interface FetchSpansOptions {
+  runtimeId: string;
+  runtimeLogGroup: string;
+  region: string;
+  lookbackDays: number;
+  sessionId?: string;
+  traceId?: string;
+}
+
 /**
  * Fetch OTel spans from the `aws/spans` log group and runtime logs from the agent's
  * log group, then group them by session.
  *
  * The Evaluate API requires spans from a single session per call.
  */
-async function fetchSessionSpans(
-  runtimeId: string,
-  runtimeLogGroup: string,
-  region: string,
-  lookbackDays: number
-): Promise<SessionSpans[]> {
+async function fetchSessionSpans(opts: FetchSpansOptions): Promise<SessionSpans[]> {
+  const { runtimeId, runtimeLogGroup, region, lookbackDays } = opts;
   const endTimeMs = Date.now();
   const startTimeMs = endTimeMs - lookbackDays * 24 * 60 * 60 * 1000;
   const startTimeSec = Math.floor(startTimeMs / 1000);
@@ -278,17 +368,20 @@ async function fetchSessionSpans(
   });
 
   // 1. Query proper OTel spans from the aws/spans log group
-  const spanRows = await executeQuery(
-    client,
-    SPANS_LOG_GROUP,
-    `fields @message, attributes.session.id as sessionId, traceId
+  let spanQuery = `fields @message, attributes.session.id as sessionId, traceId
      | parse resource.attributes.cloud.resource_id "runtime/*/" as parsedAgentId
-     | filter parsedAgentId = '${sanitizeQueryValue(runtimeId)}'
-     | sort startTimeUnixNano asc
-     | limit 10000`,
-    startTimeSec,
-    endTimeSec
-  );
+     | filter parsedAgentId = '${sanitizeQueryValue(runtimeId)}'`;
+
+  if (opts.sessionId) {
+    spanQuery += `\n     | filter attributes.session.id = '${sanitizeQueryValue(opts.sessionId)}'`;
+  }
+  if (opts.traceId) {
+    spanQuery += `\n     | filter traceId = '${sanitizeQueryValue(opts.traceId)}'`;
+  }
+
+  spanQuery += `\n     | sort startTimeUnixNano asc\n     | limit 10000`;
+
+  const spanRows = await executeQuery(client, SPANS_LOG_GROUP, spanQuery, startTimeSec, endTimeSec);
 
   // Group spans by session and collect trace IDs
   const sessionMap = new Map<string, DocumentType[]>();
@@ -405,7 +498,14 @@ export async function handleRunEval(options: RunEvalOptions): Promise<RunEvalRes
   const { ctx } = resolution;
 
   // Fetch spans grouped by session
-  const sessions = await fetchSessionSpans(ctx.runtimeId, ctx.runtimeLogGroup, ctx.region, options.days);
+  const sessions = await fetchSessionSpans({
+    runtimeId: ctx.runtimeId,
+    runtimeLogGroup: ctx.runtimeLogGroup,
+    region: ctx.region,
+    lookbackDays: options.days,
+    sessionId: options.sessionId,
+    traceId: options.traceId,
+  });
 
   if (sessions.length === 0) {
     return {
@@ -414,12 +514,16 @@ export async function handleRunEval(options: RunEvalOptions): Promise<RunEvalRes
     };
   }
 
-  // Run each evaluator against each session
+  // Resolve evaluator levels to determine how to send spans
+  const evaluatorLevels = await resolveEvaluatorLevels(ctx.evaluatorIds, ctx.region);
+
+  // Run each evaluator against each session with level-appropriate targeting
   const results: EvalEvaluatorResult[] = [];
 
   for (let i = 0; i < ctx.evaluatorIds.length; i++) {
     const evaluatorId = ctx.evaluatorIds[i]!;
     const evaluatorName = ctx.evaluatorLabels[i] ?? evaluatorId;
+    const level = evaluatorLevels.get(evaluatorId) ?? 'SESSION';
 
     const sessionScores: EvalSessionScore[] = [];
     let totalInputTokens = 0;
@@ -427,10 +531,24 @@ export async function handleRunEval(options: RunEvalOptions): Promise<RunEvalRes
     let totalTokens = 0;
 
     for (const session of sessions) {
+      // Build evaluation target based on evaluator level
+      let targetTraceIds: string[] | undefined;
+      let targetSpanIds: string[] | undefined;
+
+      if (level === 'TRACE') {
+        targetTraceIds = extractTraceIds(session.spans);
+        if (targetTraceIds.length === 0) continue;
+      } else if (level === 'TOOL_CALL') {
+        targetSpanIds = extractToolCallSpanIds(session.spans);
+        if (targetSpanIds.length === 0) continue;
+      }
+
       const response = await evaluate({
         region: ctx.region,
         evaluatorId,
         sessionSpans: session.spans,
+        targetTraceIds,
+        targetSpanIds,
       });
 
       for (const r of response.evaluationResults) {

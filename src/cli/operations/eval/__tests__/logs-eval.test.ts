@@ -1,14 +1,19 @@
 import { handleLogsEval } from '../logs-eval.js';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockLoadDeployedProjectConfig = vi.fn();
 const mockResolveAgent = vi.fn();
+const mockGetOnlineEvaluationConfig = vi.fn();
 const mockSearchLogs = vi.fn();
 const mockStreamLogs = vi.fn();
 
 vi.mock('../../resolve-agent', () => ({
   loadDeployedProjectConfig: () => mockLoadDeployedProjectConfig(),
   resolveAgent: (...args: unknown[]) => mockResolveAgent(...args),
+}));
+
+vi.mock('../../../aws/agentcore-control', () => ({
+  getOnlineEvaluationConfig: (...args: unknown[]) => mockGetOnlineEvaluationConfig(...args),
 }));
 
 vi.mock('../../../aws/cloudwatch', () => ({
@@ -71,6 +76,19 @@ function makeResolvedAgent(agentName = 'my-agent') {
 }
 
 describe('handleLogsEval', () => {
+  beforeEach(() => {
+    // Default: API returns the convention-based log group name
+    mockGetOnlineEvaluationConfig.mockImplementation((opts: { configId: string }) =>
+      Promise.resolve({
+        configId: opts.configId,
+        configName: 'eval-config',
+        status: 'ACTIVE',
+        executionStatus: 'ENABLED',
+        outputLogGroupName: `/aws/bedrock-agentcore/evaluations/results/${opts.configId}`,
+      })
+    );
+  });
+
   afterEach(() => vi.clearAllMocks());
 
   it('returns error when agent resolution fails', async () => {
@@ -205,5 +223,81 @@ describe('handleLogsEval', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('No deployed online eval configs found');
+  });
+
+  it('uses log group name from API when available', async () => {
+    const ctx = makeContext();
+    mockLoadDeployedProjectConfig.mockResolvedValue(ctx);
+    mockResolveAgent.mockReturnValue(makeResolvedAgent());
+
+    mockGetOnlineEvaluationConfig.mockResolvedValue({
+      configId: 'cfg-123',
+      configName: 'eval-config',
+      status: 'ACTIVE',
+      executionStatus: 'ENABLED',
+      outputLogGroupName: '/custom/log/group/from-api',
+    });
+
+    async function* emptyGenerator() {
+      // no events
+    }
+    mockSearchLogs.mockReturnValue(emptyGenerator());
+
+    await handleLogsEval({ since: '1h' });
+
+    expect(mockSearchLogs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        logGroupName: '/custom/log/group/from-api',
+      })
+    );
+  });
+
+  it('falls back to convention-based log group when API call fails', async () => {
+    const ctx = makeContext();
+    mockLoadDeployedProjectConfig.mockResolvedValue(ctx);
+    mockResolveAgent.mockReturnValue(makeResolvedAgent());
+
+    mockGetOnlineEvaluationConfig.mockRejectedValue(new Error('AccessDenied'));
+
+    async function* emptyGenerator() {
+      // no events
+    }
+    mockSearchLogs.mockReturnValue(emptyGenerator());
+
+    await handleLogsEval({ since: '1h' });
+
+    expect(mockSearchLogs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        logGroupName: '/aws/bedrock-agentcore/evaluations/results/cfg-123',
+      })
+    );
+  });
+
+  it('surfaces failure reason from config in failed state', async () => {
+    const ctx = makeContext();
+    mockLoadDeployedProjectConfig.mockResolvedValue(ctx);
+    mockResolveAgent.mockReturnValue(makeResolvedAgent());
+
+    mockGetOnlineEvaluationConfig.mockResolvedValue({
+      configId: 'cfg-123',
+      configName: 'eval-config',
+      status: 'CREATE_FAILED',
+      executionStatus: 'DISABLED',
+      failureReason: 'IAM role does not exist',
+      outputLogGroupName: '/aws/bedrock-agentcore/evaluations/results/cfg-123',
+    });
+
+    async function* emptyGenerator() {
+      // no events
+    }
+    mockSearchLogs.mockReturnValue(emptyGenerator());
+
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await handleLogsEval({ since: '1h' });
+
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('IAM role does not exist'));
+    consoleSpy.mockRestore();
   });
 });

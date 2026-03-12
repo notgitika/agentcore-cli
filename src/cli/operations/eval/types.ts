@@ -44,6 +44,10 @@ export interface RunEvalOptions {
   agentArn?: string;
   /** AWS region (required with --agent-arn, inferred otherwise) */
   region?: string;
+  /** Filter to a specific session */
+  sessionId?: string;
+  /** Filter to a specific trace */
+  traceId?: string;
   days: number;
   output?: string;
   json?: boolean;

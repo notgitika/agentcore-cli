@@ -148,6 +148,13 @@ export interface UpdateOnlineEvalStatusOptions {
   executionStatus: OnlineEvalExecutionStatus;
 }
 
+export interface UpdateOnlineEvalOptions {
+  region: string;
+  onlineEvaluationConfigId: string;
+  executionStatus?: OnlineEvalExecutionStatus;
+  description?: string;
+}
+
 export interface UpdateOnlineEvalStatusResult {
   configId: string;
   executionStatus: string;
@@ -160,6 +167,13 @@ export interface UpdateOnlineEvalStatusResult {
 export async function updateOnlineEvalExecutionStatus(
   options: UpdateOnlineEvalStatusOptions
 ): Promise<UpdateOnlineEvalStatusResult> {
+  return updateOnlineEvalConfig(options);
+}
+
+/**
+ * Update an online evaluation config with any supported fields.
+ */
+export async function updateOnlineEvalConfig(options: UpdateOnlineEvalOptions): Promise<UpdateOnlineEvalStatusResult> {
   const client = new BedrockAgentCoreControlClient({
     region: options.region,
     credentials: getCredentialProvider(),
@@ -167,14 +181,15 @@ export async function updateOnlineEvalExecutionStatus(
 
   const command = new UpdateOnlineEvaluationConfigCommand({
     onlineEvaluationConfigId: options.onlineEvaluationConfigId,
-    executionStatus: options.executionStatus,
+    ...(options.executionStatus && { executionStatus: options.executionStatus }),
+    ...(options.description !== undefined && { description: options.description }),
   });
 
   const response = await client.send(command);
 
   return {
     configId: response.onlineEvaluationConfigId ?? options.onlineEvaluationConfigId,
-    executionStatus: response.executionStatus ?? options.executionStatus,
+    executionStatus: response.executionStatus ?? options.executionStatus ?? 'UNKNOWN',
     status: response.status ?? 'UNKNOWN',
   };
 }

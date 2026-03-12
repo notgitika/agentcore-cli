@@ -7,6 +7,7 @@ import type {
   DeployedState,
 } from '../../../schema';
 import { getAgentRuntimeStatus } from '../../aws';
+import { getEvaluator, getOnlineEvaluationConfig } from '../../aws/agentcore-control';
 import { getErrorMessage } from '../../errors';
 import { ExecLogger } from '../../logging';
 import type { ResourceDeploymentState } from './constants';
@@ -261,6 +262,82 @@ export async function handleProjectStatus(
 
       const hasErrors = resources.some(r => r.error);
       logger.endStep(hasErrors ? 'error' : 'success');
+    }
+
+    // Enrich deployed evaluators with live status
+    const evaluatorStates = targetResources?.evaluators ?? {};
+    const deployedEvaluators = resources.filter(
+      e => e.resourceType === 'evaluator' && e.deploymentState === 'deployed' && evaluatorStates[e.name]
+    );
+
+    if (deployedEvaluators.length > 0) {
+      logger.startStep(
+        `Fetch evaluator status (${deployedEvaluators.length} evaluator${deployedEvaluators.length !== 1 ? 's' : ''})`
+      );
+
+      await Promise.all(
+        resources.map(async (entry, i) => {
+          if (entry.resourceType !== 'evaluator' || entry.deploymentState !== 'deployed') return;
+
+          const evalState = evaluatorStates[entry.name];
+          if (!evalState) return;
+
+          try {
+            const evalResult = await getEvaluator({
+              region: targetConfig.region,
+              evaluatorId: evalState.evaluatorId,
+            });
+            resources[i] = { ...entry, detail: `${entry.detail} — ${evalResult.status}` };
+            logger.log(`  ${entry.name}: ${evalResult.status} (${evalState.evaluatorId})`);
+          } catch (error) {
+            const errorMsg = getErrorMessage(error);
+            resources[i] = { ...entry, error: errorMsg };
+            logger.log(`  ${entry.name}: ERROR - ${errorMsg}`, 'error');
+          }
+        })
+      );
+
+      const hasEvalErrors = resources.some(r => r.resourceType === 'evaluator' && r.error);
+      logger.endStep(hasEvalErrors ? 'error' : 'success');
+    }
+
+    // Enrich deployed online eval configs with live status
+    const onlineEvalStates = targetResources?.onlineEvalConfigs ?? {};
+    const deployedOnlineEvals = resources.filter(
+      e => e.resourceType === 'online-eval' && e.deploymentState === 'deployed' && onlineEvalStates[e.name]
+    );
+
+    if (deployedOnlineEvals.length > 0) {
+      logger.startStep(
+        `Fetch online eval status (${deployedOnlineEvals.length} config${deployedOnlineEvals.length !== 1 ? 's' : ''})`
+      );
+
+      await Promise.all(
+        resources.map(async (entry, i) => {
+          if (entry.resourceType !== 'online-eval' || entry.deploymentState !== 'deployed') return;
+
+          const configState = onlineEvalStates[entry.name];
+          if (!configState) return;
+
+          try {
+            const configResult = await getOnlineEvaluationConfig({
+              region: targetConfig.region,
+              configId: configState.onlineEvaluationConfigId,
+            });
+            const statusLabel = `${configResult.status} (${configResult.executionStatus})`;
+            const detail = entry.detail ? `${entry.detail} — ${statusLabel}` : statusLabel;
+            resources[i] = { ...entry, detail };
+            logger.log(`  ${entry.name}: ${statusLabel} (${configState.onlineEvaluationConfigId})`);
+          } catch (error) {
+            const errorMsg = getErrorMessage(error);
+            resources[i] = { ...entry, error: errorMsg };
+            logger.log(`  ${entry.name}: ERROR - ${errorMsg}`, 'error');
+          }
+        })
+      );
+
+      const hasOnlineEvalErrors = resources.some(r => r.resourceType === 'online-eval' && r.error);
+      logger.endStep(hasOnlineEvalErrors ? 'error' : 'success');
     }
   }
 

@@ -1,3 +1,12 @@
+import {
+  getEvaluator,
+  getOnlineEvaluationConfig,
+  listEvaluators,
+  listOnlineEvaluationConfigs,
+  updateOnlineEvalConfig,
+} from '../../aws/agentcore-control';
+import type { OnlineEvalExecutionStatus } from '../../aws/agentcore-control';
+import { detectRegion } from '../../aws/region';
 import { getErrorMessage } from '../../errors';
 import { handleGetEvalRun, handleListEvalRuns } from '../../operations/eval';
 import { COMMAND_DESCRIPTIONS } from '../../tui/copy';
@@ -125,6 +134,236 @@ export const registerEval = (program: Command) => {
             }
             console.log('');
           }
+        } catch (error) {
+          if (cliOptions.json) {
+            console.log(JSON.stringify({ success: false, error: getErrorMessage(error) }));
+          } else {
+            render(<Text color="red">Error: {getErrorMessage(error)}</Text>);
+          }
+          process.exit(1);
+        }
+      }
+    );
+
+  // ── WI-7: Evaluator Discovery Commands ──────────────────────────────
+
+  evalCmd
+    .command('list-evaluators')
+    .description('List available evaluators (built-in and custom)')
+    .option('--region <region>', 'AWS region')
+    .option('--max-results <n>', 'Maximum number of results')
+    .option('--json', 'Output as JSON')
+    .action(async (cliOptions: { region?: string; maxResults?: string; json?: boolean }) => {
+      try {
+        const region = cliOptions.region ?? (await detectRegion()).region;
+        const result = await listEvaluators({
+          region,
+          maxResults: cliOptions.maxResults ? parseInt(cliOptions.maxResults, 10) : undefined,
+        });
+
+        if (cliOptions.json) {
+          console.log(JSON.stringify(result));
+          return;
+        }
+
+        if (result.evaluators.length === 0) {
+          console.log('No evaluators found.');
+          return;
+        }
+
+        console.log(`\n${'ID'.padEnd(45)} ${'Name'.padEnd(30)} ${'Type'.padEnd(10)} ${'Level'.padEnd(12)} Status`);
+        console.log('─'.repeat(110));
+
+        for (const e of result.evaluators) {
+          console.log(
+            `${e.evaluatorId.padEnd(45)} ${e.evaluatorName.padEnd(30)} ${e.evaluatorType.padEnd(10)} ${(e.level ?? '—').padEnd(12)} ${e.status}`
+          );
+        }
+        console.log('');
+      } catch (error) {
+        if (cliOptions.json) {
+          console.log(JSON.stringify({ success: false, error: getErrorMessage(error) }));
+        } else {
+          render(<Text color="red">Error: {getErrorMessage(error)}</Text>);
+        }
+        process.exit(1);
+      }
+    });
+
+  evalCmd
+    .command('get-evaluator')
+    .description('Get details of a specific evaluator')
+    .argument('<evaluatorId>', 'Evaluator ID')
+    .option('--region <region>', 'AWS region')
+    .option('--json', 'Output as JSON')
+    .action(async (evaluatorId: string, cliOptions: { region?: string; json?: boolean }) => {
+      try {
+        const region = cliOptions.region ?? (await detectRegion()).region;
+        const result = await getEvaluator({ region, evaluatorId });
+
+        if (cliOptions.json) {
+          console.log(JSON.stringify(result));
+          return;
+        }
+
+        console.log(`\nEvaluator: ${result.evaluatorName}`);
+        console.log(`ID: ${result.evaluatorId}`);
+        console.log(`ARN: ${result.evaluatorArn}`);
+        console.log(`Level: ${result.level}`);
+        console.log(`Status: ${result.status}`);
+        if (result.description) {
+          console.log(`Description: ${result.description}`);
+        }
+        console.log('');
+      } catch (error) {
+        if (cliOptions.json) {
+          console.log(JSON.stringify({ success: false, error: getErrorMessage(error) }));
+        } else {
+          render(<Text color="red">Error: {getErrorMessage(error)}</Text>);
+        }
+        process.exit(1);
+      }
+    });
+
+  // ── WI-8: Online Eval Config Inspection Commands ────────────────────
+
+  evalCmd
+    .command('list-online')
+    .description('List online evaluation configs')
+    .option('--region <region>', 'AWS region')
+    .option('--max-results <n>', 'Maximum number of results')
+    .option('--json', 'Output as JSON')
+    .action(async (cliOptions: { region?: string; maxResults?: string; json?: boolean }) => {
+      try {
+        const region = cliOptions.region ?? (await detectRegion()).region;
+        const result = await listOnlineEvaluationConfigs({
+          region,
+          maxResults: cliOptions.maxResults ? parseInt(cliOptions.maxResults, 10) : undefined,
+        });
+
+        if (cliOptions.json) {
+          console.log(JSON.stringify(result));
+          return;
+        }
+
+        if (result.configs.length === 0) {
+          console.log('No online eval configs found.');
+          return;
+        }
+
+        console.log(`\n${'ID'.padEnd(50)} ${'Name'.padEnd(30)} ${'Status'.padEnd(18)} Execution`);
+        console.log('─'.repeat(115));
+
+        for (const c of result.configs) {
+          const failSuffix = c.failureReason ? ` (${c.failureReason})` : '';
+          console.log(
+            `${c.configId.padEnd(50)} ${c.configName.padEnd(30)} ${c.status.padEnd(18)} ${c.executionStatus}${failSuffix}`
+          );
+        }
+        console.log('');
+      } catch (error) {
+        if (cliOptions.json) {
+          console.log(JSON.stringify({ success: false, error: getErrorMessage(error) }));
+        } else {
+          render(<Text color="red">Error: {getErrorMessage(error)}</Text>);
+        }
+        process.exit(1);
+      }
+    });
+
+  evalCmd
+    .command('get-online')
+    .description('Get details of a specific online evaluation config')
+    .argument('<configId>', 'Online evaluation config ID')
+    .option('--region <region>', 'AWS region')
+    .option('--json', 'Output as JSON')
+    .action(async (configId: string, cliOptions: { region?: string; json?: boolean }) => {
+      try {
+        const region = cliOptions.region ?? (await detectRegion()).region;
+        const result = await getOnlineEvaluationConfig({ region, configId });
+
+        if (cliOptions.json) {
+          console.log(JSON.stringify(result));
+          return;
+        }
+
+        console.log(`\nOnline Eval Config: ${result.configName}`);
+        console.log(`ID: ${result.configId}`);
+        console.log(`ARN: ${result.configArn}`);
+        console.log(`Status: ${result.status}`);
+        console.log(`Execution: ${result.executionStatus}`);
+        if (result.description) {
+          console.log(`Description: ${result.description}`);
+        }
+        if (result.failureReason) {
+          console.log(`Failure: ${result.failureReason}`);
+        }
+        if (result.outputLogGroupName) {
+          console.log(`Log Group: ${result.outputLogGroupName}`);
+        }
+        console.log('');
+      } catch (error) {
+        if (cliOptions.json) {
+          console.log(JSON.stringify({ success: false, error: getErrorMessage(error) }));
+        } else {
+          render(<Text color="red">Error: {getErrorMessage(error)}</Text>);
+        }
+        process.exit(1);
+      }
+    });
+
+  // ── WI-9: Online Eval Config Update ─────────────────────────────────
+
+  evalCmd
+    .command('update-online')
+    .description('Update a deployed online evaluation config')
+    .argument('<configId>', 'Online evaluation config ID')
+    .option('--status <status>', 'Set execution status (ENABLED or DISABLED)')
+    .option('--description <text>', 'Set config description')
+    .option('--region <region>', 'AWS region')
+    .option('--json', 'Output as JSON')
+    .action(
+      async (
+        configId: string,
+        cliOptions: { status?: string; description?: string; region?: string; json?: boolean }
+      ) => {
+        try {
+          if (!cliOptions.status && cliOptions.description === undefined) {
+            const error = 'At least one of --status or --description is required';
+            if (cliOptions.json) {
+              console.log(JSON.stringify({ success: false, error }));
+            } else {
+              render(<Text color="red">{error}</Text>);
+            }
+            process.exit(1);
+          }
+
+          if (cliOptions.status && !['ENABLED', 'DISABLED'].includes(cliOptions.status)) {
+            const error = `Invalid status "${cliOptions.status}". Must be ENABLED or DISABLED.`;
+            if (cliOptions.json) {
+              console.log(JSON.stringify({ success: false, error }));
+            } else {
+              render(<Text color="red">{error}</Text>);
+            }
+            process.exit(1);
+          }
+
+          const region = cliOptions.region ?? (await detectRegion()).region;
+          const result = await updateOnlineEvalConfig({
+            region,
+            onlineEvaluationConfigId: configId,
+            executionStatus: cliOptions.status as OnlineEvalExecutionStatus | undefined,
+            description: cliOptions.description,
+          });
+
+          if (cliOptions.json) {
+            console.log(JSON.stringify(result));
+            return;
+          }
+
+          console.log(`Updated online eval config "${configId}"`);
+          console.log(`  Status: ${result.status}`);
+          console.log(`  Execution: ${result.executionStatus}`);
         } catch (error) {
           if (cliOptions.json) {
             console.log(JSON.stringify({ success: false, error: getErrorMessage(error) }));

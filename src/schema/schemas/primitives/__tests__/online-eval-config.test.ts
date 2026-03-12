@@ -87,4 +87,23 @@ describe('OnlineEvalConfigSchema', () => {
     const config = { ...validConfig, evaluators: [''] };
     expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(false);
   });
+
+  it('accepts optional description field', () => {
+    const config = { ...validConfig, description: 'My eval config description' };
+    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(true);
+  });
+
+  it('rejects description longer than 200 characters', () => {
+    const config = { ...validConfig, description: 'x'.repeat(201) };
+    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(false);
+  });
+
+  it('accepts optional enableOnCreate field', () => {
+    const config = { ...validConfig, enableOnCreate: false };
+    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(true);
+  });
+
+  it('accepts config without description and enableOnCreate', () => {
+    expect(OnlineEvalConfigSchema.safeParse(validConfig).success).toBe(true);
+  });
 });

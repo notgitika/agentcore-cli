@@ -22,6 +22,10 @@ export const OnlineEvalConfigSchema = z.object({
   evaluators: z.array(z.string().min(1)).min(1, 'At least one evaluator is required'),
   /** Sampling rate as a percentage (0.01 to 100) */
   samplingRate: z.number().min(0.01).max(100),
+  /** Optional description for the online eval config */
+  description: z.string().max(200).optional(),
+  /** Whether to enable execution on create (default: true) */
+  enableOnCreate: z.boolean().optional(),
 });
 
 export type OnlineEvalConfig = z.infer<typeof OnlineEvalConfigSchema>;

@@ -9,6 +9,8 @@ export interface AddOnlineEvalConfig {
   agents: string[];
   evaluators: string[];
   samplingRate: number;
+  description?: string;
+  enableOnCreate?: boolean;
 }
 
 export const ONLINE_EVAL_STEP_LABELS: Record<AddOnlineEvalStep, string> = {
