@@ -37,6 +37,8 @@ export const registerRun = (program: Command) => {
     .option('-e, --evaluator <names...>', 'Evaluator name(s) or Builtin.* IDs')
     .option('--evaluator-arn <arns...>', 'Evaluator ARN(s) to use directly')
     .option('--region <region>', 'AWS region (required with --agent-arn, inferred otherwise)')
+    .option('-s, --session-id <id>', 'Evaluate a specific session only')
+    .option('-t, --trace-id <id>', 'Evaluate a specific trace only')
     .option('--days <days>', 'Lookback window in days', '7')
     .option('--output <path>', 'Custom output file path for results')
     .option('--json', 'Output as JSON')
@@ -47,6 +49,8 @@ export const registerRun = (program: Command) => {
         evaluator?: string[];
         evaluatorArn?: string[];
         region?: string;
+        sessionId?: string;
+        traceId?: string;
         days: string;
         output?: string;
         json?: boolean;
@@ -71,6 +75,8 @@ export const registerRun = (program: Command) => {
           evaluator: cliOptions.evaluator ?? [],
           evaluatorArn: cliOptions.evaluatorArn,
           region: cliOptions.region,
+          sessionId: cliOptions.sessionId,
+          traceId: cliOptions.traceId,
           days: parseInt(cliOptions.days, 10),
           output: cliOptions.output,
           json: cliOptions.json,

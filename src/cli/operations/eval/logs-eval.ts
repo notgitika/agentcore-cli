@@ -1,4 +1,5 @@
 import { parseTimeString } from '../../../lib/utils';
+import { getOnlineEvaluationConfig } from '../../aws/agentcore-control';
 import { searchLogs, streamLogs } from '../../aws/cloudwatch';
 import type { DeployedProjectConfig } from '../resolve-agent';
 import { loadDeployedProjectConfig, resolveAgent } from '../resolve-agent';
@@ -25,26 +26,50 @@ function formatLogLine(event: { timestamp: number; message: string }, json: bool
   return `${ts}  ${event.message}`;
 }
 
+interface ResolvedLogGroup {
+  logGroupName: string;
+  configName: string;
+  failureReason?: string;
+}
+
 /**
  * Resolve the online eval config log group names for a given agent.
- * Online eval results are written to: /aws/bedrock-agentcore/evaluations/results/{onlineEvalConfigId}
+ * Fetches the actual log group from the API when possible, falls back to convention.
  */
-function resolveEvalLogGroups(context: DeployedProjectConfig, agentName: string, targetName: string): string[] {
+async function resolveEvalLogGroups(
+  context: DeployedProjectConfig,
+  agentName: string,
+  targetName: string,
+  region: string
+): Promise<ResolvedLogGroup[]> {
   const { project, deployedState } = context;
   const targetResources = deployedState.targets[targetName]?.resources;
 
   // Find online eval configs that monitor this agent
   const matchingConfigs = (project.onlineEvalConfigs ?? []).filter(c => c.agents.includes(agentName));
 
-  const logGroups: string[] = [];
+  const results: ResolvedLogGroup[] = [];
   for (const config of matchingConfigs) {
     const deployed = targetResources?.onlineEvalConfigs?.[config.name];
-    if (deployed?.onlineEvaluationConfigId) {
-      logGroups.push(`/aws/bedrock-agentcore/evaluations/results/${deployed.onlineEvaluationConfigId}`);
+    if (!deployed?.onlineEvaluationConfigId) continue;
+
+    const configId = deployed.onlineEvaluationConfigId;
+    const fallbackLogGroup = `/aws/bedrock-agentcore/evaluations/results/${configId}`;
+
+    try {
+      const apiConfig = await getOnlineEvaluationConfig({ region, configId });
+      results.push({
+        logGroupName: apiConfig.outputLogGroupName ?? fallbackLogGroup,
+        configName: config.name,
+        failureReason: apiConfig.failureReason,
+      });
+    } catch {
+      // API call failed — fall back to convention-based name
+      results.push({ logGroupName: fallbackLogGroup, configName: config.name });
     }
   }
 
-  return logGroups;
+  return results;
 }
 
 export async function handleLogsEval(options: LogsEvalOptions): Promise<LogsEvalResult> {
@@ -57,13 +82,20 @@ export async function handleLogsEval(options: LogsEvalOptions): Promise<LogsEval
 
   const { agent } = agentResult;
 
-  const logGroups = resolveEvalLogGroups(context, agent.agentName, agent.targetName);
+  const resolvedLogGroups = await resolveEvalLogGroups(context, agent.agentName, agent.targetName, agent.region);
 
-  if (logGroups.length === 0) {
+  if (resolvedLogGroups.length === 0) {
     return {
       success: false,
       error: `No deployed online eval configs found for agent '${agent.agentName}'. Add one with 'agentcore add online-eval' and deploy.`,
     };
+  }
+
+  // Surface failure reasons from configs that are in a failed state
+  for (const lg of resolvedLogGroups) {
+    if (lg.failureReason) {
+      console.error(`Warning: Online eval config '${lg.configName}' has a failure: ${lg.failureReason}`);
+    }
   }
 
   const isJson = options.json ?? false;
@@ -75,7 +107,7 @@ export async function handleLogsEval(options: LogsEvalOptions): Promise<LogsEval
 
   try {
     // Query all matching log groups
-    for (const logGroupName of logGroups) {
+    for (const { logGroupName } of resolvedLogGroups) {
       if (!isFollow) {
         const startTimeMs = options.since ? parseTimeString(options.since) : Date.now() - 3_600_000;
         const endTimeMs = options.until ? parseTimeString(options.until) : Date.now();

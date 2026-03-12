@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mockResolveAgent = vi.fn();
 const mockLoadDeployedProjectConfig = vi.fn();
 const mockEvaluate = vi.fn();
+const mockGetEvaluator = vi.fn();
 const mockSaveEvalRun = vi.fn();
 const mockGenerateRunId = vi.fn();
 const mockSend = vi.fn();
@@ -19,6 +20,10 @@ vi.mock('../../resolve-agent', () => ({
 
 vi.mock('../../../aws/agentcore', () => ({
   evaluate: (...args: unknown[]) => mockEvaluate(...args),
+}));
+
+vi.mock('../../../aws/agentcore-control', () => ({
+  getEvaluator: (...args: unknown[]) => mockGetEvaluator(...args),
 }));
 
 vi.mock('../../../aws', () => ({
@@ -87,6 +92,21 @@ function makeOtelSpanRow(sessionId: string, traceId: string, spanBody: Record<st
     scope: { name: 'strands.telemetry.tracer' },
     body: spanBody,
     traceId,
+  });
+  return [
+    { field: '@message', value: message },
+    { field: 'sessionId', value: sessionId },
+    { field: 'traceId', value: traceId },
+  ];
+}
+
+function makeToolCallSpanRow(sessionId: string, traceId: string, spanId: string, toolName: string) {
+  const message = JSON.stringify({
+    scope: { name: 'strands.telemetry.tracer' },
+    traceId,
+    spanId,
+    kind: 'CLIENT',
+    attributes: { 'gen_ai.tool.name': toolName },
   });
   return [
     { field: '@message', value: message },
@@ -575,6 +595,280 @@ describe('handleRunEval', () => {
     expect(result.error).toContain('No evaluators specified');
   });
 
+  // ─── Evaluator-level grouping ────────────────────────────────────────────
+
+  it('sends targetTraceIds for TRACE-level builtin evaluators', async () => {
+    const ctx = makeDeployedContext();
+    mockLoadDeployedProjectConfig.mockResolvedValue(ctx);
+    mockResolveAgent.mockReturnValue({
+      success: true,
+      agent: {
+        agentName: 'my-agent',
+        targetName: 'dev',
+        region: 'us-east-1',
+        accountId: '111222333444',
+        runtimeId: 'rt-123',
+      },
+    });
+
+    const spanRows = [makeOtelSpanRow('session-1', 'trace-1'), makeOtelSpanRow('session-1', 'trace-2')];
+    setupCloudWatchToReturn(spanRows);
+
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 4.0, context: { spanContext: { sessionId: 'session-1', traceId: 'trace-1' } } }],
+    });
+
+    // Builtin.Helpfulness is TRACE-level
+    const result = await handleRunEval({ evaluator: ['Builtin.Helpfulness'], days: 7 });
+
+    expect(result.success).toBe(true);
+    expect(mockEvaluate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetTraceIds: expect.arrayContaining(['trace-1', 'trace-2']),
+      })
+    );
+  });
+
+  it('does not send targetTraceIds for SESSION-level evaluators', async () => {
+    const ctx = makeDeployedContext();
+    mockLoadDeployedProjectConfig.mockResolvedValue(ctx);
+    mockResolveAgent.mockReturnValue({
+      success: true,
+      agent: {
+        agentName: 'my-agent',
+        targetName: 'dev',
+        region: 'us-east-1',
+        accountId: '111222333444',
+        runtimeId: 'rt-123',
+      },
+    });
+
+    setupCloudWatchToReturn([makeOtelSpanRow('session-1', 'trace-1')]);
+
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 3.0, context: { spanContext: { sessionId: 'session-1' } } }],
+    });
+
+    // Builtin.GoalSuccessRate is SESSION-level
+    const result = await handleRunEval({ evaluator: ['Builtin.GoalSuccessRate'], days: 7 });
+
+    expect(result.success).toBe(true);
+    expect(mockEvaluate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetTraceIds: undefined,
+        targetSpanIds: undefined,
+      })
+    );
+  });
+
+  it('sends targetSpanIds for TOOL_CALL-level evaluators', async () => {
+    const ctx = makeDeployedContext();
+    mockLoadDeployedProjectConfig.mockResolvedValue(ctx);
+    mockResolveAgent.mockReturnValue({
+      success: true,
+      agent: {
+        agentName: 'my-agent',
+        targetName: 'dev',
+        region: 'us-east-1',
+        accountId: '111222333444',
+        runtimeId: 'rt-123',
+      },
+    });
+
+    const spanRows = [makeToolCallSpanRow('session-1', 'trace-1', 'span-tool-1', 'calculator')];
+    setupCloudWatchToReturn(spanRows);
+
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 5.0, context: { spanContext: { sessionId: 'session-1', spanId: 'span-tool-1' } } }],
+    });
+
+    // Builtin.ToolSelectionAccuracy is TOOL_CALL-level
+    const result = await handleRunEval({ evaluator: ['Builtin.ToolSelectionAccuracy'], days: 7 });
+
+    expect(result.success).toBe(true);
+    expect(mockEvaluate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetSpanIds: ['span-tool-1'],
+      })
+    );
+  });
+
+  it('fetches level from API for custom evaluators', async () => {
+    const ctx = makeDeployedContext({
+      evaluators: { MyTraceEval: { evaluatorId: 'eval-trace-custom' } },
+    });
+    mockLoadDeployedProjectConfig.mockResolvedValue(ctx);
+    mockResolveAgent.mockReturnValue({
+      success: true,
+      agent: {
+        agentName: 'my-agent',
+        targetName: 'dev',
+        region: 'us-east-1',
+        accountId: '111222333444',
+        runtimeId: 'rt-123',
+      },
+    });
+
+    // Mock getEvaluator to return TRACE level for the custom evaluator
+    mockGetEvaluator.mockResolvedValue({
+      evaluatorId: 'eval-trace-custom',
+      evaluatorName: 'MyTraceEval',
+      level: 'TRACE',
+      status: 'ACTIVE',
+    });
+
+    setupCloudWatchToReturn([makeOtelSpanRow('session-1', 'trace-1')]);
+
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 4.0, context: { spanContext: { sessionId: 'session-1', traceId: 'trace-1' } } }],
+    });
+
+    const result = await handleRunEval({ evaluator: ['MyTraceEval'], days: 7 });
+
+    expect(result.success).toBe(true);
+    expect(mockGetEvaluator).toHaveBeenCalledWith(expect.objectContaining({ evaluatorId: 'eval-trace-custom' }));
+    expect(mockEvaluate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetTraceIds: ['trace-1'],
+      })
+    );
+  });
+
+  it('defaults to SESSION level when getEvaluator fails for custom evaluator', async () => {
+    const ctx = makeDeployedContext({
+      evaluators: { FailingEval: { evaluatorId: 'eval-failing' } },
+    });
+    mockLoadDeployedProjectConfig.mockResolvedValue(ctx);
+    mockResolveAgent.mockReturnValue({
+      success: true,
+      agent: {
+        agentName: 'my-agent',
+        targetName: 'dev',
+        region: 'us-east-1',
+        accountId: '111222333444',
+        runtimeId: 'rt-123',
+      },
+    });
+
+    mockGetEvaluator.mockRejectedValue(new Error('Not found'));
+
+    setupCloudWatchToReturn([makeOtelSpanRow('session-1', 'trace-1')]);
+
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 3.0, context: { spanContext: { sessionId: 'session-1' } } }],
+    });
+
+    const result = await handleRunEval({ evaluator: ['FailingEval'], days: 7 });
+
+    expect(result.success).toBe(true);
+    // Should default to SESSION (no target IDs)
+    expect(mockEvaluate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetTraceIds: undefined,
+        targetSpanIds: undefined,
+      })
+    );
+  });
+
+  // ─── Session/trace filtering ─────────────────────────────────────────────
+
+  function getFirstQueryString(): string {
+    const call = mockSend.mock.calls.find((c: unknown[]) => {
+      const input = (c[0] as { input?: { queryString?: string } }).input;
+      return input?.queryString !== undefined;
+    });
+    return (call![0] as { input: { queryString: string } }).input.queryString;
+  }
+
+  it('filters CloudWatch query by --session-id', async () => {
+    const ctx = makeDeployedContext();
+    mockLoadDeployedProjectConfig.mockResolvedValue(ctx);
+    mockResolveAgent.mockReturnValue({
+      success: true,
+      agent: {
+        agentName: 'my-agent',
+        targetName: 'dev',
+        region: 'us-east-1',
+        accountId: '111222333444',
+        runtimeId: 'rt-123',
+      },
+    });
+
+    setupCloudWatchToReturn([makeOtelSpanRow('session-abc', 'trace-1')]);
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 4.0, context: { spanContext: { sessionId: 'session-abc' } } }],
+    });
+
+    const result = await handleRunEval({
+      evaluator: ['Builtin.GoalSuccessRate'],
+      days: 7,
+      sessionId: 'session-abc',
+    });
+
+    expect(result.success).toBe(true);
+    const query = getFirstQueryString();
+    expect(query).toContain("filter attributes.session.id = 'session-abc'");
+  });
+
+  it('filters CloudWatch query by --trace-id', async () => {
+    const ctx = makeDeployedContext();
+    mockLoadDeployedProjectConfig.mockResolvedValue(ctx);
+    mockResolveAgent.mockReturnValue({
+      success: true,
+      agent: {
+        agentName: 'my-agent',
+        targetName: 'dev',
+        region: 'us-east-1',
+        accountId: '111222333444',
+        runtimeId: 'rt-123',
+      },
+    });
+
+    setupCloudWatchToReturn([makeOtelSpanRow('session-1', 'trace-xyz')]);
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 3.0, context: { spanContext: { sessionId: 'session-1', traceId: 'trace-xyz' } } }],
+    });
+
+    const result = await handleRunEval({
+      evaluator: ['Builtin.GoalSuccessRate'],
+      days: 7,
+      traceId: 'trace-xyz',
+    });
+
+    expect(result.success).toBe(true);
+    const query = getFirstQueryString();
+    expect(query).toContain("filter traceId = 'trace-xyz'");
+  });
+
+  it('sanitizes --session-id and --trace-id values', async () => {
+    const ctx = makeDeployedContext();
+    mockLoadDeployedProjectConfig.mockResolvedValue(ctx);
+    mockResolveAgent.mockReturnValue({
+      success: true,
+      agent: {
+        agentName: 'my-agent',
+        targetName: 'dev',
+        region: 'us-east-1',
+        accountId: '111222333444',
+        runtimeId: 'rt-123',
+      },
+    });
+
+    setupCloudWatchToReturn([]);
+
+    await handleRunEval({
+      evaluator: ['Builtin.GoalSuccessRate'],
+      days: 7,
+      sessionId: "sess'; DROP TABLE--",
+      traceId: "trace'; DROP TABLE--",
+    });
+
+    const query = getFirstQueryString();
+    expect(query).toContain("filter attributes.session.id = 'sess; DROP TABLE--'");
+    expect(query).toContain("filter traceId = 'trace; DROP TABLE--'");
+    expect(query).not.toContain("sess'");
+  });
+
   // ─── Query sanitization ───────────────────────────────────────────────────
 
   it('sanitizes runtimeId in CloudWatch query to prevent injection', async () => {
@@ -595,13 +889,7 @@ describe('handleRunEval', () => {
 
     await handleRunEval({ evaluator: ['Builtin.GoalSuccessRate'], days: 7 });
 
-    // Verify the StartQueryCommand was called with sanitized runtimeId (no single quotes)
-    const startQueryCall = mockSend.mock.calls.find((call: unknown[]) => {
-      const input = (call[0] as { input?: { queryString?: string } }).input;
-      return input?.queryString !== undefined;
-    });
-    expect(startQueryCall).toBeDefined();
-    const queryString = (startQueryCall![0] as { input: { queryString: string } }).input.queryString;
+    const queryString = getFirstQueryString();
     expect(queryString).not.toContain("'rt-123'; DROP TABLE'");
     expect(queryString).toContain('rt-123; DROP TABLE');
   });
