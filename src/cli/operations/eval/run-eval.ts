@@ -9,6 +9,7 @@ import { CloudWatchLogsClient, GetQueryResultsCommand, StartQueryCommand } from 
 import type { ResultField } from '@aws-sdk/client-cloudwatch-logs';
 import type { DocumentType } from '@smithy/types';
 import { writeFileSync } from 'fs';
+import { join } from 'path';
 
 const SPANS_LOG_GROUP = 'aws/spans';
 
@@ -19,18 +20,97 @@ const SUPPORTED_SCOPES = new Set([
 ]);
 
 interface ResolvedEvalContext {
-  agentName: string;
+  agentLabel: string;
   region: string;
-  accountId: string;
   runtimeId: string;
   runtimeLogGroup: string;
   evaluatorIds: string[];
+  evaluatorLabels: string[];
 }
 
-function resolveEvalContext(
-  context: DeployedProjectConfig,
-  options: RunEvalOptions
-): { success: true; ctx: ResolvedEvalContext } | { success: false; error: string } {
+type ResolveResult = { success: true; ctx: ResolvedEvalContext } | { success: false; error: string };
+
+/**
+ * Resolve evaluator IDs from ARN strings or raw IDs.
+ * Returns the extracted evaluator ID (last segment of ARN, or the value as-is).
+ */
+function resolveEvaluatorArns(arns: string[]): string[] {
+  return arns.map(arnOrId => {
+    const arnMatch = /evaluator\/(.+)$/.exec(arnOrId);
+    return arnMatch ? arnMatch[1]! : arnOrId;
+  });
+}
+
+/**
+ * ARN mode: resolve context directly from an agent runtime ARN.
+ * No project config needed.
+ */
+function resolveFromArn(options: RunEvalOptions): ResolveResult {
+  const arn = options.agentArn!;
+
+  // Parse ARN: arn:aws:bedrock-agentcore:<region>:<account>:runtime/<runtimeId>
+  const arnParts = arn.split(':');
+  if (arnParts.length < 6) {
+    return { success: false, error: `Invalid agent runtime ARN: ${arn}` };
+  }
+
+  const region = options.region ?? arnParts[3];
+  if (!region) {
+    return { success: false, error: 'Could not determine region from ARN. Use --region to specify.' };
+  }
+
+  const resourcePart = arnParts.slice(5).join(':');
+  const runtimeMatch = /runtime\/(.+)$/.exec(resourcePart);
+  if (!runtimeMatch) {
+    return { success: false, error: `Could not extract runtime ID from ARN: ${arn}` };
+  }
+  const runtimeId = runtimeMatch[1]!;
+
+  // In ARN mode, evaluators must come from --evaluator-arn or Builtin.* names
+  const evaluatorIds: string[] = [];
+  const evaluatorLabels: string[] = [];
+
+  for (const evalName of options.evaluator) {
+    if (evalName.startsWith('Builtin.')) {
+      evaluatorIds.push(evalName);
+      evaluatorLabels.push(evalName);
+    } else {
+      return {
+        success: false,
+        error: `Custom evaluator "${evalName}" cannot be resolved in ARN mode. Use --evaluator-arn with an evaluator ARN or ID, or use Builtin.* evaluators.`,
+      };
+    }
+  }
+
+  if (options.evaluatorArn) {
+    const resolved = resolveEvaluatorArns(options.evaluatorArn);
+    evaluatorIds.push(...resolved);
+    evaluatorLabels.push(...options.evaluatorArn);
+  }
+
+  if (evaluatorIds.length === 0) {
+    return { success: false, error: 'No evaluators specified. Use -e/--evaluator with Builtin.* or --evaluator-arn.' };
+  }
+
+  const runtimeLogGroup = `/aws/bedrock-agentcore/runtimes/${runtimeId}-${DEFAULT_ENDPOINT_NAME}`;
+
+  return {
+    success: true,
+    ctx: {
+      agentLabel: runtimeId,
+      region,
+      runtimeId,
+      runtimeLogGroup,
+      evaluatorIds,
+      evaluatorLabels,
+    },
+  };
+}
+
+/**
+ * Project mode: resolve context from agentcore.json + deployed-state.json.
+ */
+function resolveFromProject(context: DeployedProjectConfig, options: RunEvalOptions): ResolveResult {
   const agentResult = resolveAgent(context, { agent: options.agent });
   if (!agentResult.success) {
     return agentResult;
@@ -41,11 +121,13 @@ function resolveEvalContext(
 
   // Resolve evaluator names to IDs
   const evaluatorIds: string[] = [];
+  const evaluatorLabels: string[] = [];
   const targetResources = context.deployedState.targets[agent.targetName]?.resources;
 
   for (const evalName of options.evaluator) {
     if (evalName.startsWith('Builtin.')) {
       evaluatorIds.push(evalName);
+      evaluatorLabels.push(evalName);
       continue;
     }
 
@@ -57,14 +139,14 @@ function resolveEvalContext(
       };
     }
     evaluatorIds.push(deployedEval.evaluatorId);
+    evaluatorLabels.push(evalName);
   }
 
-  // Also add any direct ARNs/IDs — extract ID from ARN if full ARN is passed
+  // Also add any direct ARNs/IDs
   if (options.evaluatorArn) {
-    for (const arnOrId of options.evaluatorArn) {
-      const arnMatch = /evaluator\/(.+)$/.exec(arnOrId);
-      evaluatorIds.push(arnMatch ? arnMatch[1]! : arnOrId);
-    }
+    const resolved = resolveEvaluatorArns(options.evaluatorArn);
+    evaluatorIds.push(...resolved);
+    evaluatorLabels.push(...options.evaluatorArn);
   }
 
   if (evaluatorIds.length === 0) {
@@ -74,12 +156,12 @@ function resolveEvalContext(
   return {
     success: true,
     ctx: {
-      agentName: agent.agentName,
+      agentLabel: agent.agentName,
       region: agent.region,
-      accountId: agent.accountId,
       runtimeId: agent.runtimeId,
       runtimeLogGroup,
       evaluatorIds,
+      evaluatorLabels,
     },
   };
 }
@@ -307,8 +389,14 @@ export interface RunEvalResult {
 }
 
 export async function handleRunEval(options: RunEvalOptions): Promise<RunEvalResult> {
-  const context = await loadDeployedProjectConfig();
-  const resolution = resolveEvalContext(context, options);
+  let resolution: ResolveResult;
+
+  if (options.agentArn) {
+    resolution = resolveFromArn(options);
+  } else {
+    const context = await loadDeployedProjectConfig();
+    resolution = resolveFromProject(context, options);
+  }
 
   if (!resolution.success) {
     return { success: false, error: resolution.error };
@@ -322,17 +410,16 @@ export async function handleRunEval(options: RunEvalOptions): Promise<RunEvalRes
   if (sessions.length === 0) {
     return {
       success: false,
-      error: `No session spans found for agent "${ctx.agentName}" in the last ${options.days} day(s). Has the agent been invoked?`,
+      error: `No session spans found for agent "${ctx.agentLabel}" in the last ${options.days} day(s). Has the agent been invoked?`,
     };
   }
 
   // Run each evaluator against each session
   const results: EvalEvaluatorResult[] = [];
-  const allEvaluatorNames = [...options.evaluator, ...(options.evaluatorArn ?? [])];
 
   for (let i = 0; i < ctx.evaluatorIds.length; i++) {
     const evaluatorId = ctx.evaluatorIds[i]!;
-    const evaluatorName = allEvaluatorNames[i] ?? evaluatorId;
+    const evaluatorName = ctx.evaluatorLabels[i] ?? evaluatorId;
 
     const sessionScores: EvalSessionScore[] = [];
     let totalInputTokens = 0;
@@ -379,8 +466,8 @@ export async function handleRunEval(options: RunEvalOptions): Promise<RunEvalRes
   const run: EvalRunResult = {
     runId: generateRunId(),
     timestamp: new Date().toISOString(),
-    agent: ctx.agentName,
-    evaluators: allEvaluatorNames,
+    agent: ctx.agentLabel,
+    evaluators: ctx.evaluatorLabels,
     lookbackDays: options.days,
     sessionCount: sessions.length,
     results,
@@ -391,6 +478,11 @@ export async function handleRunEval(options: RunEvalOptions): Promise<RunEvalRes
   if (options.output) {
     writeFileSync(options.output, JSON.stringify(run, null, 2));
     filePath = options.output;
+  } else if (options.agentArn) {
+    // ARN mode may not have a project directory — save to cwd
+    const fallbackPath = join(process.cwd(), `${run.runId}.json`);
+    writeFileSync(fallbackPath, JSON.stringify(run, null, 2));
+    filePath = fallbackPath;
   } else {
     filePath = saveEvalRun(run);
   }

@@ -33,21 +33,27 @@ export const registerRun = (program: Command) => {
     .command('eval')
     .description('Run on-demand evaluation of agent traces')
     .option('-a, --agent <name>', 'Agent to evaluate')
+    .option('--agent-arn <arn>', 'Agent runtime ARN (bypasses project config)')
     .option('-e, --evaluator <names...>', 'Evaluator name(s) or Builtin.* IDs')
     .option('--evaluator-arn <arns...>', 'Evaluator ARN(s) to use directly')
+    .option('--region <region>', 'AWS region (required with --agent-arn, inferred otherwise)')
     .option('--days <days>', 'Lookback window in days', '7')
     .option('--output <path>', 'Custom output file path for results')
     .option('--json', 'Output as JSON')
     .action(
       async (cliOptions: {
         agent?: string;
+        agentArn?: string;
         evaluator?: string[];
         evaluatorArn?: string[];
+        region?: string;
         days: string;
         output?: string;
         json?: boolean;
       }) => {
-        requireProject();
+        if (!cliOptions.agentArn) {
+          requireProject();
+        }
 
         if (!cliOptions.evaluator && !cliOptions.evaluatorArn) {
           const error = 'At least one --evaluator or --evaluator-arn is required';
@@ -61,8 +67,10 @@ export const registerRun = (program: Command) => {
 
         const options: RunEvalOptions = {
           agent: cliOptions.agent,
+          agentArn: cliOptions.agentArn,
           evaluator: cliOptions.evaluator ?? [],
           evaluatorArn: cliOptions.evaluatorArn,
+          region: cliOptions.region,
           days: parseInt(cliOptions.days, 10),
           output: cliOptions.output,
           json: cliOptions.json,

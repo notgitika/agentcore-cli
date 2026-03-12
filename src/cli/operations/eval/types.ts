@@ -34,9 +34,16 @@ export interface EvalRunResult {
 
 /** Options for running an eval */
 export interface RunEvalOptions {
+  /** Agent name (project mode) */
   agent?: string;
+  /** Evaluator names or Builtin.* IDs (resolved via project deployed state) */
   evaluator: string[];
+  /** Evaluator ARN(s) or IDs passed directly */
   evaluatorArn?: string[];
+  /** Agent runtime ARN (ARN mode — bypasses project config) */
+  agentArn?: string;
+  /** AWS region (required with --agent-arn, inferred otherwise) */
+  region?: string;
   days: number;
   output?: string;
   json?: boolean;

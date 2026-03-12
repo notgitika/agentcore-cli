@@ -449,6 +449,132 @@ describe('handleRunEval', () => {
     expect(result.run!.results[1]!.aggregateScore).toBe(4.5);
   });
 
+  // ─── ARN mode ─────────────────────────────────────────────────────────────
+
+  it('resolves context from agent runtime ARN without project config', async () => {
+    setupCloudWatchToReturn([makeOtelSpanRow('s1', 't1')]);
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 4.0, context: { spanContext: { sessionId: 's1' } } }],
+    });
+
+    const result = await handleRunEval({
+      agentArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/rt-arn-test',
+      evaluator: ['Builtin.Helpfulness'],
+      evaluatorArn: [],
+      days: 3,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.run!.agent).toBe('rt-arn-test');
+    expect(mockLoadDeployedProjectConfig).not.toHaveBeenCalled();
+    expect(mockResolveAgent).not.toHaveBeenCalled();
+  });
+
+  it('uses --region override in ARN mode', async () => {
+    setupCloudWatchToReturn([makeOtelSpanRow('s1', 't1')]);
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 3.0, context: { spanContext: { sessionId: 's1' } } }],
+    });
+
+    const result = await handleRunEval({
+      agentArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/rt-region-test',
+      evaluator: ['Builtin.Helpfulness'],
+      region: 'eu-west-1',
+      days: 7,
+    });
+
+    expect(result.success).toBe(true);
+    // Should not load project config
+    expect(mockLoadDeployedProjectConfig).not.toHaveBeenCalled();
+  });
+
+  it('resolves evaluator ARNs in ARN mode', async () => {
+    setupCloudWatchToReturn([makeOtelSpanRow('s1', 't1')]);
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 5.0, context: { spanContext: { sessionId: 's1' } } }],
+    });
+
+    const result = await handleRunEval({
+      agentArn: 'arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/rt-abc',
+      evaluator: [],
+      evaluatorArn: ['arn:aws:bedrock-agentcore:us-east-1:123456789012:evaluator/eval-xyz'],
+      days: 7,
+    });
+
+    expect(result.success).toBe(true);
+    expect(mockEvaluate).toHaveBeenCalledWith(expect.objectContaining({ evaluatorId: 'eval-xyz' }));
+  });
+
+  it('returns error for invalid ARN format', async () => {
+    const result = await handleRunEval({
+      agentArn: 'not-an-arn',
+      evaluator: ['Builtin.Helpfulness'],
+      days: 7,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid agent runtime ARN');
+  });
+
+  it('rejects custom evaluator names in ARN mode', async () => {
+    const result = await handleRunEval({
+      agentArn: 'arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/rt-abc',
+      evaluator: ['MyCustomEval'],
+      days: 7,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('cannot be resolved in ARN mode');
+  });
+
+  it('saves to cwd in ARN mode when no --output is specified', async () => {
+    setupCloudWatchToReturn([makeOtelSpanRow('s1', 't1')]);
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 4.0, context: { spanContext: { sessionId: 's1' } } }],
+    });
+
+    const result = await handleRunEval({
+      agentArn: 'arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/rt-save-test',
+      evaluator: ['Builtin.Helpfulness'],
+      days: 7,
+    });
+
+    expect(result.success).toBe(true);
+    // Should write to cwd, not call saveEvalRun (which requires a project)
+    expect(mockSaveEvalRun).not.toHaveBeenCalled();
+    expect(mockWriteFileSync).toHaveBeenCalledWith(expect.stringContaining('run_test-123.json'), expect.any(String));
+    expect(result.filePath).toContain('run_test-123.json');
+  });
+
+  it('saves to --output path in ARN mode', async () => {
+    setupCloudWatchToReturn([makeOtelSpanRow('s1', 't1')]);
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 4.0, context: { spanContext: { sessionId: 's1' } } }],
+    });
+
+    const result = await handleRunEval({
+      agentArn: 'arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/rt-output-test',
+      evaluator: ['Builtin.Helpfulness'],
+      days: 7,
+      output: '/tmp/custom-eval.json',
+    });
+
+    expect(result.success).toBe(true);
+    expect(mockWriteFileSync).toHaveBeenCalledWith('/tmp/custom-eval.json', expect.any(String));
+    expect(result.filePath).toBe('/tmp/custom-eval.json');
+  });
+
+  it('returns error when no evaluators in ARN mode', async () => {
+    const result = await handleRunEval({
+      agentArn: 'arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/rt-abc',
+      evaluator: [],
+      days: 7,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('No evaluators specified');
+  });
+
   // ─── Query sanitization ───────────────────────────────────────────────────
 
   it('sanitizes runtimeId in CloudWatch query to prevent injection', async () => {
