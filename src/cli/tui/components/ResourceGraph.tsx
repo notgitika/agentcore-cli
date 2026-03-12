@@ -105,6 +105,8 @@ export function ResourceGraph({ project, mcp, agentName, resourceStatuses }: Res
   const agents = agentName ? allAgents.filter(a => a.name === agentName) : allAgents;
   const memories = project.memories ?? [];
   const credentials = project.credentials ?? [];
+  const evaluators = project.evaluators ?? [];
+  const onlineEvalConfigs = project.onlineEvalConfigs ?? [];
   const gateways = mcp?.agentCoreGateways ?? [];
   const mcpRuntimeTools = mcp?.mcpRuntimeTools ?? [];
   const unassignedTargets = mcp?.unassignedTargets ?? [];
@@ -130,6 +132,8 @@ export function ResourceGraph({ project, mcp, agentName, resourceStatuses }: Res
     agents.length > 0 ||
     memories.length > 0 ||
     credentials.length > 0 ||
+    evaluators.length > 0 ||
+    onlineEvalConfigs.length > 0 ||
     gateways.length > 0 ||
     mcpRuntimeTools.length > 0 ||
     unassignedTargets.length > 0 ||
@@ -203,6 +207,55 @@ export function ResourceGraph({ project, mcp, agentName, resourceStatuses }: Res
                 color="yellow"
                 name={credential.name}
                 detail={rsEntry?.detail ?? credential.type.replace('CredentialProvider', '')}
+                deploymentState={rsEntry?.deploymentState}
+                identifier={rsEntry?.identifier}
+              />
+            );
+          })}
+        </Box>
+      )}
+
+      {/* Evaluators */}
+      {evaluators.length > 0 && (
+        <Box flexDirection="column">
+          <SectionHeader>Evaluators</SectionHeader>
+          {evaluators.map(evaluator => {
+            const rsEntry = statusMap.get(`evaluator:${evaluator.name}`);
+            const evalStatus = rsEntry?.error ? 'error' : undefined;
+            const evalStatusColor = rsEntry?.error ? 'red' : undefined;
+            return (
+              <ResourceRow
+                key={evaluator.name}
+                icon={ICONS.evaluator}
+                color="cyan"
+                name={evaluator.name}
+                detail={rsEntry?.detail ?? `${evaluator.level} — LLM-as-a-Judge`}
+                status={evalStatus}
+                statusColor={evalStatusColor}
+                deploymentState={rsEntry?.deploymentState}
+                identifier={rsEntry?.identifier}
+              />
+            );
+          })}
+        </Box>
+      )}
+
+      {/* Online Eval Configs */}
+      {onlineEvalConfigs.length > 0 && (
+        <Box flexDirection="column">
+          <SectionHeader>Online Eval Configs</SectionHeader>
+          {onlineEvalConfigs.map(config => {
+            const rsEntry = statusMap.get(`online-eval:${config.name}`);
+            const defaultDetail = `${config.agents.length} agents, ${config.evaluators.length} evaluators — ${config.samplingRate}% sampling`;
+            return (
+              <ResourceRow
+                key={config.name}
+                icon={ICONS['online-eval']}
+                color="magenta"
+                name={config.name}
+                detail={rsEntry?.detail ?? defaultDetail}
+                status={rsEntry?.error ? 'error' : undefined}
+                statusColor={rsEntry?.error ? 'red' : undefined}
                 deploymentState={rsEntry?.deploymentState}
                 identifier={rsEntry?.identifier}
               />
@@ -303,6 +356,8 @@ export function ResourceGraph({ project, mcp, agentName, resourceStatuses }: Res
           <Text color="green">{ICONS.agent}</Text> agent{'  '}
           <Text color="blue">{ICONS.memory}</Text> memory{'  '}
           <Text color="yellow">{ICONS.credential}</Text> credential{'  '}
+          <Text color="cyan">{ICONS.evaluator}</Text> evaluator{'  '}
+          <Text color="magenta">{ICONS['online-eval']}</Text> online-eval{'  '}
           <Text color="magenta">{ICONS.gateway}</Text> gateway
         </Text>
         {resourceStatuses && resourceStatuses.length > 0 && (
