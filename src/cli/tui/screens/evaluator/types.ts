@@ -52,9 +52,9 @@ export const LEVEL_PLACEHOLDERS: Record<EvaluationLevel, string[]> = {
  */
 export const DEFAULT_INSTRUCTIONS: Record<EvaluationLevel, string> = {
   SESSION:
-    'Evaluate the agent session. Context: {context}. The agent trajectory was: {actual_trajectory}. Rate the overall quality of the response.',
+    'Evaluate the agent session based on the following conversation. Context: {context}. Rate the overall quality of the response.',
   TRACE:
-    'Evaluate the agent trace. Context: {context}. The agent trajectory was: {actual_trajectory}. Rate the quality of this trace.',
+    'Evaluate the agent trace based on the following conversation. Context: {context}. Rate the quality of this trace.',
   TOOL_CALL:
     'Evaluate the tool call. Tool: {tool_name}. Input: {tool_input}. Output: {tool_output}. Rate the quality of this tool usage.',
 };

@@ -1,0 +1,17 @@
+import { loadEvalRun } from './storage';
+import type { EvalRunResult, GetEvalRunOptions } from './types';
+
+export interface GetEvalRunResult {
+  success: boolean;
+  error?: string;
+  run?: EvalRunResult;
+}
+
+export function handleGetEvalRun(options: GetEvalRunOptions): GetEvalRunResult {
+  try {
+    const run = loadEvalRun(options.runId);
+    return { success: true, run };
+  } catch (err) {
+    return { success: false, error: (err as Error).message };
+  }
+}

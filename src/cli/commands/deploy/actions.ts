@@ -6,8 +6,10 @@ import {
   buildDeployedState,
   getStackOutputs,
   parseAgentOutputs,
+  parseEvaluatorOutputs,
   parseGatewayOutputs,
   parseMemoryOutputs,
+  parseOnlineEvalOutputs,
 } from '../../cloudformation';
 import { getErrorMessage } from '../../errors';
 import { ExecLogger } from '../../logging';
@@ -374,6 +376,14 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       );
     }
 
+    // Parse evaluator outputs
+    const evaluatorNames = (context.projectSpec.evaluators ?? []).map(e => e.name);
+    const evaluators = parseEvaluatorOutputs(outputs, evaluatorNames);
+
+    // Parse online eval config outputs
+    const onlineEvalNames = (context.projectSpec.onlineEvalConfigs ?? []).map(c => c.name);
+    const onlineEvalConfigs = parseOnlineEvalOutputs(outputs, onlineEvalNames);
+
     // Parse gateway outputs
     const gatewaySpecs =
       mcpSpec?.agentCoreGateways?.reduce(
@@ -395,6 +405,8 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       identityKmsKeyArn,
       credentials: deployedCredentials,
       memories,
+      evaluators,
+      onlineEvalConfigs,
     });
     await configIO.writeDeployedState(deployedState);
 

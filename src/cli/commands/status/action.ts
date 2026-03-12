@@ -152,19 +152,22 @@ export function computeResourceStatuses(
     },
   });
 
-  const evaluators: ResourceStatusEntry[] = (project.evaluators ?? []).map(e => ({
+  const evaluators = diffResourceSet({
     resourceType: 'evaluator',
-    name: e.name,
-    deploymentState: 'local-only' as ResourceDeploymentState,
-    detail: `${e.level} — LLM-as-a-Judge`,
-  }));
+    localItems: project.evaluators ?? [],
+    deployedRecord: resources?.evaluators ?? {},
+    getIdentifier: deployed => deployed.evaluatorArn,
+    getLocalDetail: item => `${item.level} — LLM-as-a-Judge`,
+  });
 
-  const onlineEvalConfigs: ResourceStatusEntry[] = (project.onlineEvalConfigs ?? []).map(c => ({
+  const onlineEvalConfigs = diffResourceSet({
     resourceType: 'online-eval',
-    name: c.name,
-    deploymentState: 'local-only' as ResourceDeploymentState,
-    detail: `${c.agents.length} agent${c.agents.length !== 1 ? 's' : ''}, ${c.evaluators.length} evaluator${c.evaluators.length !== 1 ? 's' : ''}`,
-  }));
+    localItems: project.onlineEvalConfigs ?? [],
+    deployedRecord: resources?.onlineEvalConfigs ?? {},
+    getIdentifier: deployed => deployed.onlineEvaluationConfigArn,
+    getLocalDetail: item =>
+      `${item.agents.length} agent${item.agents.length !== 1 ? 's' : ''}, ${item.evaluators.length} evaluator${item.evaluators.length !== 1 ? 's' : ''}`,
+  });
 
   return [...agents, ...credentials, ...memories, ...gateways, ...evaluators, ...onlineEvalConfigs];
 }

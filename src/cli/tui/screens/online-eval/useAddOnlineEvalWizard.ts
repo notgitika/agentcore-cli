@@ -10,7 +10,6 @@ function getDefaultConfig(): AddOnlineEvalConfig {
     agents: [],
     evaluators: [],
     samplingRate: DEFAULT_SAMPLING_RATE,
-    enableOnCreate: true,
   };
 }
 

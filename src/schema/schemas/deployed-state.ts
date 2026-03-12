@@ -120,6 +120,29 @@ export const CredentialDeployedStateSchema = z.object({
 export type CredentialDeployedState = z.infer<typeof CredentialDeployedStateSchema>;
 
 // ============================================================================
+// Evaluator Deployed State
+// ============================================================================
+
+export const EvaluatorDeployedStateSchema = z.object({
+  evaluatorId: z.string().min(1),
+  evaluatorArn: z.string().min(1),
+});
+
+export type EvaluatorDeployedState = z.infer<typeof EvaluatorDeployedStateSchema>;
+
+// ============================================================================
+// Online Eval Config Deployed State
+// ============================================================================
+
+export const OnlineEvalDeployedStateSchema = z.object({
+  onlineEvaluationConfigId: z.string().min(1),
+  onlineEvaluationConfigArn: z.string().min(1),
+  executionStatus: z.enum(['ENABLED', 'DISABLED']).optional(),
+});
+
+export type OnlineEvalDeployedState = z.infer<typeof OnlineEvalDeployedStateSchema>;
+
+// ============================================================================
 // Deployed Resource State
 // ============================================================================
 
@@ -129,6 +152,8 @@ export const DeployedResourceStateSchema = z.object({
   mcp: McpDeployedStateSchema.optional(),
   externallyManaged: ExternallyManagedStateSchema.optional(),
   credentials: z.record(z.string(), CredentialDeployedStateSchema).optional(),
+  evaluators: z.record(z.string(), EvaluatorDeployedStateSchema).optional(),
+  onlineEvalConfigs: z.record(z.string(), OnlineEvalDeployedStateSchema).optional(),
   stackName: z.string().optional(),
   identityKmsKeyArn: z.string().optional(),
 });

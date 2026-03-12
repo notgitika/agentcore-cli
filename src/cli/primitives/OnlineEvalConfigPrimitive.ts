@@ -12,7 +12,6 @@ export interface AddOnlineEvalConfigOptions {
   agents: string[];
   evaluators: string[];
   samplingRate: number;
-  enableOnCreate?: boolean;
 }
 
 export type RemovableOnlineEvalConfig = RemovableResource;
@@ -203,12 +202,11 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
     this.checkDuplicate(project.onlineEvalConfigs, options.name, 'Online eval config');
 
     const config: OnlineEvalConfig = {
-      type: 'OnlineEvalConfig',
+      type: 'OnlineEvaluationConfig',
       name: options.name,
       agents: options.agents,
       evaluators: options.evaluators,
       samplingRate: options.samplingRate,
-      enableOnCreate: options.enableOnCreate ?? true,
     };
 
     project.onlineEvalConfigs.push(config);

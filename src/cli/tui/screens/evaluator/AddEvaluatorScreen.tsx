@@ -16,6 +16,7 @@ import {
   validateInstructionPlaceholders,
 } from './types';
 import { useAddEvaluatorWizard } from './useAddEvaluatorWizard';
+import { Box, Text } from 'ink';
 import React, { useMemo } from 'react';
 
 interface AddEvaluatorScreenProps {
@@ -122,14 +123,21 @@ export function AddEvaluatorScreen({ onComplete, onExit, existingEvaluatorNames 
         )}
 
         {isInstructionsStep && (
-          <TextInput
-            key="instructions"
-            prompt={`Evaluation instructions (must include at least one: ${LEVEL_PLACEHOLDERS[wizard.config.level].map(p => `{${p}}`).join(', ')})`}
-            initialValue={DEFAULT_INSTRUCTIONS[wizard.config.level]}
-            onSubmit={wizard.setInstructions}
-            onCancel={() => wizard.goBack()}
-            customValidation={value => validateInstructionPlaceholders(value, wizard.config.level)}
-          />
+          <Box flexDirection="column">
+            <Text>Evaluation instructions</Text>
+            <Text dimColor>
+              Must include at least one: {LEVEL_PLACEHOLDERS[wizard.config.level].map(p => `{${p}}`).join(', ')}
+            </Text>
+            <TextInput
+              key="instructions"
+              prompt=""
+              hideArrow={false}
+              initialValue={DEFAULT_INSTRUCTIONS[wizard.config.level]}
+              onSubmit={wizard.setInstructions}
+              onCancel={() => wizard.goBack()}
+              customValidation={value => validateInstructionPlaceholders(value, wizard.config.level)}
+            />
+          </Box>
         )}
 
         {isRatingScaleStep && (

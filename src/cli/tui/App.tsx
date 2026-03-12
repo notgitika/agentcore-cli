@@ -7,6 +7,7 @@ import { AddFlow } from './screens/add/AddFlow';
 import { CreateScreen } from './screens/create';
 import { DeployScreen } from './screens/deploy/DeployScreen';
 import { DevScreen } from './screens/dev/DevScreen';
+import { EvalScreen } from './screens/eval';
 import { HelpScreen, HomeScreen } from './screens/home';
 import { InvokeScreen } from './screens/invoke';
 import { PackageScreen } from './screens/package';
@@ -32,6 +33,7 @@ type Route =
   | { name: 'add' }
   | { name: 'status' }
   | { name: 'remove' }
+  | { name: 'eval' }
   | { name: 'validate' }
   | { name: 'package' }
   | { name: 'update' };
@@ -84,6 +86,8 @@ function AppContent() {
       setRoute({ name: 'add' });
     } else if (id === 'remove') {
       setRoute({ name: 'remove' });
+    } else if (id === 'eval') {
+      setRoute({ name: 'eval' });
     } else if (id === 'validate') {
       setRoute({ name: 'validate' });
     } else if (id === 'package') {
@@ -177,6 +181,10 @@ function AppContent() {
         }}
       />
     );
+  }
+
+  if (route.name === 'eval') {
+    return <EvalScreen isInteractive={true} onExit={() => setRoute({ name: 'help' })} />;
   }
 
   if (route.name === 'validate') {

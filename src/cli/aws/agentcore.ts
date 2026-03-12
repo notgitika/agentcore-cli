@@ -1,9 +1,11 @@
 import { getCredentialProvider } from './account';
 import {
   BedrockAgentCoreClient,
+  EvaluateCommand,
   InvokeAgentRuntimeCommand,
   StopRuntimeSessionCommand,
 } from '@aws-sdk/client-bedrock-agentcore';
+import type { DocumentType } from '@smithy/types';
 
 /** Logger interface for SSE events */
 export interface SSELogger {
@@ -231,6 +233,108 @@ export async function invokeAgentRuntime(options: InvokeAgentRuntimeOptions): Pr
   return {
     content,
     sessionId: response.runtimeSessionId,
+  };
+}
+
+// ============================================================================
+// Evaluate
+// ============================================================================
+
+export interface EvaluateOptions {
+  region: string;
+  evaluatorId: string;
+  sessionSpans: DocumentType[];
+  targetSpanIds?: string[];
+  targetTraceIds?: string[];
+}
+
+export interface EvaluationResultContext {
+  sessionId: string | undefined;
+  traceId: string | undefined;
+  spanId: string | undefined;
+}
+
+export interface EvaluationResultTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
+export interface EvaluationResult {
+  evaluatorArn: string | undefined;
+  evaluatorId: string | undefined;
+  evaluatorName: string | undefined;
+  explanation: string | undefined;
+  value: number | undefined;
+  label: string | undefined;
+  errorMessage: string | undefined;
+  errorCode: string | undefined;
+  context: EvaluationResultContext | undefined;
+  tokenUsage: EvaluationResultTokenUsage | undefined;
+}
+
+export interface EvaluateResult {
+  evaluationResults: EvaluationResult[];
+}
+
+/**
+ * Run on-demand evaluation of agent traces using a specified evaluator.
+ */
+export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult> {
+  const client = new BedrockAgentCoreClient({
+    region: options.region,
+    credentials: getCredentialProvider(),
+  });
+
+  const evaluationTarget = options.targetSpanIds
+    ? { spanIds: options.targetSpanIds }
+    : options.targetTraceIds
+      ? { traceIds: options.targetTraceIds }
+      : undefined;
+
+  const command = new EvaluateCommand({
+    evaluatorId: options.evaluatorId,
+    evaluationInput: {
+      sessionSpans: options.sessionSpans,
+    },
+    ...(evaluationTarget ? { evaluationTarget } : {}),
+  });
+
+  const response = await client.send(command);
+
+  if (!response.evaluationResults) {
+    throw new Error('No evaluation results returned');
+  }
+
+  return {
+    evaluationResults: response.evaluationResults.map(r => {
+      const spanContext = r.context && 'spanContext' in r.context ? r.context.spanContext : undefined;
+
+      return {
+        evaluatorArn: r.evaluatorArn,
+        evaluatorId: r.evaluatorId,
+        evaluatorName: r.evaluatorName,
+        explanation: r.explanation,
+        value: r.value,
+        label: r.label,
+        errorMessage: r.errorMessage,
+        errorCode: r.errorCode,
+        context: spanContext
+          ? {
+              sessionId: spanContext.sessionId,
+              traceId: spanContext.traceId,
+              spanId: spanContext.spanId,
+            }
+          : undefined,
+        tokenUsage: r.tokenUsage
+          ? {
+              inputTokens: r.tokenUsage.inputTokens ?? 0,
+              outputTokens: r.tokenUsage.outputTokens ?? 0,
+              totalTokens: r.tokenUsage.totalTokens ?? 0,
+            }
+          : undefined,
+      };
+    }),
   };
 }
 

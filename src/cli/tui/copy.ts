@@ -40,6 +40,10 @@ export const COMMAND_DESCRIPTIONS = {
   remove: 'Remove AgentCore resources and project',
   status: 'Retrieve details of deployed AgentCore resources.',
   traces: 'View and download agent traces.',
+  eval: 'View eval run results.',
+  pause: 'Pause a running resource.',
+  resume: 'Resume a paused resource.',
+  run: 'Run operations (eval, etc.).',
   update: 'Check for and install CLI updates',
   validate: 'Validate agentcore/ config files.',
 } as const;
