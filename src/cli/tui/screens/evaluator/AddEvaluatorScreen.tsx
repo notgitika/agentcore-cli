@@ -1,5 +1,5 @@
 import type { EvaluationLevel, EvaluatorConfig } from '../../../../schema';
-import { EvaluatorNameSchema } from '../../../../schema';
+import { BedrockModelIdSchema, EvaluatorNameSchema } from '../../../../schema';
 import type { SelectableItem } from '../../components';
 import { ConfirmReview, Panel, Screen, StepIndicator, TextInput, WizardSelect } from '../../components';
 import { HELP_TEXT } from '../../constants';
@@ -89,8 +89,8 @@ export function AddEvaluatorScreen({ onComplete, onExit, existingEvaluatorNames 
   const headerContent = <StepIndicator steps={wizard.steps} currentStep={wizard.step} labels={EVALUATOR_STEP_LABELS} />;
 
   return (
-    <Screen title="Add Evaluator" onExit={onExit} helpText={helpText} headerContent={headerContent}>
-      <Panel>
+    <Screen title="Add Evaluator" onExit={onExit} helpText={helpText} headerContent={headerContent} exitEnabled={false}>
+      <Panel fullWidth>
         {isNameStep && (
           <TextInput
             key="name"
@@ -119,6 +119,7 @@ export function AddEvaluatorScreen({ onComplete, onExit, existingEvaluatorNames 
             initialValue={DEFAULT_MODEL}
             onSubmit={wizard.setModel}
             onCancel={() => wizard.goBack()}
+            schema={BedrockModelIdSchema}
           />
         )}
 
