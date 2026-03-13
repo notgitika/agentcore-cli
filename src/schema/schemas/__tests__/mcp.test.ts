@@ -6,6 +6,7 @@ import {
   ApiGatewayConfigSchema,
   CustomJwtAuthorizerConfigSchema,
   GatewayAuthorizerTypeSchema,
+  GatewayExceptionLevelSchema,
   GatewayTargetTypeSchema,
   LambdaFunctionArnConfigSchema,
   McpImplLanguageSchema,
@@ -305,6 +306,20 @@ describe('AgentCoreGatewayTargetSchema', () => {
   });
 });
 
+describe('GatewayExceptionLevelSchema', () => {
+  it('accepts NONE', () => {
+    expect(GatewayExceptionLevelSchema.safeParse('NONE').success).toBe(true);
+  });
+
+  it('accepts DEBUG', () => {
+    expect(GatewayExceptionLevelSchema.safeParse('DEBUG').success).toBe(true);
+  });
+
+  it('rejects invalid level', () => {
+    expect(GatewayExceptionLevelSchema.safeParse('VERBOSE').success).toBe(false);
+  });
+});
+
 describe('AgentCoreGatewaySchema', () => {
   const validToolDef = {
     name: 'myTool',
@@ -402,6 +417,33 @@ describe('AgentCoreGatewaySchema', () => {
     const result = AgentCoreGatewaySchema.safeParse({
       ...validGateway,
       enableSemanticSearch: 'yes',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('defaults exceptionLevel to NONE when omitted', () => {
+    const result = AgentCoreGatewaySchema.safeParse(validGateway);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.exceptionLevel).toBe('NONE');
+    }
+  });
+
+  it('accepts explicit exceptionLevel DEBUG', () => {
+    const result = AgentCoreGatewaySchema.safeParse({
+      ...validGateway,
+      exceptionLevel: 'DEBUG',
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.exceptionLevel).toBe('DEBUG');
+    }
+  });
+
+  it('rejects invalid exceptionLevel', () => {
+    const result = AgentCoreGatewaySchema.safeParse({
+      ...validGateway,
+      exceptionLevel: 'VERBOSE',
     });
     expect(result.success).toBe(false);
   });

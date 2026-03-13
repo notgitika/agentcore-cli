@@ -2,6 +2,7 @@ import { ConfigIO, findConfigRoot } from '../../../lib';
 import {
   AgentNameSchema,
   BuildTypeSchema,
+  GatewayExceptionLevelSchema,
   GatewayNameSchema,
   ModelProviderSchema,
   SDKFrameworkSchema,
@@ -206,6 +207,14 @@ export function validateAddGatewayOptions(options: AddGatewayOptions): Validatio
   }
   if (options.agentClientId && options.authorizerType !== 'CUSTOM_JWT') {
     return { valid: false, error: 'Agent OAuth credentials are only valid with CUSTOM_JWT authorizer' };
+  }
+
+  // Validate exception level if provided
+  if (options.exceptionLevel) {
+    const levelResult = GatewayExceptionLevelSchema.safeParse(options.exceptionLevel);
+    if (!levelResult.success) {
+      return { valid: false, error: `Invalid exception level: ${options.exceptionLevel}. Use NONE or DEBUG` };
+    }
   }
 
   return { valid: true };

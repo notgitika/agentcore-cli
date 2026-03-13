@@ -5,6 +5,7 @@ export interface TransactionSearchSetupOptions {
   region: string;
   accountId: string;
   agentNames: string[];
+  hasGateways?: boolean;
 }
 
 export interface TransactionSearchSetupResult {
@@ -26,7 +27,7 @@ export async function setupTransactionSearch(
 ): Promise<TransactionSearchSetupResult> {
   const { region, accountId, agentNames } = options;
 
-  if (agentNames.length === 0) {
+  if (agentNames.length === 0 && !options.hasGateways) {
     return { success: true };
   }
 

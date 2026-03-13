@@ -309,7 +309,7 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     }
 
     // Deploy
-    const hasGateways = mcpSpec?.agentCoreGateways && mcpSpec.agentCoreGateways.length > 0;
+    const hasGateways = (mcpSpec?.agentCoreGateways?.length ?? 0) > 0;
     const deployStepName = hasGateways ? 'Deploying gateways...' : 'Deploy to AWS';
     startStep(deployStepName);
 
@@ -419,9 +419,14 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     // Post-deploy: Enable CloudWatch Transaction Search (non-blocking, silent)
     const nextSteps = agentNames.length > 0 ? [...AGENT_NEXT_STEPS] : [...MEMORY_ONLY_NEXT_STEPS];
     const notes: string[] = [];
-    if (agentNames.length > 0) {
+    if (agentNames.length > 0 || hasGateways) {
       try {
-        const tsResult = await setupTransactionSearch({ region: target.region, accountId: target.account, agentNames });
+        const tsResult = await setupTransactionSearch({
+          region: target.region,
+          accountId: target.account,
+          agentNames,
+          hasGateways,
+        });
         if (tsResult.error) {
           logger.log(`Transaction search setup warning: ${tsResult.error}`, 'warn');
         } else {

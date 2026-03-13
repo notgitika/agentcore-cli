@@ -587,6 +587,13 @@ export const AgentCoreGatewayTargetSchema = z
 export type AgentCoreGatewayTarget = z.infer<typeof AgentCoreGatewayTargetSchema>;
 
 // ============================================================================
+// Gateway Exception Level
+// ============================================================================
+
+export const GatewayExceptionLevelSchema = z.enum(['NONE', 'DEBUG']);
+export type GatewayExceptionLevel = z.infer<typeof GatewayExceptionLevelSchema>;
+
+// ============================================================================
 // Gateway
 // ============================================================================
 
@@ -605,6 +612,8 @@ export const AgentCoreGatewaySchema = z
     authorizerConfiguration: GatewayAuthorizerConfigSchema.optional(),
     /** Whether to enable semantic search for tool discovery. Defaults to true. */
     enableSemanticSearch: z.boolean().default(true),
+    /** Exception verbosity level. 'NONE' = generic errors (default), 'DEBUG' = verbose errors. */
+    exceptionLevel: GatewayExceptionLevelSchema.default('NONE'),
   })
   .strict()
   .refine(

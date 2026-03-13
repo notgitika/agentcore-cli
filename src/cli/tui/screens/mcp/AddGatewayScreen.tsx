@@ -15,7 +15,12 @@ import { HELP_TEXT } from '../../constants';
 import { useListNavigation, useMultiSelectNavigation } from '../../hooks';
 import { generateUniqueName } from '../../utils';
 import type { AddGatewayConfig } from './types';
-import { AUTHORIZER_TYPE_OPTIONS, GATEWAY_STEP_LABELS, SEMANTIC_SEARCH_ITEM_ID } from './types';
+import {
+  AUTHORIZER_TYPE_OPTIONS,
+  EXCEPTION_LEVEL_ITEM_ID,
+  GATEWAY_STEP_LABELS,
+  SEMANTIC_SEARCH_ITEM_ID,
+} from './types';
 import { useAddGatewayWizard } from './useAddGatewayWizard';
 import { Box, Text } from 'ink';
 import React, { useMemo, useState } from 'react';
@@ -51,7 +56,10 @@ export function AddGatewayScreen({ onComplete, onExit, existingGateways, unassig
   );
 
   const advancedConfigItems: SelectableItem[] = useMemo(
-    () => [{ id: SEMANTIC_SEARCH_ITEM_ID, title: 'Semantic Search' }],
+    () => [
+      { id: SEMANTIC_SEARCH_ITEM_ID, title: 'Semantic Search' },
+      { id: EXCEPTION_LEVEL_ITEM_ID, title: 'Debug Exception Level' },
+    ],
     []
   );
 
@@ -83,7 +91,10 @@ export function AddGatewayScreen({ onComplete, onExit, existingGateways, unassig
     getId: item => item.id,
     initialSelectedIds: INITIAL_ADVANCED_SELECTED,
     onConfirm: selectedIds =>
-      wizard.setAdvancedConfig({ enableSemanticSearch: selectedIds.includes(SEMANTIC_SEARCH_ITEM_ID) }),
+      wizard.setAdvancedConfig({
+        enableSemanticSearch: selectedIds.includes(SEMANTIC_SEARCH_ITEM_ID),
+        exceptionLevel: selectedIds.includes(EXCEPTION_LEVEL_ITEM_ID) ? 'DEBUG' : 'NONE',
+      }),
     onExit: () => wizard.goBack(),
     isActive: isAdvancedConfigStep,
     requireSelection: false,
@@ -273,6 +284,7 @@ export function AddGatewayScreen({ onComplete, onExit, existingGateways, unassig
                     : '(none)',
               },
               { label: 'Semantic Search', value: wizard.config.enableSemanticSearch ? 'Enabled' : 'Disabled' },
+              { label: 'Exception Level', value: wizard.config.exceptionLevel === 'DEBUG' ? 'Debug' : 'None' },
             ]}
           />
         )}

@@ -29,6 +29,7 @@ export function useCreateGateway() {
         agentClientId: config.jwtConfig?.agentClientId,
         agentClientSecret: config.jwtConfig?.agentClientSecret,
         enableSemanticSearch: config.enableSemanticSearch,
+        exceptionLevel: config.exceptionLevel,
       });
       if (!addResult.success) {
         throw new Error(addResult.error ?? 'Failed to create gateway');

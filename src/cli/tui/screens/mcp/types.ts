@@ -1,6 +1,7 @@
 import type {
   ApiGatewayHttpMethod,
   GatewayAuthorizerType,
+  GatewayExceptionLevel,
   GatewayTargetType,
   NodeRuntime,
   PythonRuntime,
@@ -33,10 +34,15 @@ export interface AddGatewayConfig {
   selectedTargets?: string[];
   /** Whether to enable semantic search for tool discovery */
   enableSemanticSearch: boolean;
+  /** Exception verbosity level for the gateway */
+  exceptionLevel: GatewayExceptionLevel;
 }
 
 /** Item ID for the semantic search toggle in the advanced config pane. */
 export const SEMANTIC_SEARCH_ITEM_ID = 'semantic-search';
+
+/** Item ID for the debug exception level toggle in the advanced config pane. */
+export const EXCEPTION_LEVEL_ITEM_ID = 'exception-level';
 
 export const GATEWAY_STEP_LABELS: Record<AddGatewayStep, string> = {
   name: 'Name',

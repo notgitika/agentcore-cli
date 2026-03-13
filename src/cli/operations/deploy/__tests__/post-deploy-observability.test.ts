@@ -80,4 +80,36 @@ describe('setupTransactionSearch', () => {
 
     expect(result).toEqual({ success: false, error: 'Insufficient permissions' });
   });
+
+  it('triggers when hasGateways is true and agentNames is empty', async () => {
+    const result = await setupTransactionSearch({
+      region: 'us-west-2',
+      accountId: '111222333444',
+      agentNames: [],
+      hasGateways: true,
+    });
+    expect(mockEnableTransactionSearch).toHaveBeenCalledWith('us-west-2', '111222333444', 100);
+    expect(result).toEqual({ success: true });
+  });
+
+  it('skips when both agentNames empty and hasGateways false', async () => {
+    const result = await setupTransactionSearch({
+      region: 'us-east-1',
+      accountId: '123456789012',
+      agentNames: [],
+      hasGateways: false,
+    });
+    expect(result).toEqual({ success: true });
+    expect(mockEnableTransactionSearch).not.toHaveBeenCalled();
+  });
+
+  it('skips when agentNames empty and hasGateways undefined', async () => {
+    const result = await setupTransactionSearch({
+      region: 'us-east-1',
+      accountId: '123456789012',
+      agentNames: [],
+    });
+    expect(result).toEqual({ success: true });
+    expect(mockEnableTransactionSearch).not.toHaveBeenCalled();
+  });
 });

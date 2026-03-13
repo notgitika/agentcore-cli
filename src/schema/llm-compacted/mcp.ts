@@ -25,6 +25,8 @@ interface AgentCoreGateway {
   targets: AgentCoreGatewayTarget[];
   /** Enable semantic search for tool discovery. @default true */
   enableSemanticSearch?: boolean; // default true
+  /** Exception verbosity level. @default 'NONE' */
+  exceptionLevel?: 'NONE' | 'DEBUG'; // default 'NONE'
 }
 
 interface AgentCoreGatewayTarget {
