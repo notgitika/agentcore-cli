@@ -27,7 +27,7 @@ vi.mock('../../../../lib/utils', () => ({
 
 function makeContext({
   agentName = 'my-agent',
-  onlineEvalConfigs = [{ name: 'eval-config', agents: ['my-agent'] }] as { name: string; agents: string[] }[],
+  onlineEvalConfigs = [{ name: 'eval-config' }] as { name: string }[],
   deployedConfigId = 'cfg-123',
 } = {}) {
   return {
@@ -207,22 +207,6 @@ describe('handleLogsEval', () => {
         logGroupName: '/aws/bedrock-agentcore/evaluations/results/my-custom-config-id',
       })
     );
-  });
-
-  it('only resolves configs that match the target agent', async () => {
-    const ctx = makeContext({
-      agentName: 'my-agent',
-      onlineEvalConfigs: [
-        { name: 'eval-config', agents: ['other-agent'] }, // doesn't match
-      ],
-    });
-    mockLoadDeployedProjectConfig.mockResolvedValue(ctx);
-    mockResolveAgent.mockReturnValue(makeResolvedAgent());
-
-    const result = await handleLogsEval({});
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('No deployed online eval configs found');
   });
 
   it('uses log group name from API when available', async () => {

@@ -343,7 +343,7 @@ describe('computeResourceStatuses', () => {
   it('marks online-eval config as deployed when in both local and deployed state', () => {
     const project = {
       ...baseProject,
-      onlineEvalConfigs: [{ name: 'TestConfig', agents: ['Agent1'], evaluators: ['Builtin.Helpfulness'] }],
+      onlineEvalConfigs: [{ name: 'TestConfig', evaluators: ['Builtin.Helpfulness'], samplingRate: 10 }],
     } as unknown as AgentCoreProjectSpec;
 
     const resources: DeployedResourceState = {
@@ -360,13 +360,13 @@ describe('computeResourceStatuses', () => {
 
     expect(configEntry).toBeDefined();
     expect(configEntry!.deploymentState).toBe('deployed');
-    expect(configEntry!.detail).toBe('1 agent, 1 evaluator');
+    expect(configEntry!.detail).toBe('1 evaluator, 10% sampling');
   });
 
   it('marks online-eval config as local-only when not deployed', () => {
     const project = {
       ...baseProject,
-      onlineEvalConfigs: [{ name: 'TestConfig', agents: ['A', 'B'], evaluators: ['Builtin.X', 'Builtin.Y', 'Custom'] }],
+      onlineEvalConfigs: [{ name: 'TestConfig', evaluators: ['Builtin.X', 'Builtin.Y', 'Custom'], samplingRate: 50 }],
     } as unknown as AgentCoreProjectSpec;
 
     const result = computeResourceStatuses(project, undefined);
@@ -374,7 +374,7 @@ describe('computeResourceStatuses', () => {
 
     expect(configEntry).toBeDefined();
     expect(configEntry!.deploymentState).toBe('local-only');
-    expect(configEntry!.detail).toBe('2 agents, 3 evaluators');
+    expect(configEntry!.detail).toBe('3 evaluators, 50% sampling');
   });
 
   it('marks online-eval config as pending-removal when deployed but removed from schema', () => {
@@ -452,7 +452,7 @@ describe('handleProjectStatus — live enrichment', () => {
       project: {
         ...baseProject,
         evaluators: [{ name: 'MyEval', level: 'SESSION', config: {} }],
-        onlineEvalConfigs: [{ name: 'MyConfig', agents: ['agent1'], evaluators: ['Builtin.Helpfulness'] }],
+        onlineEvalConfigs: [{ name: 'MyConfig', evaluators: ['Builtin.Helpfulness'], samplingRate: 10 }],
       } as unknown as AgentCoreProjectSpec,
       awsTargets: [{ name: 'dev', region: 'us-east-1', account: '123456789' }],
       deployedState: {

@@ -16,9 +16,9 @@ export const OnlineEvalConfigNameSchema = z
 export const OnlineEvalConfigSchema = z.object({
   type: z.literal('OnlineEvaluationConfig'),
   name: OnlineEvalConfigNameSchema,
-  /** Agent names this online eval config monitors */
-  agents: z.array(z.string().min(1)).min(1, 'At least one agent is required'),
-  /** Evaluator names (custom) or Builtin.* IDs */
+  /** Agent name to monitor (must match a project agent) */
+  agent: z.string().min(1, 'Agent name is required'),
+  /** Evaluator names (custom), Builtin.* IDs, or evaluator ARNs */
   evaluators: z.array(z.string().min(1)).min(1, 'At least one evaluator is required'),
   /** Sampling rate as a percentage (0.01 to 100) */
   samplingRate: z.number().min(0.01).max(100),

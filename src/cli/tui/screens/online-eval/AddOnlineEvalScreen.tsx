@@ -1,11 +1,19 @@
 import { OnlineEvalConfigNameSchema } from '../../../../schema';
 import type { SelectableItem } from '../../components';
-import { ConfirmReview, Panel, Screen, StepIndicator, TextInput, WizardMultiSelect } from '../../components';
+import {
+  ConfirmReview,
+  Panel,
+  Screen,
+  StepIndicator,
+  TextInput,
+  WizardMultiSelect,
+  WizardSelect,
+} from '../../components';
 import { HELP_TEXT } from '../../constants';
 import { useListNavigation, useMultiSelectNavigation } from '../../hooks';
 import { generateUniqueName } from '../../utils';
-import type { AddOnlineEvalConfig } from './types';
-import { BUILTIN_EVALUATORS, DEFAULT_SAMPLING_RATE, ONLINE_EVAL_STEP_LABELS } from './types';
+import type { AddOnlineEvalConfig, EvaluatorItem } from './types';
+import { DEFAULT_SAMPLING_RATE, ONLINE_EVAL_STEP_LABELS } from './types';
 import { useAddOnlineEvalWizard } from './useAddOnlineEvalWizard';
 import React, { useMemo } from 'react';
 
@@ -13,43 +21,59 @@ interface AddOnlineEvalScreenProps {
   onComplete: (config: AddOnlineEvalConfig) => void;
   onExit: () => void;
   existingConfigNames: string[];
-  availableAgents: string[];
-  availableEvaluators: string[];
+  evaluatorItems: EvaluatorItem[];
+  agentNames: string[];
 }
 
 export function AddOnlineEvalScreen({
   onComplete,
   onExit,
   existingConfigNames,
-  availableAgents,
-  availableEvaluators,
+  evaluatorItems: rawEvaluatorItems,
+  agentNames,
 }: AddOnlineEvalScreenProps) {
-  const wizard = useAddOnlineEvalWizard();
+  const wizard = useAddOnlineEvalWizard(agentNames.length);
 
-  const agentItems: SelectableItem[] = useMemo(
-    () => availableAgents.map(name => ({ id: name, title: name, description: 'Agent' })),
-    [availableAgents]
-  );
+  // Auto-set agent when there's only one
+  const effectiveConfig = useMemo(() => {
+    if (agentNames.length === 1 && !wizard.config.agent) {
+      return { ...wizard.config, agent: agentNames[0]! };
+    }
+    return wizard.config;
+  }, [wizard.config, agentNames]);
 
   const evaluatorItems: SelectableItem[] = useMemo(() => {
-    const custom = availableEvaluators.map(name => ({ id: name, title: name, description: 'Custom evaluator' }));
-    const builtin = BUILTIN_EVALUATORS.map(b => ({ id: b.id, title: b.title, description: b.description }));
-    return [...custom, ...builtin];
-  }, [availableEvaluators]);
+    return rawEvaluatorItems.map(e => ({
+      id: e.arn,
+      title: e.name,
+      description: e.type === 'Builtin' ? 'Built-in evaluator' : (e.description ?? 'Custom evaluator'),
+    }));
+  }, [rawEvaluatorItems]);
+
+  const agentItems: SelectableItem[] = useMemo(() => {
+    return agentNames.map(name => ({ id: name, title: name }));
+  }, [agentNames]);
 
   const isNameStep = wizard.step === 'name';
-  const isAgentsStep = wizard.step === 'agents';
+  const isAgentStep = wizard.step === 'agent';
   const isEvaluatorsStep = wizard.step === 'evaluators';
   const isSamplingRateStep = wizard.step === 'samplingRate';
+  const isEnableOnCreateStep = wizard.step === 'enableOnCreate';
   const isConfirmStep = wizard.step === 'confirm';
 
-  const agentsNav = useMultiSelectNavigation({
+  const enableOnCreateItems: SelectableItem[] = useMemo(
+    () => [
+      { id: 'yes', title: 'Yes', description: 'Enable evaluation immediately after deploy' },
+      { id: 'no', title: 'No', description: 'Deploy paused — enable later with `agentcore resume online-eval`' },
+    ],
+    []
+  );
+
+  const agentNav = useListNavigation({
     items: agentItems,
-    getId: item => item.id,
-    onConfirm: ids => wizard.setAgents(ids),
+    onSelect: item => wizard.setAgent(item.id),
     onExit: () => wizard.goBack(),
-    isActive: isAgentsStep,
-    requireSelection: true,
+    isActive: isAgentStep,
   });
 
   const evaluatorsNav = useMultiSelectNavigation({
@@ -61,16 +85,24 @@ export function AddOnlineEvalScreen({
     requireSelection: true,
   });
 
+  const enableOnCreateNav = useListNavigation({
+    items: enableOnCreateItems,
+    onSelect: item => wizard.setEnableOnCreate(item.id === 'yes'),
+    onExit: () => wizard.goBack(),
+    isActive: isEnableOnCreateStep,
+  });
+
   useListNavigation({
     items: [{ id: 'confirm', title: 'Confirm' }],
-    onSelect: () => onComplete(wizard.config),
+    onSelect: () => onComplete(effectiveConfig),
     onExit: () => wizard.goBack(),
     isActive: isConfirmStep,
   });
 
-  const helpText =
-    isAgentsStep || isEvaluatorsStep
-      ? 'Space toggle · Enter confirm · Esc back'
+  const helpText = isEvaluatorsStep
+    ? 'Space toggle · Enter confirm · Esc back'
+    : isAgentStep || isEnableOnCreateStep
+      ? HELP_TEXT.NAVIGATE_SELECT
       : isConfirmStep
         ? HELP_TEXT.CONFIRM_CANCEL
         : HELP_TEXT.TEXT_INPUT;
@@ -94,13 +126,12 @@ export function AddOnlineEvalScreen({
           />
         )}
 
-        {isAgentsStep && (
-          <WizardMultiSelect
-            title="Select agents to monitor"
-            description="Choose which agents this config evaluates"
+        {isAgentStep && (
+          <WizardSelect
+            title="Select agent to monitor"
+            description="Each online eval config monitors a single agent"
             items={agentItems}
-            cursorIndex={agentsNav.cursorIndex}
-            selectedIds={agentsNav.selectedIds}
+            selectedIndex={agentNav.selectedIndex}
           />
         )}
 
@@ -134,14 +165,23 @@ export function AddOnlineEvalScreen({
           />
         )}
 
+        {isEnableOnCreateStep && (
+          <WizardSelect
+            title="Enable on deploy?"
+            description="If enabled, evaluation starts automatically after `agentcore deploy`"
+            items={enableOnCreateItems}
+            selectedIndex={enableOnCreateNav.selectedIndex}
+          />
+        )}
+
         {isConfirmStep && (
           <ConfirmReview
             fields={[
-              { label: 'Name', value: wizard.config.name },
-              { label: 'Agents', value: wizard.config.agents.join(', ') },
-              { label: 'Evaluators', value: wizard.config.evaluators.join(', ') },
-              { label: 'Sampling Rate', value: `${wizard.config.samplingRate}%` },
-              { label: 'Enable on Create', value: 'Yes' },
+              { label: 'Name', value: effectiveConfig.name },
+              { label: 'Agent', value: effectiveConfig.agent },
+              { label: 'Evaluators', value: effectiveConfig.evaluators.join(', ') },
+              { label: 'Sampling Rate', value: `${effectiveConfig.samplingRate}%` },
+              { label: 'Enable on Deploy', value: effectiveConfig.enableOnCreate ? 'Yes' : 'No' },
             ]}
           />
         )}

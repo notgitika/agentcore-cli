@@ -1,15 +1,20 @@
+import { ConfigIO } from '../../../../lib';
+import { validateAwsCredentials } from '../../../aws/account';
+import { listEvaluators } from '../../../aws/agentcore-control';
+import { detectRegion } from '../../../aws/region';
+import { getErrorMessage } from '../../../errors';
 import { ErrorPrompt } from '../../components';
-import { useExistingEvaluatorNames } from '../../hooks/useCreateEvaluator';
-import { useAvailableAgents } from '../../hooks/useCreateMcp';
 import { useCreateOnlineEval, useExistingOnlineEvalNames } from '../../hooks/useCreateOnlineEval';
 import { AddSuccessScreen } from '../add/AddSuccessScreen';
 import { AddOnlineEvalScreen } from './AddOnlineEvalScreen';
-import type { AddOnlineEvalConfig } from './types';
+import type { AddOnlineEvalConfig, EvaluatorItem } from './types';
 import React, { useCallback, useEffect, useState } from 'react';
 
 type FlowState =
-  | { name: 'create-wizard' }
+  | { name: 'loading' }
+  | { name: 'create-wizard'; evaluators: EvaluatorItem[]; agentNames: string[] }
   | { name: 'create-success'; configName: string }
+  | { name: 'creds-error'; message: string }
   | { name: 'error'; message: string };
 
 interface AddOnlineEvalFlowProps {
@@ -23,9 +28,53 @@ interface AddOnlineEvalFlowProps {
 export function AddOnlineEvalFlow({ isInteractive = true, onExit, onBack, onDev, onDeploy }: AddOnlineEvalFlowProps) {
   const { createOnlineEval, reset: resetCreate } = useCreateOnlineEval();
   const { names: existingConfigNames } = useExistingOnlineEvalNames();
-  const { agents: availableAgents } = useAvailableAgents();
-  const { names: availableEvaluators } = useExistingEvaluatorNames();
-  const [flow, setFlow] = useState<FlowState>({ name: 'create-wizard' });
+  const [flow, setFlow] = useState<FlowState>({ name: 'loading' });
+
+  // Pre-check AWS credentials then fetch evaluators from the account
+  useEffect(() => {
+    if (flow.name !== 'loading') return;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        await validateAwsCredentials();
+      } catch (err) {
+        if (!cancelled) setFlow({ name: 'creds-error', message: getErrorMessage(err) });
+        return;
+      }
+
+      try {
+        const [{ region }, projectSpec] = await Promise.all([detectRegion(), new ConfigIO().readProjectSpec()]);
+        const result = await listEvaluators({ region });
+        if (cancelled) return;
+
+        const items: EvaluatorItem[] = result.evaluators.map(e => ({
+          arn: e.evaluatorArn,
+          name: e.evaluatorName,
+          type: e.evaluatorType,
+          description: e.description,
+        }));
+
+        const agentNames = projectSpec.agents.map(a => a.name);
+
+        if (agentNames.length === 0) {
+          setFlow({
+            name: 'error',
+            message: 'No agents found in project. Add an agent first with `agentcore add agent`.',
+          });
+          return;
+        }
+
+        setFlow({ name: 'create-wizard', evaluators: items, agentNames });
+      } catch (err) {
+        if (!cancelled) setFlow({ name: 'error', message: getErrorMessage(err) });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [flow.name]);
 
   useEffect(() => {
     if (!isInteractive && flow.name === 'create-success') {
@@ -46,12 +95,20 @@ export function AddOnlineEvalFlow({ isInteractive = true, onExit, onBack, onDev,
     [createOnlineEval]
   );
 
+  if (flow.name === 'loading') {
+    return null;
+  }
+
+  if (flow.name === 'creds-error') {
+    return <ErrorPrompt message="AWS credentials required" detail={flow.message} onBack={onBack} onExit={onExit} />;
+  }
+
   if (flow.name === 'create-wizard') {
     return (
       <AddOnlineEvalScreen
         existingConfigNames={existingConfigNames}
-        availableAgents={availableAgents}
-        availableEvaluators={availableEvaluators}
+        evaluatorItems={flow.evaluators}
+        agentNames={flow.agentNames}
         onComplete={handleCreateComplete}
         onExit={onBack}
       />
@@ -78,7 +135,7 @@ export function AddOnlineEvalFlow({ isInteractive = true, onExit, onBack, onDev,
       detail={flow.message}
       onBack={() => {
         resetCreate();
-        setFlow({ name: 'create-wizard' });
+        setFlow({ name: 'loading' });
       }}
       onExit={onExit}
     />

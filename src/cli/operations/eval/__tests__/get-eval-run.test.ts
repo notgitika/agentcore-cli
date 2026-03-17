@@ -9,7 +9,6 @@ vi.mock('../storage', () => ({
 }));
 
 const sampleRun: EvalRunResult = {
-  runId: 'run_abc',
   timestamp: '2025-01-15T10:00:00.000Z',
   agent: 'test-agent',
   evaluators: ['Builtin.GoalSuccessRate'],
@@ -30,22 +29,22 @@ describe('handleGetEvalRun', () => {
   it('returns the run on success', () => {
     mockLoadEvalRun.mockReturnValue(sampleRun);
 
-    const result = handleGetEvalRun({ runId: 'run_abc' });
+    const result = handleGetEvalRun({ filename: 'eval_2025-01-15_10-00-00' });
 
     expect(result.success).toBe(true);
     expect(result.run).toEqual(sampleRun);
-    expect(mockLoadEvalRun).toHaveBeenCalledWith('run_abc');
+    expect(mockLoadEvalRun).toHaveBeenCalledWith('eval_2025-01-15_10-00-00');
   });
 
   it('returns error when run is not found', () => {
     mockLoadEvalRun.mockImplementation(() => {
-      throw new Error('Eval run "run_missing" not found');
+      throw new Error('Eval run "eval_2025-01-01_00-00-00" not found');
     });
 
-    const result = handleGetEvalRun({ runId: 'run_missing' });
+    const result = handleGetEvalRun({ filename: 'eval_2025-01-01_00-00-00' });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('run_missing');
+    expect(result.error).toContain('not found');
     expect(result.run).toBeUndefined();
   });
 
@@ -54,7 +53,7 @@ describe('handleGetEvalRun', () => {
       throw new Error('string error');
     });
 
-    const result = handleGetEvalRun({ runId: 'run_bad' });
+    const result = handleGetEvalRun({ filename: 'eval_bad' });
 
     expect(result.success).toBe(false);
     expect(result.error).toBe('string error');

@@ -7,11 +7,13 @@ import { AddFlow } from './screens/add/AddFlow';
 import { CreateScreen } from './screens/create';
 import { DeployScreen } from './screens/deploy/DeployScreen';
 import { DevScreen } from './screens/dev/DevScreen';
-import { EvalScreen } from './screens/eval';
+import { EvalHubScreen, EvalScreen } from './screens/eval';
 import { HelpScreen, HomeScreen } from './screens/home';
 import { InvokeScreen } from './screens/invoke';
+import { OnlineEvalDashboard } from './screens/online-eval';
 import { PackageScreen } from './screens/package';
 import { RemoveFlow } from './screens/remove';
+import { RunEvalFlow, RunScreen } from './screens/run-eval';
 import { StatusScreen } from './screens/status/StatusScreen';
 import { UpdateScreen } from './screens/update';
 import { ValidateScreen } from './screens/validate';
@@ -33,7 +35,11 @@ type Route =
   | { name: 'add' }
   | { name: 'status' }
   | { name: 'remove' }
+  | { name: 'run' }
+  | { name: 'run-eval'; from?: 'run' | 'eval' }
   | { name: 'eval' }
+  | { name: 'eval-runs' }
+  | { name: 'online-evals' }
   | { name: 'validate' }
   | { name: 'package' }
   | { name: 'update' };
@@ -86,6 +92,8 @@ function AppContent() {
       setRoute({ name: 'add' });
     } else if (id === 'remove') {
       setRoute({ name: 'remove' });
+    } else if (id === 'run') {
+      setRoute({ name: 'run' });
     } else if (id === 'eval') {
       setRoute({ name: 'eval' });
     } else if (id === 'validate') {
@@ -183,8 +191,44 @@ function AppContent() {
     );
   }
 
+  if (route.name === 'run') {
+    return (
+      <RunScreen
+        onRunEval={() => setRoute({ name: 'run-eval', from: 'run' })}
+        onExit={() => setRoute({ name: 'help' })}
+      />
+    );
+  }
+
   if (route.name === 'eval') {
-    return <EvalScreen isInteractive={true} onExit={() => setRoute({ name: 'help' })} />;
+    return (
+      <EvalHubScreen
+        onSelect={view => {
+          if (view === 'run-eval') setRoute({ name: 'run-eval', from: 'eval' });
+          if (view === 'runs') setRoute({ name: 'eval-runs' });
+          if (view === 'online-dashboard') setRoute({ name: 'online-evals' });
+        }}
+        onExit={() => setRoute({ name: 'help' })}
+      />
+    );
+  }
+
+  if (route.name === 'run-eval') {
+    const backRoute = route.from ?? 'eval';
+    return (
+      <RunEvalFlow
+        onExit={() => setRoute({ name: backRoute } as Route)}
+        onViewRuns={() => setRoute({ name: 'eval-runs' })}
+      />
+    );
+  }
+
+  if (route.name === 'eval-runs') {
+    return <EvalScreen isInteractive={true} onExit={() => setRoute({ name: 'eval' })} />;
+  }
+
+  if (route.name === 'online-evals') {
+    return <OnlineEvalDashboard isInteractive={true} onExit={() => setRoute({ name: 'eval' })} />;
   }
 
   if (route.name === 'validate') {

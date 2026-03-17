@@ -55,13 +55,15 @@ export type RatingScale = z.infer<typeof RatingScaleSchema>;
 // LLM-as-a-Judge Config
 // ============================================================================
 
-export const BedrockModelIdSchema = z
-  .string()
-  .min(1, 'Model ID is required')
-  .regex(
-    /^(arn:aws(-[a-z]+)?:bedrock:[a-z0-9-]+:\d{12}:(inference-profile|foundation-model)\/[a-zA-Z0-9._:-]+|([a-z]{2}(-[a-z]+)?\.)?[a-z0-9]+\.[a-zA-Z0-9._-]+(:[0-9]+)?)$/,
-    'Must be a valid Bedrock model ID (e.g. us.anthropic.claude-sonnet-4-5-20250929-v1:0) or model ARN'
-  );
+// eslint-disable-next-line security/detect-unsafe-regex -- anchored pattern, no backtracking risk
+const BEDROCK_MODEL_ID_PATTERN = /^[a-z][a-z0-9-]*\.[a-zA-Z0-9._-]+(:[0-9]+)?$/;
+const BEDROCK_ARN_PATTERN = /^arn:aws[a-z-]*:bedrock:[a-z0-9-]+:\d{12}:(inference-profile|foundation-model)\/.+$/;
+
+export function isValidBedrockModelId(value: string): boolean {
+  return BEDROCK_MODEL_ID_PATTERN.test(value) || BEDROCK_ARN_PATTERN.test(value);
+}
+
+export const BedrockModelIdSchema = z.string().min(1, 'Model ID is required');
 
 export const LlmAsAJudgeConfigSchema = z.object({
   model: BedrockModelIdSchema,

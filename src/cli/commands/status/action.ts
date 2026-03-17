@@ -167,7 +167,7 @@ export function computeResourceStatuses(
     deployedRecord: resources?.onlineEvalConfigs ?? {},
     getIdentifier: deployed => deployed.onlineEvaluationConfigArn,
     getLocalDetail: item =>
-      `${item.agents.length} agent${item.agents.length !== 1 ? 's' : ''}, ${item.evaluators.length} evaluator${item.evaluators.length !== 1 ? 's' : ''}`,
+      `${item.evaluators.length} evaluator${item.evaluators.length !== 1 ? 's' : ''}, ${item.samplingRate}% sampling`,
   });
 
   return [...agents, ...credentials, ...memories, ...gateways, ...evaluators, ...onlineEvalConfigs];

@@ -4,7 +4,16 @@ import type { EvaluationLevel, EvaluatorConfig } from '../../../../schema';
 // Evaluator Flow Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type AddEvaluatorStep = 'name' | 'level' | 'model' | 'instructions' | 'ratingScale' | 'confirm';
+export type AddEvaluatorStep =
+  | 'name'
+  | 'level'
+  | 'model'
+  | 'model-custom'
+  | 'instructions'
+  | 'ratingScale'
+  | 'ratingScale-type'
+  | 'ratingScale-custom'
+  | 'confirm';
 
 export interface AddEvaluatorConfig {
   name: string;
@@ -16,8 +25,11 @@ export const EVALUATOR_STEP_LABELS: Record<AddEvaluatorStep, string> = {
   name: 'Name',
   level: 'Level',
   model: 'Model',
+  'model-custom': 'Model',
   instructions: 'Prompt',
   ratingScale: 'Scale',
+  'ratingScale-type': 'Scale',
+  'ratingScale-custom': 'Scale',
   confirm: 'Confirm',
 };
 
@@ -33,6 +45,47 @@ export const EVALUATION_LEVEL_OPTIONS = [
 
 export const DEFAULT_MODEL = 'us.anthropic.claude-sonnet-4-5-20250929-v1:0';
 
+export const CUSTOM_MODEL_ID = '__custom__';
+
+export interface EvaluatorModelOption {
+  id: string;
+  title: string;
+  description: string;
+}
+
+export const EVALUATOR_MODEL_OPTIONS: EvaluatorModelOption[] = [
+  {
+    id: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+    title: 'Claude Sonnet 4.5',
+    description: 'Recommended — balanced speed and accuracy',
+  },
+  {
+    id: 'global.anthropic.claude-opus-4-5-20251101-v1:0',
+    title: 'Claude Opus 4.5',
+    description: 'Most capable — best for complex evaluations',
+  },
+  {
+    id: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+    title: 'Claude Haiku 4.5',
+    description: 'Fastest — good for high-volume evaluations',
+  },
+  {
+    id: 'us.amazon.nova-pro-v1:0',
+    title: 'Amazon Nova Pro',
+    description: 'Amazon foundation model — strong reasoning',
+  },
+  {
+    id: 'us.amazon.nova-lite-v1:0',
+    title: 'Amazon Nova Lite',
+    description: 'Amazon foundation model — fast and cost-effective',
+  },
+  {
+    id: CUSTOM_MODEL_ID,
+    title: 'Other',
+    description: 'Enter a custom Bedrock model ID or ARN',
+  },
+];
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Placeholder Constants
 // ─────────────────────────────────────────────────────────────────────────────
@@ -42,9 +95,9 @@ export const DEFAULT_MODEL = 'us.anthropic.claude-sonnet-4-5-20250929-v1:0';
  * to contain at least one placeholder from the evaluator's level.
  */
 export const LEVEL_PLACEHOLDERS: Record<EvaluationLevel, string[]> = {
-  SESSION: ['available_tools', 'context', 'actual_trajectory', 'expected_trajectory', 'assertions'],
-  TRACE: ['available_tools', 'context', 'actual_trajectory', 'expected_trajectory', 'assertions'],
-  TOOL_CALL: ['tool_name', 'tool_input', 'tool_output', 'context'],
+  SESSION: ['context', 'available_tools'],
+  TRACE: ['context', 'assistant_turn'],
+  TOOL_CALL: ['available_tools', 'context', 'tool_turn'],
 };
 
 /**
@@ -52,11 +105,10 @@ export const LEVEL_PLACEHOLDERS: Record<EvaluationLevel, string[]> = {
  */
 export const DEFAULT_INSTRUCTIONS: Record<EvaluationLevel, string> = {
   SESSION:
-    'Evaluate the agent session based on the following conversation. Context: {context}. Rate the overall quality of the response.',
+    'Evaluate the agent session. Context: {context}. Available tools: {available_tools}. Rate the overall quality of the session.',
   TRACE:
-    'Evaluate the agent trace based on the following conversation. Context: {context}. Rate the quality of this trace.',
-  TOOL_CALL:
-    'Evaluate the tool call. Tool: {tool_name}. Input: {tool_input}. Output: {tool_output}. Rate the quality of this tool usage.',
+    'Evaluate the agent trace. Context: {context}. Assistant turn: {assistant_turn}. Rate the quality of this trace.',
+  TOOL_CALL: 'Evaluate the tool call. Context: {context}. Tool turn: {tool_turn}. Rate the quality of this tool usage.',
 };
 
 /**
@@ -76,6 +128,66 @@ export interface RatingScalePreset {
   title: string;
   description: string;
   ratingScale: EvaluatorConfig['llmAsAJudge']['ratingScale'];
+}
+
+export const CUSTOM_RATING_SCALE_ID = '__custom__';
+
+export type CustomRatingScaleType = 'numerical' | 'categorical';
+
+export const RATING_SCALE_TYPE_OPTIONS = [
+  { id: 'numerical', title: 'Numerical', description: 'Scored values (e.g. 1–5)' },
+  { id: 'categorical', title: 'Categorical', description: 'Named labels (e.g. Pass/Fail)' },
+] as const;
+
+/**
+ * Parse a custom rating scale from compact text format.
+ * Numerical: "1:Poor:Fails to meet, 2:Fair:Partially meets, 5:Excellent:Far exceeds"
+ * Categorical: "Pass:Meets criteria, Fail:Does not meet"
+ */
+export function parseCustomRatingScale(
+  input: string,
+  type: CustomRatingScaleType
+): { success: true; ratingScale: EvaluatorConfig['llmAsAJudge']['ratingScale'] } | { success: false; error: string } {
+  const entries = input
+    .split(',')
+    .map(e => e.trim())
+    .filter(Boolean);
+
+  if (entries.length < 2) {
+    return { success: false, error: 'At least 2 entries required (comma-separated)' };
+  }
+
+  if (type === 'numerical') {
+    const numerical: { value: number; label: string; definition: string }[] = [];
+    for (const entry of entries) {
+      const firstColon = entry.indexOf(':');
+      const secondColon = firstColon >= 0 ? entry.indexOf(':', firstColon + 1) : -1;
+      if (firstColon < 0 || secondColon < 0) {
+        return { success: false, error: `Invalid entry "${entry}". Format: value:label:definition` };
+      }
+      const rawValue = entry.slice(0, firstColon).trim();
+      const value = Number(rawValue);
+      if (isNaN(value)) {
+        return { success: false, error: `"${rawValue}" is not a valid number in "${entry}"` };
+      }
+      const label = entry.slice(firstColon + 1, secondColon).trim();
+      const definition = entry.slice(secondColon + 1).trim();
+      numerical.push({ value, label, definition });
+    }
+    return { success: true, ratingScale: { numerical } };
+  }
+
+  const categorical: { label: string; definition: string }[] = [];
+  for (const entry of entries) {
+    const firstColon = entry.indexOf(':');
+    if (firstColon < 0) {
+      return { success: false, error: `Invalid entry "${entry}". Format: label:definition` };
+    }
+    const label = entry.slice(0, firstColon).trim();
+    const definition = entry.slice(firstColon + 1).trim();
+    categorical.push({ label, definition });
+  }
+  return { success: true, ratingScale: { categorical } };
 }
 
 export const RATING_SCALE_PRESETS: RatingScalePreset[] = [

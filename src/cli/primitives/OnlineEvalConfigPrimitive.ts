@@ -9,9 +9,10 @@ import type { Command } from '@commander-js/extra-typings';
 
 export interface AddOnlineEvalConfigOptions {
   name: string;
-  agents: string[];
+  agent: string;
   evaluators: string[];
   samplingRate: number;
+  enableOnCreate?: boolean;
 }
 
 export type RemovableOnlineEvalConfig = RemovableResource;
@@ -62,7 +63,6 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
 
     const summary: string[] = [
       `Removing online eval config: ${configName}`,
-      `Monitors agents: ${config.agents.join(', ')}`,
       `Uses evaluators: ${config.evaluators.join(', ')}`,
     ];
     const schemaChanges: SchemaChange[] = [];
@@ -104,16 +104,20 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
       .command('online-eval')
       .description('Add an online eval config to the project')
       .option('--name <name>', 'Config name [non-interactive]')
-      .option('-a, --agent <agents...>', 'Agent name(s) to monitor [non-interactive]')
-      .option('-e, --evaluator <evaluators...>', 'Evaluator name(s) or Builtin.* IDs [non-interactive]')
+      .option('-a, --agent <name>', 'Agent to monitor [non-interactive]')
+      .option('-e, --evaluator <evaluators...>', 'Evaluator name(s), Builtin.* IDs, or ARNs [non-interactive]')
+      .option('--evaluator-arn <arns...>', 'Evaluator ARN(s) [non-interactive]')
       .option('--sampling-rate <rate>', 'Sampling percentage (0.01-100) [non-interactive]')
+      .option('--enable-on-create', 'Enable evaluation immediately after deploy [non-interactive]')
       .option('--json', 'Output as JSON [non-interactive]')
       .action(
         async (cliOptions: {
           name?: string;
-          agent?: string[];
+          agent?: string;
           evaluator?: string[];
+          evaluatorArn?: string[];
           samplingRate?: string;
+          enableOnCreate?: boolean;
           json?: boolean;
         }) => {
           try {
@@ -123,9 +127,12 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
             }
 
             if (cliOptions.name || cliOptions.json) {
-              if (!cliOptions.name || !cliOptions.agent || !cliOptions.evaluator || !cliOptions.samplingRate) {
+              // Merge --evaluator and --evaluator-arn into a single list
+              const allEvaluators = [...(cliOptions.evaluator ?? []), ...(cliOptions.evaluatorArn ?? [])];
+
+              if (!cliOptions.name || !cliOptions.agent || allEvaluators.length === 0 || !cliOptions.samplingRate) {
                 const error =
-                  '--name, --agent, --evaluator, and --sampling-rate are all required in non-interactive mode';
+                  '--name, --agent, --evaluator (and/or --evaluator-arn), and --sampling-rate are all required in non-interactive mode';
                 if (cliOptions.json) {
                   console.log(JSON.stringify({ success: false, error }));
                 } else {
@@ -147,9 +154,10 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
 
               const result = await this.add({
                 name: cliOptions.name,
-                agents: cliOptions.agent,
-                evaluators: cliOptions.evaluator,
+                agent: cliOptions.agent,
+                evaluators: allEvaluators,
                 samplingRate,
+                enableOnCreate: cliOptions.enableOnCreate,
               });
 
               if (cliOptions.json) {
@@ -204,9 +212,10 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
     const config: OnlineEvalConfig = {
       type: 'OnlineEvaluationConfig',
       name: options.name,
-      agents: options.agents,
+      agent: options.agent,
       evaluators: options.evaluators,
       samplingRate: options.samplingRate,
+      ...(options.enableOnCreate !== undefined && { enableOnCreate: options.enableOnCreate }),
     };
 
     project.onlineEvalConfigs.push(config);

@@ -33,20 +33,18 @@ interface ResolvedLogGroup {
 }
 
 /**
- * Resolve the online eval config log group names for a given agent.
+ * Resolve the online eval config log group names.
  * Fetches the actual log group from the API when possible, falls back to convention.
  */
 async function resolveEvalLogGroups(
   context: DeployedProjectConfig,
-  agentName: string,
   targetName: string,
   region: string
 ): Promise<ResolvedLogGroup[]> {
   const { project, deployedState } = context;
   const targetResources = deployedState.targets[targetName]?.resources;
 
-  // Find online eval configs that monitor this agent
-  const matchingConfigs = (project.onlineEvalConfigs ?? []).filter(c => c.agents.includes(agentName));
+  const matchingConfigs = project.onlineEvalConfigs ?? [];
 
   const results: ResolvedLogGroup[] = [];
   for (const config of matchingConfigs) {
@@ -82,12 +80,12 @@ export async function handleLogsEval(options: LogsEvalOptions): Promise<LogsEval
 
   const { agent } = agentResult;
 
-  const resolvedLogGroups = await resolveEvalLogGroups(context, agent.agentName, agent.targetName, agent.region);
+  const resolvedLogGroups = await resolveEvalLogGroups(context, agent.targetName, agent.region);
 
   if (resolvedLogGroups.length === 0) {
     return {
       success: false,
-      error: `No deployed online eval configs found for agent '${agent.agentName}'. Add one with 'agentcore add online-eval' and deploy.`,
+      error: `No deployed online eval configs found. Add one with 'agentcore add online-eval' and deploy.`,
     };
   }
 

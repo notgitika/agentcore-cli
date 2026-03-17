@@ -16,6 +16,7 @@ export type {
 } from './evaluator';
 export {
   BedrockModelIdSchema,
+  isValidBedrockModelId,
   EvaluationLevelSchema,
   EvaluatorConfigSchema,
   EvaluatorNameSchema,

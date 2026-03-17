@@ -4,7 +4,7 @@ import { getEvaluator } from '../../aws/agentcore-control';
 import { DEFAULT_ENDPOINT_NAME } from '../../constants';
 import type { DeployedProjectConfig } from '../resolve-agent';
 import { loadDeployedProjectConfig, resolveAgent } from '../resolve-agent';
-import { generateRunId, saveEvalRun } from './storage';
+import { generateFilename, saveEvalRun } from './storage';
 import type { EvalEvaluatorResult, EvalRunResult, EvalSessionScore, RunEvalOptions } from './types';
 import { CloudWatchLogsClient, GetQueryResultsCommand, StartQueryCommand } from '@aws-sdk/client-cloudwatch-logs';
 import type { ResultField } from '@aws-sdk/client-cloudwatch-logs';
@@ -491,7 +491,7 @@ async function fetchSessionSpans(opts: FetchSpansOptions): Promise<SessionSpans[
   // 3. Build session list — aws/spans docs are already scoped by runtimeId (step 1),
   //    and runtime log docs were filtered through isRelevantForEval (step 2).
   //    We keep all docs so the Evaluate API has full trace context for resolving
-  //    template variables like {actual_trajectory}.
+  //    template variables like {context} and {assistant_turn}.
   const sessions: SessionSpans[] = [];
   for (const [sessionId, docs] of sessionMap) {
     if (docs.length > 0) {
@@ -615,9 +615,9 @@ export async function handleRunEval(options: RunEvalOptions): Promise<RunEvalRes
   }
 
   // Build run result
+  const timestamp = new Date().toISOString();
   const run: EvalRunResult = {
-    runId: generateRunId(),
-    timestamp: new Date().toISOString(),
+    timestamp,
     agent: ctx.agentLabel,
     evaluators: ctx.evaluatorLabels,
     lookbackDays: options.days,
@@ -632,7 +632,7 @@ export async function handleRunEval(options: RunEvalOptions): Promise<RunEvalRes
     filePath = options.output;
   } else if (options.agentArn) {
     // ARN mode may not have a project directory — save to cwd
-    const fallbackPath = join(process.cwd(), `${run.runId}.json`);
+    const fallbackPath = join(process.cwd(), `${generateFilename(timestamp)}.json`);
     writeFileSync(fallbackPath, JSON.stringify(run, null, 2));
     filePath = fallbackPath;
   } else {

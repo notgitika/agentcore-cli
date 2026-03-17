@@ -8,7 +8,7 @@ const mockLoadDeployedProjectConfig = vi.fn();
 const mockEvaluate = vi.fn();
 const mockGetEvaluator = vi.fn();
 const mockSaveEvalRun = vi.fn();
-const mockGenerateRunId = vi.fn();
+const mockGenerateFilename = vi.fn();
 const mockSend = vi.fn();
 const mockGetCredentialProvider = vi.fn().mockReturnValue({});
 const mockWriteFileSync = vi.fn();
@@ -31,7 +31,7 @@ vi.mock('../../../aws', () => ({
 }));
 
 vi.mock('../storage', () => ({
-  generateRunId: () => mockGenerateRunId(),
+  generateFilename: (...args: unknown[]) => mockGenerateFilename(...args),
   saveEvalRun: (...args: unknown[]) => mockSaveEvalRun(...args),
 }));
 
@@ -136,8 +136,8 @@ function setupCloudWatchToReturn(spanRows: unknown[][], runtimeLogRows: unknown[
 
 describe('handleRunEval', () => {
   beforeEach(() => {
-    mockGenerateRunId.mockReturnValue('run_test-123');
-    mockSaveEvalRun.mockReturnValue('/tmp/eval-results/run_test-123.json');
+    mockGenerateFilename.mockReturnValue('eval_2025-01-15_10-00-00');
+    mockSaveEvalRun.mockReturnValue('/tmp/eval-results/eval_2025-01-15_10-00-00.json');
   });
 
   afterEach(() => vi.clearAllMocks());
@@ -394,7 +394,7 @@ describe('handleRunEval', () => {
     expect(result.success).toBe(true);
     expect(mockSaveEvalRun).toHaveBeenCalled();
     expect(mockWriteFileSync).not.toHaveBeenCalled();
-    expect(result.filePath).toBe('/tmp/eval-results/run_test-123.json');
+    expect(result.filePath).toBe('/tmp/eval-results/eval_2025-01-15_10-00-00.json');
   });
 
   it('writes to custom output path when --output is specified', async () => {
@@ -562,8 +562,11 @@ describe('handleRunEval', () => {
     expect(result.success).toBe(true);
     // Should write to cwd, not call saveEvalRun (which requires a project)
     expect(mockSaveEvalRun).not.toHaveBeenCalled();
-    expect(mockWriteFileSync).toHaveBeenCalledWith(expect.stringContaining('run_test-123.json'), expect.any(String));
-    expect(result.filePath).toContain('run_test-123.json');
+    expect(mockWriteFileSync).toHaveBeenCalledWith(
+      expect.stringContaining('eval_2025-01-15_10-00-00.json'),
+      expect.any(String)
+    );
+    expect(result.filePath).toContain('eval_2025-01-15_10-00-00.json');
   });
 
   it('saves to --output path in ARN mode', async () => {

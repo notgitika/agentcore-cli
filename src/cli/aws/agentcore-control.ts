@@ -1,11 +1,11 @@
 import { getCredentialProvider } from './account';
 import {
   BedrockAgentCoreControlClient,
+  DeleteOnlineEvaluationConfigCommand,
   GetAgentRuntimeCommand,
   GetEvaluatorCommand,
   GetOnlineEvaluationConfigCommand,
   ListEvaluatorsCommand,
-  ListOnlineEvaluationConfigsCommand,
   UpdateOnlineEvaluationConfigCommand,
 } from '@aws-sdk/client-bedrock-agentcore-control';
 
@@ -242,52 +242,38 @@ export async function getOnlineEvaluationConfig(
   };
 }
 
-export interface ListOnlineEvalConfigsOptions {
+// ============================================================================
+// Delete Online Eval Config
+// ============================================================================
+
+export interface DeleteOnlineEvalConfigOptions {
   region: string;
-  maxResults?: number;
-  nextToken?: string;
+  onlineEvaluationConfigId: string;
 }
 
-export interface OnlineEvalConfigSummary {
+export interface DeleteOnlineEvalConfigResult {
   configId: string;
   configArn: string;
-  configName: string;
   status: string;
-  executionStatus: string;
-  description?: string;
-  failureReason?: string;
 }
 
-export interface ListOnlineEvalConfigsResult {
-  configs: OnlineEvalConfigSummary[];
-  nextToken?: string;
-}
-
-export async function listOnlineEvaluationConfigs(
-  options: ListOnlineEvalConfigsOptions
-): Promise<ListOnlineEvalConfigsResult> {
+export async function deleteOnlineEvalConfig(
+  options: DeleteOnlineEvalConfigOptions
+): Promise<DeleteOnlineEvalConfigResult> {
   const client = new BedrockAgentCoreControlClient({
     region: options.region,
     credentials: getCredentialProvider(),
   });
 
-  const command = new ListOnlineEvaluationConfigsCommand({
-    maxResults: options.maxResults,
-    nextToken: options.nextToken,
+  const command = new DeleteOnlineEvaluationConfigCommand({
+    onlineEvaluationConfigId: options.onlineEvaluationConfigId,
   });
 
   const response = await client.send(command);
 
   return {
-    configs: (response.onlineEvaluationConfigs ?? []).map(c => ({
-      configId: c.onlineEvaluationConfigId ?? '',
-      configArn: c.onlineEvaluationConfigArn ?? '',
-      configName: c.onlineEvaluationConfigName ?? '',
-      status: c.status ?? 'UNKNOWN',
-      executionStatus: c.executionStatus ?? 'UNKNOWN',
-      description: c.description,
-      failureReason: c.failureReason,
-    })),
-    nextToken: response.nextToken,
+    configId: response.onlineEvaluationConfigId ?? options.onlineEvaluationConfigId,
+    configArn: response.onlineEvaluationConfigArn ?? '',
+    status: response.status ?? 'DELETING',
   };
 }

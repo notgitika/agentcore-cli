@@ -29,7 +29,7 @@ describe('OnlineEvalConfigSchema', () => {
   const validConfig = {
     type: 'OnlineEvaluationConfig' as const,
     name: 'TestConfig',
-    agents: ['agent1'],
+    agent: 'MyAgent',
     evaluators: ['Builtin.GoalSuccessRate'],
     samplingRate: 10,
   };
@@ -38,18 +38,21 @@ describe('OnlineEvalConfigSchema', () => {
     expect(OnlineEvalConfigSchema.safeParse(validConfig).success).toBe(true);
   });
 
-  it('accepts multiple agents and evaluators', () => {
-    const config = { ...validConfig, agents: ['a1', 'a2'], evaluators: ['Builtin.X', 'CustomEval'] };
+  it('accepts multiple evaluators', () => {
+    const config = { ...validConfig, evaluators: ['Builtin.X', 'CustomEval'] };
+    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(true);
+  });
+
+  it('accepts evaluator ARNs', () => {
+    const config = {
+      ...validConfig,
+      evaluators: ['arn:aws:bedrock:us-east-1:123456:evaluator/MyEval-abc'],
+    };
     expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(true);
   });
 
   it('rejects wrong type literal', () => {
     const config = { ...validConfig, type: 'WrongType' };
-    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(false);
-  });
-
-  it('rejects empty agents array', () => {
-    const config = { ...validConfig, agents: [] };
     expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(false);
   });
 
@@ -76,11 +79,6 @@ describe('OnlineEvalConfigSchema', () => {
   it('accepts maximum sampling rate of 100', () => {
     const config = { ...validConfig, samplingRate: 100 };
     expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(true);
-  });
-
-  it('rejects empty string in agents array', () => {
-    const config = { ...validConfig, agents: [''] };
-    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(false);
   });
 
   it('rejects empty string in evaluators array', () => {

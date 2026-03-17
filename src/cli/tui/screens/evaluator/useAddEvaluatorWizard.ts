@@ -1,6 +1,6 @@
 import type { EvaluationLevel, EvaluatorConfig } from '../../../../schema';
-import type { AddEvaluatorConfig, AddEvaluatorStep } from './types';
-import { DEFAULT_MODEL } from './types';
+import type { AddEvaluatorConfig, AddEvaluatorStep, CustomRatingScaleType } from './types';
+import { CUSTOM_MODEL_ID, CUSTOM_RATING_SCALE_ID, DEFAULT_MODEL } from './types';
 import { useCallback, useState } from 'react';
 
 const ALL_STEPS: AddEvaluatorStep[] = ['name', 'level', 'model', 'instructions', 'ratingScale', 'confirm'];
@@ -27,13 +27,23 @@ function getDefaultConfig(): AddEvaluatorConfig {
 export function useAddEvaluatorWizard() {
   const [config, setConfig] = useState<AddEvaluatorConfig>(getDefaultConfig);
   const [step, setStep] = useState<AddEvaluatorStep>('name');
+  const [customRatingScaleType, setCustomRatingScaleType] = useState<CustomRatingScaleType>('numerical');
 
   const currentIndex = ALL_STEPS.indexOf(step);
 
   const goBack = useCallback(() => {
+    // Sub-steps not in ALL_STEPS — go back to their parent select
+    if (step === 'model-custom') {
+      setStep('model');
+      return;
+    }
+    if (step === 'ratingScale-type' || step === 'ratingScale-custom') {
+      setStep(step === 'ratingScale-custom' ? 'ratingScale-type' : 'ratingScale');
+      return;
+    }
     const prevStep = ALL_STEPS[currentIndex - 1];
     if (prevStep) setStep(prevStep);
-  }, [currentIndex]);
+  }, [currentIndex, step]);
 
   const nextStep = useCallback((currentStep: AddEvaluatorStep): AddEvaluatorStep | undefined => {
     const idx = ALL_STEPS.indexOf(currentStep);
@@ -58,7 +68,25 @@ export function useAddEvaluatorWizard() {
     [nextStep]
   );
 
-  const setModel = useCallback(
+  const selectModel = useCallback(
+    (modelId: string) => {
+      if (modelId === CUSTOM_MODEL_ID) {
+        setStep('model-custom');
+        return;
+      }
+      setConfig(c => ({
+        ...c,
+        config: {
+          llmAsAJudge: { ...c.config.llmAsAJudge, model: modelId },
+        },
+      }));
+      const next = nextStep('model');
+      if (next) setStep(next);
+    },
+    [nextStep]
+  );
+
+  const setCustomModel = useCallback(
     (model: string) => {
       setConfig(c => ({
         ...c,
@@ -66,6 +94,7 @@ export function useAddEvaluatorWizard() {
           llmAsAJudge: { ...c.config.llmAsAJudge, model },
         },
       }));
+      // After custom model input, go to instructions (same as after model select)
       const next = nextStep('model');
       if (next) setStep(next);
     },
@@ -86,7 +115,32 @@ export function useAddEvaluatorWizard() {
     [nextStep]
   );
 
-  const setRatingScale = useCallback(
+  const selectRatingScale = useCallback(
+    (presetIdOrCustom: string, ratingScale?: EvaluatorConfig['llmAsAJudge']['ratingScale']) => {
+      if (presetIdOrCustom === CUSTOM_RATING_SCALE_ID) {
+        setStep('ratingScale-type');
+        return;
+      }
+      if (ratingScale) {
+        setConfig(c => ({
+          ...c,
+          config: {
+            llmAsAJudge: { ...c.config.llmAsAJudge, ratingScale },
+          },
+        }));
+      }
+      const next = nextStep('ratingScale');
+      if (next) setStep(next);
+    },
+    [nextStep]
+  );
+
+  const selectCustomRatingScaleType = useCallback((type: CustomRatingScaleType) => {
+    setCustomRatingScaleType(type);
+    setStep('ratingScale-custom');
+  }, []);
+
+  const setCustomRatingScale = useCallback(
     (ratingScale: EvaluatorConfig['llmAsAJudge']['ratingScale']) => {
       setConfig(c => ({
         ...c,
@@ -110,12 +164,16 @@ export function useAddEvaluatorWizard() {
     step,
     steps: ALL_STEPS,
     currentIndex,
+    customRatingScaleType,
     goBack,
     setName,
     setLevel,
-    setModel,
+    selectModel,
+    setCustomModel,
     setInstructions,
-    setRatingScale,
+    selectRatingScale,
+    selectCustomRatingScaleType,
+    setCustomRatingScale,
     reset,
   };
 }

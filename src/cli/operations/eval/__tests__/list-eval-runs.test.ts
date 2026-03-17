@@ -8,10 +8,9 @@ vi.mock('../storage', () => ({
   listEvalRuns: () => mockListEvalRuns(),
 }));
 
-function makeRun(agent: string, runId: string): EvalRunResult {
+function makeRun(agent: string, timestamp: string): EvalRunResult {
   return {
-    runId,
-    timestamp: '2025-01-15T10:00:00.000Z',
+    timestamp,
     agent,
     evaluators: ['Builtin.GoalSuccessRate'],
     lookbackDays: 7,
@@ -24,7 +23,7 @@ describe('handleListEvalRuns', () => {
   afterEach(() => vi.clearAllMocks());
 
   it('returns all runs when no filters specified', () => {
-    const runs = [makeRun('agent-a', 'run_1'), makeRun('agent-b', 'run_2')];
+    const runs = [makeRun('agent-a', '2025-01-15T10:00:00.000Z'), makeRun('agent-b', '2025-01-15T11:00:00.000Z')];
     mockListEvalRuns.mockReturnValue(runs);
 
     const result = handleListEvalRuns({});
@@ -34,7 +33,11 @@ describe('handleListEvalRuns', () => {
   });
 
   it('filters by agent name', () => {
-    const runs = [makeRun('agent-a', 'run_1'), makeRun('agent-b', 'run_2'), makeRun('agent-a', 'run_3')];
+    const runs = [
+      makeRun('agent-a', '2025-01-15T10:00:00.000Z'),
+      makeRun('agent-b', '2025-01-15T11:00:00.000Z'),
+      makeRun('agent-a', '2025-01-15T12:00:00.000Z'),
+    ];
     mockListEvalRuns.mockReturnValue(runs);
 
     const result = handleListEvalRuns({ agent: 'agent-a' });
@@ -45,7 +48,11 @@ describe('handleListEvalRuns', () => {
   });
 
   it('limits the number of results', () => {
-    const runs = [makeRun('a', 'run_1'), makeRun('a', 'run_2'), makeRun('a', 'run_3')];
+    const runs = [
+      makeRun('a', '2025-01-15T10:00:00.000Z'),
+      makeRun('a', '2025-01-15T11:00:00.000Z'),
+      makeRun('a', '2025-01-15T12:00:00.000Z'),
+    ];
     mockListEvalRuns.mockReturnValue(runs);
 
     const result = handleListEvalRuns({ limit: 2 });
@@ -55,14 +62,19 @@ describe('handleListEvalRuns', () => {
   });
 
   it('applies agent filter before limit', () => {
-    const runs = [makeRun('a', 'run_1'), makeRun('b', 'run_2'), makeRun('a', 'run_3'), makeRun('a', 'run_4')];
+    const runs = [
+      makeRun('a', '2025-01-15T10:00:00.000Z'),
+      makeRun('b', '2025-01-15T11:00:00.000Z'),
+      makeRun('a', '2025-01-15T12:00:00.000Z'),
+      makeRun('a', '2025-01-15T13:00:00.000Z'),
+    ];
     mockListEvalRuns.mockReturnValue(runs);
 
     const result = handleListEvalRuns({ agent: 'a', limit: 2 });
 
     expect(result.runs).toHaveLength(2);
-    expect(result.runs![0]!.runId).toBe('run_1');
-    expect(result.runs![1]!.runId).toBe('run_3');
+    expect(result.runs![0]!.timestamp).toBe('2025-01-15T10:00:00.000Z');
+    expect(result.runs![1]!.timestamp).toBe('2025-01-15T12:00:00.000Z');
   });
 
   it('returns empty array when no runs exist', () => {

@@ -2,32 +2,42 @@ import type { AddOnlineEvalConfig, AddOnlineEvalStep } from './types';
 import { DEFAULT_SAMPLING_RATE } from './types';
 import { useCallback, useState } from 'react';
 
-const ALL_STEPS: AddOnlineEvalStep[] = ['name', 'agents', 'evaluators', 'samplingRate', 'confirm'];
+function getAllSteps(agentCount: number): AddOnlineEvalStep[] {
+  if (agentCount <= 1) {
+    return ['name', 'evaluators', 'samplingRate', 'enableOnCreate', 'confirm'];
+  }
+  return ['name', 'agent', 'evaluators', 'samplingRate', 'enableOnCreate', 'confirm'];
+}
 
 function getDefaultConfig(): AddOnlineEvalConfig {
   return {
     name: '',
-    agents: [],
+    agent: '',
     evaluators: [],
     samplingRate: DEFAULT_SAMPLING_RATE,
+    enableOnCreate: true,
   };
 }
 
-export function useAddOnlineEvalWizard() {
+export function useAddOnlineEvalWizard(agentCount: number) {
+  const allSteps = getAllSteps(agentCount);
   const [config, setConfig] = useState<AddOnlineEvalConfig>(getDefaultConfig);
-  const [step, setStep] = useState<AddOnlineEvalStep>('name');
+  const [step, setStep] = useState<AddOnlineEvalStep>(allSteps[0]!);
 
-  const currentIndex = ALL_STEPS.indexOf(step);
+  const currentIndex = allSteps.indexOf(step);
 
   const goBack = useCallback(() => {
-    const prevStep = ALL_STEPS[currentIndex - 1];
+    const prevStep = allSteps[currentIndex - 1];
     if (prevStep) setStep(prevStep);
-  }, [currentIndex]);
+  }, [allSteps, currentIndex, setStep]);
 
-  const nextStep = useCallback((currentStep: AddOnlineEvalStep): AddOnlineEvalStep | undefined => {
-    const idx = ALL_STEPS.indexOf(currentStep);
-    return ALL_STEPS[idx + 1];
-  }, []);
+  const nextStep = useCallback(
+    (currentStep: AddOnlineEvalStep): AddOnlineEvalStep | undefined => {
+      const idx = allSteps.indexOf(currentStep);
+      return allSteps[idx + 1];
+    },
+    [allSteps]
+  );
 
   const setName = useCallback(
     (name: string) => {
@@ -35,16 +45,16 @@ export function useAddOnlineEvalWizard() {
       const next = nextStep('name');
       if (next) setStep(next);
     },
-    [nextStep]
+    [nextStep, setConfig, setStep]
   );
 
-  const setAgents = useCallback(
-    (agents: string[]) => {
-      setConfig(c => ({ ...c, agents }));
-      const next = nextStep('agents');
+  const setAgent = useCallback(
+    (agent: string) => {
+      setConfig(c => ({ ...c, agent }));
+      const next = nextStep('agent');
       if (next) setStep(next);
     },
-    [nextStep]
+    [nextStep, setConfig, setStep]
   );
 
   const setEvaluators = useCallback(
@@ -53,7 +63,7 @@ export function useAddOnlineEvalWizard() {
       const next = nextStep('evaluators');
       if (next) setStep(next);
     },
-    [nextStep]
+    [nextStep, setConfig, setStep]
   );
 
   const setSamplingRate = useCallback(
@@ -62,24 +72,34 @@ export function useAddOnlineEvalWizard() {
       const next = nextStep('samplingRate');
       if (next) setStep(next);
     },
-    [nextStep]
+    [nextStep, setConfig, setStep]
+  );
+
+  const setEnableOnCreate = useCallback(
+    (enableOnCreate: boolean) => {
+      setConfig(c => ({ ...c, enableOnCreate }));
+      const next = nextStep('enableOnCreate');
+      if (next) setStep(next);
+    },
+    [nextStep, setConfig, setStep]
   );
 
   const reset = useCallback(() => {
     setConfig(getDefaultConfig());
-    setStep('name');
-  }, []);
+    setStep(allSteps[0]!);
+  }, [allSteps, setConfig, setStep]);
 
   return {
     config,
     step,
-    steps: ALL_STEPS,
+    steps: allSteps,
     currentIndex,
     goBack,
     setName,
-    setAgents,
+    setAgent,
     setEvaluators,
     setSamplingRate,
+    setEnableOnCreate,
     reset,
   };
 }

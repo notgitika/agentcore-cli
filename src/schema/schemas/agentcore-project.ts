@@ -21,7 +21,7 @@ export type { MemoryStrategy, MemoryStrategyType } from './primitives/memory';
 export type { OnlineEvalConfig } from './primitives/online-eval-config';
 export { OnlineEvalConfigSchema, OnlineEvalConfigNameSchema } from './primitives/online-eval-config';
 export type { EvaluationLevel, EvaluatorConfig, LlmAsAJudgeConfig, RatingScale } from './primitives/evaluator';
-export { BedrockModelIdSchema, EvaluatorNameSchema } from './primitives/evaluator';
+export { BedrockModelIdSchema, isValidBedrockModelId, EvaluatorNameSchema } from './primitives/evaluator';
 
 // ============================================================================
 // Project Name Schema
@@ -140,6 +140,7 @@ export type Evaluator = z.infer<typeof EvaluatorSchema>;
 // ============================================================================
 
 const BUILTIN_EVALUATOR_PREFIX = 'Builtin.';
+const ARN_PREFIX = 'arn:';
 
 export const AgentCoreProjectSpecSchema = z
   .object({
@@ -197,22 +198,23 @@ export const AgentCoreProjectSpecSchema = z
       ),
   })
   .superRefine((spec, ctx) => {
-    // Cross-field validation: onlineEvalConfigs reference valid agents and evaluators
     const agentNames = new Set(spec.agents.map(a => a.name));
     const evaluatorNames = new Set(spec.evaluators.map(e => e.name));
 
     for (const config of spec.onlineEvalConfigs) {
-      for (const agentName of config.agents) {
-        if (!agentNames.has(agentName)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `Online eval config "${config.name}" references unknown agent "${agentName}"`,
-          });
-        }
+      // Validate agent reference
+      if (!agentNames.has(config.agent)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Online eval config "${config.name}" references unknown agent "${config.agent}"`,
+        });
       }
 
+      // Validate evaluator references
       for (const evalName of config.evaluators) {
-        if (!evalName.startsWith(BUILTIN_EVALUATOR_PREFIX) && !evaluatorNames.has(evalName)) {
+        // Skip built-in evaluators and ARN references (externally managed)
+        if (evalName.startsWith(BUILTIN_EVALUATOR_PREFIX) || evalName.startsWith(ARN_PREFIX)) continue;
+        if (!evaluatorNames.has(evalName)) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             message: `Online eval config "${config.name}" references unknown evaluator "${evalName}"`,

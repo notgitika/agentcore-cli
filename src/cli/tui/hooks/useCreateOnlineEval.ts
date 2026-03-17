@@ -3,9 +3,10 @@ import { useCallback, useEffect, useState } from 'react';
 
 interface CreateOnlineEvalConfig {
   name: string;
-  agents: string[];
+  agent: string;
   evaluators: string[];
   samplingRate: number;
+  enableOnCreate: boolean;
 }
 
 export function useCreateOnlineEval() {
@@ -18,9 +19,10 @@ export function useCreateOnlineEval() {
     try {
       const addResult = await onlineEvalConfigPrimitive.add({
         name: config.name,
-        agents: config.agents,
+        agent: config.agent,
         evaluators: config.evaluators,
         samplingRate: config.samplingRate,
+        enableOnCreate: config.enableOnCreate,
       });
       if (!addResult.success) {
         throw new Error(addResult.error ?? 'Failed to create online eval config');

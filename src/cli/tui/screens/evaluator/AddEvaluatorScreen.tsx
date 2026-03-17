@@ -1,18 +1,21 @@
 import type { EvaluationLevel, EvaluatorConfig } from '../../../../schema';
-import { BedrockModelIdSchema, EvaluatorNameSchema } from '../../../../schema';
+import { EvaluatorNameSchema, isValidBedrockModelId } from '../../../../schema';
 import type { SelectableItem } from '../../components';
 import { ConfirmReview, Panel, Screen, StepIndicator, TextInput, WizardSelect } from '../../components';
 import { HELP_TEXT } from '../../constants';
 import { useListNavigation } from '../../hooks';
 import { generateUniqueName } from '../../utils';
-import type { AddEvaluatorConfig } from './types';
+import type { AddEvaluatorConfig, CustomRatingScaleType } from './types';
 import {
+  CUSTOM_RATING_SCALE_ID,
   DEFAULT_INSTRUCTIONS,
-  DEFAULT_MODEL,
   EVALUATION_LEVEL_OPTIONS,
+  EVALUATOR_MODEL_OPTIONS,
   EVALUATOR_STEP_LABELS,
   LEVEL_PLACEHOLDERS,
   RATING_SCALE_PRESETS,
+  RATING_SCALE_TYPE_OPTIONS,
+  parseCustomRatingScale,
   validateInstructionPlaceholders,
 } from './types';
 import { useAddEvaluatorWizard } from './useAddEvaluatorWizard';
@@ -44,15 +47,31 @@ export function AddEvaluatorScreen({ onComplete, onExit, existingEvaluatorNames 
   );
 
   const ratingScaleItems: SelectableItem[] = useMemo(
-    () => RATING_SCALE_PRESETS.map(opt => ({ id: opt.id, title: opt.title, description: opt.description })),
+    () => [
+      ...RATING_SCALE_PRESETS.map(opt => ({ id: opt.id, title: opt.title, description: opt.description })),
+      { id: CUSTOM_RATING_SCALE_ID, title: 'Custom', description: 'Define your own rating scale' },
+    ],
+    []
+  );
+
+  const ratingScaleTypeItems: SelectableItem[] = useMemo(
+    () => RATING_SCALE_TYPE_OPTIONS.map(opt => ({ id: opt.id, title: opt.title, description: opt.description })),
+    []
+  );
+
+  const modelItems: SelectableItem[] = useMemo(
+    () => EVALUATOR_MODEL_OPTIONS.map(opt => ({ id: opt.id, title: opt.title, description: opt.description })),
     []
   );
 
   const isNameStep = wizard.step === 'name';
   const isLevelStep = wizard.step === 'level';
   const isModelStep = wizard.step === 'model';
+  const isModelCustomStep = wizard.step === 'model-custom';
   const isInstructionsStep = wizard.step === 'instructions';
   const isRatingScaleStep = wizard.step === 'ratingScale';
+  const isRatingScaleTypeStep = wizard.step === 'ratingScale-type';
+  const isRatingScaleCustomStep = wizard.step === 'ratingScale-custom';
   const isConfirmStep = wizard.step === 'confirm';
 
   const levelNav = useListNavigation({
@@ -62,14 +81,28 @@ export function AddEvaluatorScreen({ onComplete, onExit, existingEvaluatorNames 
     isActive: isLevelStep,
   });
 
+  const modelNav = useListNavigation({
+    items: modelItems,
+    onSelect: item => wizard.selectModel(item.id),
+    onExit: () => wizard.goBack(),
+    isActive: isModelStep,
+  });
+
   const ratingScaleNav = useListNavigation({
     items: ratingScaleItems,
     onSelect: item => {
       const preset = RATING_SCALE_PRESETS.find(p => p.id === item.id);
-      if (preset) wizard.setRatingScale(preset.ratingScale);
+      wizard.selectRatingScale(item.id, preset?.ratingScale);
     },
     onExit: () => wizard.goBack(),
     isActive: isRatingScaleStep,
+  });
+
+  const ratingScaleTypeNav = useListNavigation({
+    items: ratingScaleTypeItems,
+    onSelect: item => wizard.selectCustomRatingScaleType(item.id as CustomRatingScaleType),
+    onExit: () => wizard.goBack(),
+    isActive: isRatingScaleTypeStep,
   });
 
   useListNavigation({
@@ -80,7 +113,7 @@ export function AddEvaluatorScreen({ onComplete, onExit, existingEvaluatorNames 
   });
 
   const helpText =
-    isLevelStep || isRatingScaleStep
+    isLevelStep || isRatingScaleStep || isModelStep || isRatingScaleTypeStep
       ? HELP_TEXT.NAVIGATE_SELECT
       : isConfirmStep
         ? HELP_TEXT.CONFIRM_CANCEL
@@ -113,13 +146,25 @@ export function AddEvaluatorScreen({ onComplete, onExit, existingEvaluatorNames 
         )}
 
         {isModelStep && (
+          <WizardSelect
+            title="Select model"
+            description="Choose the LLM for evaluation judging"
+            items={modelItems}
+            selectedIndex={modelNav.selectedIndex}
+          />
+        )}
+
+        {isModelCustomStep && (
           <TextInput
-            key="model"
+            key="model-custom"
             prompt="Bedrock model ID"
-            initialValue={DEFAULT_MODEL}
-            onSubmit={wizard.setModel}
+            initialValue=""
+            onSubmit={wizard.setCustomModel}
             onCancel={() => wizard.goBack()}
-            schema={BedrockModelIdSchema}
+            customValidation={value =>
+              isValidBedrockModelId(value) ||
+              'Must be a valid Bedrock model ID (e.g. us.anthropic.claude-sonnet-4-5-20250929-v1:0) or model ARN'
+            }
           />
         )}
 
@@ -144,10 +189,47 @@ export function AddEvaluatorScreen({ onComplete, onExit, existingEvaluatorNames 
         {isRatingScaleStep && (
           <WizardSelect
             title="Rating scale"
-            description="Choose a rating scale preset"
+            description="Choose a preset or define your own"
             items={ratingScaleItems}
             selectedIndex={ratingScaleNav.selectedIndex}
           />
+        )}
+
+        {isRatingScaleTypeStep && (
+          <WizardSelect
+            title="Scale type"
+            description="Choose the type of custom rating scale"
+            items={ratingScaleTypeItems}
+            selectedIndex={ratingScaleTypeNav.selectedIndex}
+          />
+        )}
+
+        {isRatingScaleCustomStep && (
+          <Box flexDirection="column">
+            <Text>Define rating scale entries</Text>
+            <Text dimColor>
+              {wizard.customRatingScaleType === 'numerical'
+                ? 'Format: value:label:definition, ... (e.g. 1:Poor:Fails, 3:Good:Meets, 5:Excellent:Exceeds)'
+                : 'Format: label:definition, ... (e.g. Pass:Meets criteria, Fail:Does not meet)'}
+            </Text>
+            <TextInput
+              key="ratingScale-custom"
+              prompt=""
+              hideArrow={false}
+              initialValue=""
+              onSubmit={value => {
+                const result = parseCustomRatingScale(value, wizard.customRatingScaleType);
+                if (result.success) {
+                  wizard.setCustomRatingScale(result.ratingScale);
+                }
+              }}
+              onCancel={() => wizard.goBack()}
+              customValidation={value => {
+                const result = parseCustomRatingScale(value, wizard.customRatingScaleType);
+                return result.success || result.error;
+              }}
+            />
+          </Box>
         )}
 
         {isConfirmStep && (

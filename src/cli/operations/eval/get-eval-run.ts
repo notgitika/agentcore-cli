@@ -10,7 +10,7 @@ export interface GetEvalRunResult {
 
 export function handleGetEvalRun(options: GetEvalRunOptions): GetEvalRunResult {
   try {
-    const run = loadEvalRun(options.runId);
+    const run = loadEvalRun(options.filename);
     return { success: true, run };
   } catch (err) {
     return { success: false, error: getErrorMessage(err) };

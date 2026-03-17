@@ -1,1 +1,1 @@
-export { registerResume } from '../pause/command';
+export { registerResume, registerStop } from '../pause/command';

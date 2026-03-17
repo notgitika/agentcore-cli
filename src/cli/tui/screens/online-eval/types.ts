@@ -2,41 +2,39 @@
 // Online Eval Config Flow Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type AddOnlineEvalStep = 'name' | 'agents' | 'evaluators' | 'samplingRate' | 'confirm';
+export type AddOnlineEvalStep = 'name' | 'agent' | 'evaluators' | 'samplingRate' | 'enableOnCreate' | 'confirm';
 
 export interface AddOnlineEvalConfig {
   name: string;
-  agents: string[];
+  agent: string;
   evaluators: string[];
   samplingRate: number;
+  enableOnCreate: boolean;
   description?: string;
-  enableOnCreate?: boolean;
 }
 
 export const ONLINE_EVAL_STEP_LABELS: Record<AddOnlineEvalStep, string> = {
   name: 'Name',
-  agents: 'Agents',
+  agent: 'Agent',
   evaluators: 'Evaluators',
   samplingRate: 'Rate',
+  enableOnCreate: 'Enable',
   confirm: 'Confirm',
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Built-in Evaluators
+// Evaluator Items (fetched from API)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const BUILTIN_EVALUATORS = [
-  { id: 'Builtin.Helpfulness', title: 'Builtin.Helpfulness', description: 'Measures how helpful agent responses are' },
-  {
-    id: 'Builtin.GoalSuccessRate',
-    title: 'Builtin.GoalSuccessRate',
-    description: 'Measures whether the agent achieved the user goal',
-  },
-  {
-    id: 'Builtin.Faithfulness',
-    title: 'Builtin.Faithfulness',
-    description: 'Measures factual consistency with source material',
-  },
-] as const;
+export interface EvaluatorItem {
+  /** ARN used as the stored identifier in the config */
+  arn: string;
+  /** Display name */
+  name: string;
+  /** 'Builtin' or 'Custom' */
+  type: string;
+  /** Optional description */
+  description?: string;
+}
 
 export const DEFAULT_SAMPLING_RATE = 10;

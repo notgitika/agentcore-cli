@@ -13,7 +13,7 @@ vi.mock('../../../lib/index.js', () => ({
 }));
 
 function makeProject(
-  onlineEvalConfigs: { name: string; agents: string[]; evaluators: string[] }[] = [],
+  onlineEvalConfigs: { name: string; evaluators: string[] }[] = [],
   evaluators: { name: string }[] = []
 ) {
   return {
@@ -46,7 +46,7 @@ describe('OnlineEvalConfigPrimitive', () => {
 
       const result = await primitive.add({
         name: 'MyConfig',
-        agents: ['agent1'],
+        agent: 'MyAgent',
         evaluators: ['Builtin.GoalSuccessRate'],
         samplingRate: 10,
       });
@@ -59,34 +59,68 @@ describe('OnlineEvalConfigPrimitive', () => {
       const config = writtenSpec.onlineEvalConfigs[0];
       expect(config.type).toBe('OnlineEvaluationConfig');
       expect(config.name).toBe('MyConfig');
-      expect(config.agents).toEqual(['agent1']);
       expect(config.evaluators).toEqual(['Builtin.GoalSuccessRate']);
       expect(config.samplingRate).toBe(10);
     });
 
-    it('supports multiple agents and evaluators', async () => {
+    it('stores enableOnCreate when provided', async () => {
+      mockReadProjectSpec.mockResolvedValue(makeProject());
+      mockWriteProjectSpec.mockResolvedValue(undefined);
+
+      const result = await primitive.add({
+        name: 'EnabledConfig',
+        agent: 'MyAgent',
+        evaluators: ['Builtin.GoalSuccessRate'],
+        samplingRate: 10,
+        enableOnCreate: true,
+      });
+
+      expect(result.success).toBe(true);
+      const config = mockWriteProjectSpec.mock.calls[0]![0].onlineEvalConfigs[0];
+      expect(config.enableOnCreate).toBe(true);
+    });
+
+    it('omits enableOnCreate when not provided', async () => {
+      mockReadProjectSpec.mockResolvedValue(makeProject());
+      mockWriteProjectSpec.mockResolvedValue(undefined);
+
+      await primitive.add({
+        name: 'NoEnableConfig',
+        agent: 'MyAgent',
+        evaluators: ['Builtin.GoalSuccessRate'],
+        samplingRate: 10,
+      });
+
+      const config = mockWriteProjectSpec.mock.calls[0]![0].onlineEvalConfigs[0];
+      expect(config.enableOnCreate).toBeUndefined();
+    });
+
+    it('supports multiple evaluators including ARNs', async () => {
       mockReadProjectSpec.mockResolvedValue(makeProject());
       mockWriteProjectSpec.mockResolvedValue(undefined);
 
       const result = await primitive.add({
         name: 'MultiConfig',
-        agents: ['agent1', 'agent2'],
-        evaluators: ['Builtin.GoalSuccessRate', 'CustomEval'],
+        agent: 'MyAgent',
+        evaluators: ['Builtin.GoalSuccessRate', 'CustomEval', 'arn:aws:bedrock:us-east-1:123:evaluator/ext'],
         samplingRate: 50,
       });
 
       expect(result.success).toBe(true);
       const config = mockWriteProjectSpec.mock.calls[0]![0].onlineEvalConfigs[0];
-      expect(config.agents).toEqual(['agent1', 'agent2']);
-      expect(config.evaluators).toEqual(['Builtin.GoalSuccessRate', 'CustomEval']);
+      expect(config.evaluators).toEqual([
+        'Builtin.GoalSuccessRate',
+        'CustomEval',
+        'arn:aws:bedrock:us-east-1:123:evaluator/ext',
+      ]);
     });
 
     it('returns error when config name already exists', async () => {
-      mockReadProjectSpec.mockResolvedValue(makeProject([{ name: 'Existing', agents: ['a'], evaluators: ['e'] }]));
+      mockReadProjectSpec.mockResolvedValue(makeProject([{ name: 'Existing', evaluators: ['e'] }]));
 
       const result = await primitive.add({
         name: 'Existing',
-        agents: ['a'],
+        agent: 'MyAgent',
         evaluators: ['e'],
         samplingRate: 10,
       });
@@ -101,7 +135,7 @@ describe('OnlineEvalConfigPrimitive', () => {
 
       const result = await primitive.add({
         name: 'New',
-        agents: ['a'],
+        agent: 'MyAgent',
         evaluators: ['e'],
         samplingRate: 10,
       });
@@ -114,8 +148,8 @@ describe('OnlineEvalConfigPrimitive', () => {
     it('removes config from project spec', async () => {
       mockReadProjectSpec.mockResolvedValue(
         makeProject([
-          { name: 'ConfigA', agents: ['a'], evaluators: ['e'] },
-          { name: 'ConfigB', agents: ['b'], evaluators: ['f'] },
+          { name: 'ConfigA', evaluators: ['e'] },
+          { name: 'ConfigB', evaluators: ['f'] },
         ])
       );
       mockWriteProjectSpec.mockResolvedValue(undefined);
@@ -153,15 +187,12 @@ describe('OnlineEvalConfigPrimitive', () => {
   });
 
   describe('previewRemove', () => {
-    it('returns preview with summary including agents and evaluators', async () => {
-      mockReadProjectSpec.mockResolvedValue(
-        makeProject([{ name: 'Config1', agents: ['agentA', 'agentB'], evaluators: ['Builtin.X', 'CustomY'] }])
-      );
+    it('returns preview with summary including evaluators', async () => {
+      mockReadProjectSpec.mockResolvedValue(makeProject([{ name: 'Config1', evaluators: ['Builtin.X', 'CustomY'] }]));
 
       const preview = await primitive.previewRemove('Config1');
 
       expect(preview.summary).toContain('Removing online eval config: Config1');
-      expect(preview.summary).toContain('Monitors agents: agentA, agentB');
       expect(preview.summary).toContain('Uses evaluators: Builtin.X, CustomY');
       expect(preview.schemaChanges).toHaveLength(1);
       expect((preview.schemaChanges[0]!.after as { onlineEvalConfigs: unknown[] }).onlineEvalConfigs).toHaveLength(0);
@@ -178,8 +209,8 @@ describe('OnlineEvalConfigPrimitive', () => {
     it('returns config names', async () => {
       mockReadProjectSpec.mockResolvedValue(
         makeProject([
-          { name: 'C1', agents: ['a'], evaluators: ['e'] },
-          { name: 'C2', agents: ['b'], evaluators: ['f'] },
+          { name: 'C1', evaluators: ['e'] },
+          { name: 'C2', evaluators: ['f'] },
         ])
       );
 
@@ -197,7 +228,7 @@ describe('OnlineEvalConfigPrimitive', () => {
 
   describe('getAllNames', () => {
     it('returns config names as strings', async () => {
-      mockReadProjectSpec.mockResolvedValue(makeProject([{ name: 'X', agents: ['a'], evaluators: ['e'] }]));
+      mockReadProjectSpec.mockResolvedValue(makeProject([{ name: 'X', evaluators: ['e'] }]));
 
       expect(await primitive.getAllNames()).toEqual(['X']);
     });

@@ -23,7 +23,6 @@ export interface EvalSessionScore {
 
 /** Full eval run result stored to disk */
 export interface EvalRunResult {
-  runId: string;
   timestamp: string;
   agent: string;
   evaluators: string[];
@@ -62,13 +61,17 @@ export interface ListEvalRunsOptions {
 
 /** Options for getting a single eval run */
 export interface GetEvalRunOptions {
-  runId: string;
+  filename: string;
   sessions?: boolean;
   json?: boolean;
 }
 
-/** Options for pause/resume online eval */
+/** Options for pause/resume/delete online eval */
 export interface OnlineEvalActionOptions {
   name: string;
+  /** Online eval config ARN (direct mode — bypasses project config) */
+  arn?: string;
+  /** AWS region (required with --arn when region cannot be parsed from ARN) */
+  region?: string;
   json?: boolean;
 }

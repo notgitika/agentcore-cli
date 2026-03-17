@@ -3,7 +3,6 @@ import {
   getEvaluator,
   getOnlineEvaluationConfig,
   listEvaluators,
-  listOnlineEvaluationConfigs,
   updateOnlineEvalExecutionStatus,
 } from '../agentcore-control.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -26,9 +25,6 @@ vi.mock('@aws-sdk/client-bedrock-agentcore-control', () => ({
     constructor(public input: unknown) {}
   },
   ListEvaluatorsCommand: class {
-    constructor(public input: unknown) {}
-  },
-  ListOnlineEvaluationConfigsCommand: class {
     constructor(public input: unknown) {}
   },
   UpdateOnlineEvaluationConfigCommand: class {
@@ -139,67 +135,6 @@ describe('getEvaluator', () => {
     mockSend.mockRejectedValue(new Error('AccessDenied'));
 
     await expect(getEvaluator({ region: 'us-east-1', evaluatorId: 'eval-err' })).rejects.toThrow('AccessDenied');
-  });
-});
-
-describe('listEvaluators', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('returns evaluator list', async () => {
-    mockSend.mockResolvedValue({
-      evaluators: [
-        {
-          evaluatorId: 'eval-1',
-          evaluatorArn: 'arn:1',
-          evaluatorName: 'builtin-help',
-          evaluatorType: 'Builtin',
-          level: 'SESSION',
-          status: 'ACTIVE',
-        },
-        {
-          evaluatorId: 'eval-2',
-          evaluatorArn: 'arn:2',
-          evaluatorName: 'custom-tone',
-          evaluatorType: 'Custom',
-          level: 'TRACE',
-          status: 'ACTIVE',
-          description: 'Tone checker',
-        },
-      ],
-      nextToken: 'page2',
-    });
-
-    const result = await listEvaluators({ region: 'us-east-1', maxResults: 10 });
-    expect(result.evaluators).toHaveLength(2);
-    expect(result.evaluators[0]!.evaluatorType).toBe('Builtin');
-    expect(result.evaluators[1]!.description).toBe('Tone checker');
-    expect(result.nextToken).toBe('page2');
-  });
-
-  it('returns empty list when no evaluators', async () => {
-    mockSend.mockResolvedValue({ evaluators: undefined });
-
-    const result = await listEvaluators({ region: 'us-east-1' });
-    expect(result.evaluators).toEqual([]);
-    expect(result.nextToken).toBeUndefined();
-  });
-
-  it('passes maxResults and nextToken in command', async () => {
-    mockSend.mockResolvedValue({ evaluators: [] });
-
-    await listEvaluators({ region: 'us-east-1', maxResults: 5, nextToken: 'tok-1' });
-
-    const command = mockSend.mock.calls[0]![0];
-    expect(command.input.maxResults).toBe(5);
-    expect(command.input.nextToken).toBe('tok-1');
-  });
-
-  it('propagates SDK errors', async () => {
-    mockSend.mockRejectedValue(new Error('Throttling'));
-
-    await expect(listEvaluators({ region: 'us-east-1' })).rejects.toThrow('Throttling');
   });
 });
 
@@ -370,60 +305,61 @@ describe('getOnlineEvaluationConfig', () => {
   });
 });
 
-describe('listOnlineEvaluationConfigs', () => {
+describe('listEvaluators', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('returns config list', async () => {
+  it('returns evaluator summaries', async () => {
     mockSend.mockResolvedValue({
-      onlineEvaluationConfigs: [
+      evaluators: [
         {
-          onlineEvaluationConfigId: 'oec-1',
-          onlineEvaluationConfigArn: 'arn:1',
-          onlineEvaluationConfigName: 'eval-prod',
+          evaluatorId: 'eval-1',
+          evaluatorArn: 'arn:aws:bedrock-agentcore:us-east-1:123456:evaluator/eval-1',
+          evaluatorName: 'Faithfulness',
+          evaluatorType: 'Builtin',
           status: 'ACTIVE',
-          executionStatus: 'ENABLED',
         },
         {
-          onlineEvaluationConfigId: 'oec-2',
-          onlineEvaluationConfigArn: 'arn:2',
-          onlineEvaluationConfigName: 'eval-staging',
+          evaluatorId: 'eval-2',
+          evaluatorArn: 'arn:aws:bedrock-agentcore:us-east-1:123456:evaluator/eval-2',
+          evaluatorName: 'my-custom',
+          evaluatorType: 'Custom',
           status: 'ACTIVE',
-          executionStatus: 'DISABLED',
+          description: 'A custom evaluator',
         },
       ],
-      nextToken: 'next-page',
     });
 
-    const result = await listOnlineEvaluationConfigs({ region: 'us-east-1', maxResults: 20 });
-    expect(result.configs).toHaveLength(2);
-    expect(result.configs[0]!.configName).toBe('eval-prod');
-    expect(result.configs[1]!.executionStatus).toBe('DISABLED');
-    expect(result.nextToken).toBe('next-page');
+    const result = await listEvaluators({ region: 'us-east-1' });
+    expect(result.evaluators).toHaveLength(2);
+    expect(result.evaluators[0]!.evaluatorName).toBe('Faithfulness');
+    expect(result.evaluators[0]!.evaluatorType).toBe('Builtin');
+    expect(result.evaluators[1]!.evaluatorName).toBe('my-custom');
+    expect(result.evaluators[1]!.description).toBe('A custom evaluator');
   });
 
-  it('returns empty list when no configs', async () => {
-    mockSend.mockResolvedValue({ onlineEvaluationConfigs: undefined });
+  it('returns empty array when no evaluators', async () => {
+    mockSend.mockResolvedValue({ evaluators: undefined });
 
-    const result = await listOnlineEvaluationConfigs({ region: 'us-east-1' });
-    expect(result.configs).toEqual([]);
-    expect(result.nextToken).toBeUndefined();
+    const result = await listEvaluators({ region: 'us-east-1' });
+    expect(result.evaluators).toEqual([]);
   });
 
-  it('passes maxResults and nextToken in command', async () => {
-    mockSend.mockResolvedValue({ onlineEvaluationConfigs: [] });
+  it('passes maxResults and nextToken', async () => {
+    mockSend.mockResolvedValue({ evaluators: [], nextToken: 'token-2' });
 
-    await listOnlineEvaluationConfigs({ region: 'us-east-1', maxResults: 10, nextToken: 'tok-abc' });
+    const result = await listEvaluators({ region: 'us-east-1', maxResults: 5, nextToken: 'token-1' });
 
     const command = mockSend.mock.calls[0]![0];
-    expect(command.input.maxResults).toBe(10);
-    expect(command.input.nextToken).toBe('tok-abc');
+    expect(command.input.maxResults).toBe(5);
+    expect(command.input.nextToken).toBe('token-1');
+    expect(result.nextToken).toBe('token-2');
   });
 
   it('propagates SDK errors', async () => {
-    mockSend.mockRejectedValue(new Error('InternalServerError'));
+    mockSend.mockRejectedValue(new Error('AccessDeniedException'));
 
-    await expect(listOnlineEvaluationConfigs({ region: 'us-east-1' })).rejects.toThrow('InternalServerError');
+    await expect(listEvaluators({ region: 'us-east-1' })).rejects.toThrow('AccessDeniedException');
   });
 });

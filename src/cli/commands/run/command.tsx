@@ -11,8 +11,14 @@ function formatRunOutput(result: Awaited<ReturnType<typeof handleRunEval>>): voi
   if (!result.run) return;
 
   const { run } = result;
-  console.log(`\nEval Run: ${run.runId}`);
-  console.log(`Agent: ${run.agent} | Sessions: ${run.sessionCount} | Lookback: ${run.lookbackDays}d\n`);
+  const date = new Date(run.timestamp).toLocaleString([], {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  console.log(`\nAgent: ${run.agent} | ${date} | Sessions: ${run.sessionCount} | Lookback: ${run.lookbackDays}d\n`);
 
   for (const r of run.results) {
     const score = r.aggregateScore.toFixed(2);
@@ -55,9 +61,7 @@ export const registerRun = (program: Command) => {
         output?: string;
         json?: boolean;
       }) => {
-        if (!cliOptions.agentArn) {
-          requireProject();
-        }
+        requireProject();
 
         if (!cliOptions.evaluator && !cliOptions.evaluatorArn) {
           const error = 'At least one --evaluator or --evaluator-arn is required';

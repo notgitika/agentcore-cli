@@ -1,4 +1,4 @@
-import { generateRunId, listEvalRuns, loadEvalRun, saveEvalRun } from '../storage.js';
+import { generateFilename, getResultsPath, listEvalRuns, loadEvalRun, saveEvalRun } from '../storage.js';
 import type { EvalRunResult } from '../types.js';
 // Use real fs via a temp directory
 import { existsSync, mkdirSync, rmSync } from 'fs';
@@ -20,7 +20,6 @@ function makeTmpDir(): string {
 
 function makeRunResult(overrides: Partial<EvalRunResult> = {}): EvalRunResult {
   return {
-    runId: overrides.runId ?? `run_${Date.now()}`,
     timestamp: '2025-01-15T10:00:00.000Z',
     agent: 'test-agent',
     evaluators: ['Builtin.GoalSuccessRate'],
@@ -52,48 +51,60 @@ describe('storage', () => {
     vi.clearAllMocks();
   });
 
-  describe('generateRunId', () => {
-    it('returns a string starting with run_', () => {
-      const id = generateRunId();
-      expect(id).toMatch(/^run_[0-9a-f-]+$/);
+  describe('generateFilename', () => {
+    it('returns a string starting with eval_', () => {
+      const name = generateFilename('2025-01-15T10:30:45.000Z');
+      expect(name).toMatch(/^eval_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/);
     });
 
-    it('generates unique IDs', () => {
-      const ids = new Set(Array.from({ length: 100 }, () => generateRunId()));
-      expect(ids.size).toBe(100);
+    it('formats timestamp correctly', () => {
+      const name = generateFilename('2025-03-05T08:05:09.000Z');
+      expect(name).toBe('eval_2025-03-05_08-05-09');
     });
   });
 
   describe('saveEvalRun', () => {
     it('creates eval-results directory and writes JSON file', () => {
-      const run = makeRunResult({ runId: 'run_save-test' });
+      const run = makeRunResult();
       const filePath = saveEvalRun(run);
 
       expect(filePath).toContain('eval-results');
-      expect(filePath).toContain('run_save-test.json');
+      expect(filePath).toContain('eval_2025-01-15');
+      expect(filePath.endsWith('.json')).toBe(true);
       expect(existsSync(filePath)).toBe(true);
     });
 
     it('writes valid JSON that can be read back', () => {
-      const run = makeRunResult({ runId: 'run_roundtrip' });
+      const run = makeRunResult();
       saveEvalRun(run);
-      const loaded = loadEvalRun('run_roundtrip');
+      const filename = generateFilename(run.timestamp);
+      const loaded = loadEvalRun(filename);
       expect(loaded).toEqual(run);
     });
   });
 
   describe('loadEvalRun', () => {
     it('loads a previously saved run', () => {
-      const run = makeRunResult({ runId: 'run_load-test', agent: 'my-agent' });
+      const run = makeRunResult({ agent: 'my-agent' });
       saveEvalRun(run);
 
-      const loaded = loadEvalRun('run_load-test');
+      const filename = generateFilename(run.timestamp);
+      const loaded = loadEvalRun(filename);
       expect(loaded.agent).toBe('my-agent');
       expect(loaded.results).toHaveLength(1);
     });
 
-    it('throws for a non-existent run ID', () => {
-      expect(() => loadEvalRun('run_does-not-exist')).toThrow('Eval run "run_does-not-exist" not found');
+    it('accepts filename with .json extension', () => {
+      const run = makeRunResult();
+      saveEvalRun(run);
+
+      const filename = generateFilename(run.timestamp);
+      const loaded = loadEvalRun(`${filename}.json`);
+      expect(loaded).toEqual(run);
+    });
+
+    it('throws for a non-existent filename', () => {
+      expect(() => loadEvalRun('eval_2099-01-01_00-00-00')).toThrow('not found');
     });
   });
 
@@ -109,34 +120,41 @@ describe('storage', () => {
     });
 
     it('returns saved runs', () => {
-      saveEvalRun(makeRunResult({ runId: 'run_aaa' }));
-      saveEvalRun(makeRunResult({ runId: 'run_bbb' }));
+      saveEvalRun(makeRunResult({ timestamp: '2025-01-15T10:00:00.000Z' }));
+      saveEvalRun(makeRunResult({ timestamp: '2025-01-15T11:00:00.000Z' }));
 
       const runs = listEvalRuns();
       expect(runs).toHaveLength(2);
     });
 
     it('returns runs in reverse sorted order (newest first)', () => {
-      saveEvalRun(makeRunResult({ runId: 'run_aaa' }));
-      saveEvalRun(makeRunResult({ runId: 'run_zzz' }));
-      saveEvalRun(makeRunResult({ runId: 'run_mmm' }));
+      saveEvalRun(makeRunResult({ timestamp: '2025-01-15T08:00:00.000Z' }));
+      saveEvalRun(makeRunResult({ timestamp: '2025-01-15T12:00:00.000Z' }));
+      saveEvalRun(makeRunResult({ timestamp: '2025-01-15T10:00:00.000Z' }));
 
       const runs = listEvalRuns();
-      expect(runs.map(r => r.runId)).toEqual(['run_zzz', 'run_mmm', 'run_aaa']);
+      const timestamps = runs.map(r => r.timestamp);
+      expect(timestamps).toEqual(['2025-01-15T12:00:00.000Z', '2025-01-15T10:00:00.000Z', '2025-01-15T08:00:00.000Z']);
     });
 
     it('ignores files that do not match the naming pattern', async () => {
-      saveEvalRun(makeRunResult({ runId: 'run_valid' }));
+      saveEvalRun(makeRunResult());
 
       // Write a file that doesn't match the pattern
-      const resultsDir = join(tmpDir, 'eval-results');
+      const resultsDir = join(tmpDir, '.cli', 'eval-results');
       const { writeFileSync } = await import('fs');
       writeFileSync(join(resultsDir, 'notes.txt'), 'not a run');
       writeFileSync(join(resultsDir, 'other.json'), '{}');
 
       const runs = listEvalRuns();
       expect(runs).toHaveLength(1);
-      expect(runs[0]!.runId).toBe('run_valid');
+    });
+  });
+
+  describe('getResultsPath', () => {
+    it('returns the eval-results directory path', () => {
+      const path = getResultsPath();
+      expect(path).toBe(join(tmpDir, '.cli', 'eval-results'));
     });
   });
 

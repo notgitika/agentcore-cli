@@ -114,85 +114,125 @@ export class EvaluatorPrimitive extends BasePrimitive<AddEvaluatorOptions, Remov
 
   registerCommands(addCmd: Command, removeCmd: Command): void {
     addCmd
-      .command('eval')
+      .command(this.kind)
       .description('Add a custom evaluator to the project')
-      .option('--name <name>', 'Evaluator name [non-interactive]')
-      .option('--level <level>', 'Evaluation level: SESSION, TRACE, TOOL_CALL [non-interactive]')
-      .option('--config <path>', 'Path to evaluator config JSON file [non-interactive]')
-      .option('--json', 'Output as JSON [non-interactive]')
-      .action(async (cliOptions: { name?: string; level?: string; config?: string; json?: boolean }) => {
-        try {
-          if (!findConfigRoot()) {
-            console.error('No agentcore project found. Run `agentcore create` first.');
+      .option('--name <name>', 'Evaluator name')
+      .option('--level <level>', 'Evaluation level: SESSION, TRACE, TOOL_CALL')
+      .option('--model <model>', 'Bedrock model ID for LLM-as-a-Judge')
+      .option('--instructions <text>', 'Evaluation prompt instructions')
+      .option('--config <path>', 'Path to evaluator config JSON file (overrides --model, --instructions)')
+      .option('--json', 'Output as JSON')
+      .action(
+        async (cliOptions: {
+          name?: string;
+          level?: string;
+          model?: string;
+          instructions?: string;
+          config?: string;
+          json?: boolean;
+        }) => {
+          try {
+            if (!findConfigRoot()) {
+              console.error('No agentcore project found. Run `agentcore create` first.');
+              process.exit(1);
+            }
+
+            if (cliOptions.name || cliOptions.json) {
+              if (!cliOptions.name || !cliOptions.level) {
+                const error = '--name and --level are required in non-interactive mode';
+                if (cliOptions.json) {
+                  console.log(JSON.stringify({ success: false, error }));
+                } else {
+                  console.error(error);
+                }
+                process.exit(1);
+              }
+
+              if (!cliOptions.config && !cliOptions.model) {
+                const error = 'Either --config or --model is required';
+                if (cliOptions.json) {
+                  console.log(JSON.stringify({ success: false, error }));
+                } else {
+                  console.error(error);
+                }
+                process.exit(1);
+              }
+
+              const levelResult = EvaluationLevelSchema.safeParse(cliOptions.level);
+              if (!levelResult.success) {
+                const error = `Invalid --level "${cliOptions.level}". Must be one of: SESSION, TRACE, TOOL_CALL`;
+                if (cliOptions.json) {
+                  console.log(JSON.stringify({ success: false, error }));
+                } else {
+                  console.error(error);
+                }
+                process.exit(1);
+              }
+
+              let configJson: EvaluatorConfig;
+              if (cliOptions.config) {
+                const { readFileSync } = await import('fs');
+                configJson = JSON.parse(readFileSync(cliOptions.config, 'utf-8')) as EvaluatorConfig;
+              } else {
+                configJson = {
+                  llmAsAJudge: {
+                    model: cliOptions.model!,
+                    instructions: cliOptions.instructions ?? `Evaluate the quality. Context: {context}`,
+                    ratingScale: {
+                      numerical: [
+                        { value: 1, label: 'Poor', definition: 'Fails to meet expectations' },
+                        { value: 2, label: 'Fair', definition: 'Partially meets expectations' },
+                        { value: 3, label: 'Good', definition: 'Meets expectations' },
+                        { value: 4, label: 'Very Good', definition: 'Exceeds expectations' },
+                        { value: 5, label: 'Excellent', definition: 'Far exceeds expectations' },
+                      ],
+                    },
+                  },
+                };
+              }
+
+              const result = await this.add({
+                name: cliOptions.name,
+                level: levelResult.data,
+                config: configJson,
+              });
+
+              if (cliOptions.json) {
+                console.log(JSON.stringify(result));
+              } else if (result.success) {
+                console.log(`Added evaluator '${result.evaluatorName}'`);
+              } else {
+                console.error(result.error);
+              }
+              process.exit(result.success ? 0 : 1);
+            } else {
+              // TUI fallback
+              const [{ render }, { default: React }, { AddFlow }] = await Promise.all([
+                import('ink'),
+                import('react'),
+                import('../tui/screens/add/AddFlow'),
+              ]);
+              const { clear, unmount } = render(
+                React.createElement(AddFlow, {
+                  isInteractive: false,
+                  onExit: () => {
+                    clear();
+                    unmount();
+                    process.exit(0);
+                  },
+                })
+              );
+            }
+          } catch (error) {
+            if (cliOptions.json) {
+              console.log(JSON.stringify({ success: false, error: getErrorMessage(error) }));
+            } else {
+              console.error(getErrorMessage(error));
+            }
             process.exit(1);
           }
-
-          if (cliOptions.name || cliOptions.json) {
-            if (!cliOptions.name || !cliOptions.level || !cliOptions.config) {
-              const error = '--name, --level, and --config are all required in non-interactive mode';
-              if (cliOptions.json) {
-                console.log(JSON.stringify({ success: false, error }));
-              } else {
-                console.error(error);
-              }
-              process.exit(1);
-            }
-
-            const levelResult = EvaluationLevelSchema.safeParse(cliOptions.level);
-            if (!levelResult.success) {
-              const error = `Invalid --level "${cliOptions.level}". Must be one of: SESSION, TRACE, TOOL_CALL`;
-              if (cliOptions.json) {
-                console.log(JSON.stringify({ success: false, error }));
-              } else {
-                console.error(error);
-              }
-              process.exit(1);
-            }
-
-            const { readFileSync } = await import('fs');
-            const configJson = JSON.parse(readFileSync(cliOptions.config, 'utf-8')) as EvaluatorConfig;
-
-            const result = await this.add({
-              name: cliOptions.name,
-              level: levelResult.data,
-              config: configJson,
-            });
-
-            if (cliOptions.json) {
-              console.log(JSON.stringify(result));
-            } else if (result.success) {
-              console.log(`Added evaluator '${result.evaluatorName}'`);
-            } else {
-              console.error(result.error);
-            }
-            process.exit(result.success ? 0 : 1);
-          } else {
-            // TUI fallback
-            const [{ render }, { default: React }, { AddFlow }] = await Promise.all([
-              import('ink'),
-              import('react'),
-              import('../tui/screens/add/AddFlow'),
-            ]);
-            const { clear, unmount } = render(
-              React.createElement(AddFlow, {
-                isInteractive: false,
-                onExit: () => {
-                  clear();
-                  unmount();
-                  process.exit(0);
-                },
-              })
-            );
-          }
-        } catch (error) {
-          if (cliOptions.json) {
-            console.log(JSON.stringify({ success: false, error: getErrorMessage(error) }));
-          } else {
-            console.error(getErrorMessage(error));
-          }
-          process.exit(1);
         }
-      });
+      );
 
     this.registerRemoveSubcommand(removeCmd);
   }
