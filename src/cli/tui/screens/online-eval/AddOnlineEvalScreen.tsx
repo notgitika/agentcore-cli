@@ -15,6 +15,7 @@ import { generateUniqueName } from '../../utils';
 import type { AddOnlineEvalConfig, EvaluatorItem } from './types';
 import { DEFAULT_SAMPLING_RATE, ONLINE_EVAL_STEP_LABELS } from './types';
 import { useAddOnlineEvalWizard } from './useAddOnlineEvalWizard';
+import { Box, Text } from 'ink';
 import React, { useMemo } from 'react';
 
 interface AddOnlineEvalScreenProps {
@@ -146,23 +147,29 @@ export function AddOnlineEvalScreen({
         )}
 
         {isSamplingRateStep && (
-          <TextInput
-            key="samplingRate"
-            prompt="Sampling rate (0.01–100%)"
-            initialValue={String(DEFAULT_SAMPLING_RATE)}
-            onSubmit={value => {
-              const rate = parseFloat(value);
-              if (isNaN(rate) || rate < 0.01 || rate > 100) return;
-              wizard.setSamplingRate(rate);
-            }}
-            onCancel={() => wizard.goBack()}
-            customValidation={value => {
-              const rate = parseFloat(value);
-              if (isNaN(rate)) return 'Must be a number';
-              if (rate < 0.01 || rate > 100) return 'Must be between 0.01 and 100';
-              return true;
-            }}
-          />
+          <Box flexDirection="column">
+            <Text dimColor>
+              Percentage of agent requests that will be evaluated. Higher rates give better coverage but increase LLM
+              costs from evaluator invocations.
+            </Text>
+            <TextInput
+              key="samplingRate"
+              prompt="Sampling rate (0.01–100%)"
+              initialValue={String(DEFAULT_SAMPLING_RATE)}
+              onSubmit={value => {
+                const rate = parseFloat(value);
+                if (isNaN(rate) || rate < 0.01 || rate > 100) return;
+                wizard.setSamplingRate(rate);
+              }}
+              onCancel={() => wizard.goBack()}
+              customValidation={value => {
+                const rate = parseFloat(value);
+                if (isNaN(rate)) return 'Must be a number';
+                if (rate < 0.01 || rate > 100) return 'Must be between 0.01 and 100';
+                return true;
+              }}
+            />
+          </Box>
         )}
 
         {isEnableOnCreateStep && (

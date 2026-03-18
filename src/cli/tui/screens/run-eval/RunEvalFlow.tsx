@@ -255,6 +255,7 @@ function ResultsView({ run, filePath, onRunAnother, onViewRuns, onExit }: Result
           </Text>
 
           <Box marginTop={1} flexDirection="column">
+            <Text dimColor>Scores range from 0 (worst) to 1 (best).</Text>
             {run.results.map((r, i) => {
               const errCount = r.sessionScores.filter(s => s.errorMessage).length;
               return (

@@ -38,9 +38,9 @@ export const EVALUATOR_STEP_LABELS: Record<AddEvaluatorStep, string> = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const EVALUATION_LEVEL_OPTIONS = [
-  { id: 'SESSION', title: 'Session', description: 'Evaluate entire conversation sessions' },
-  { id: 'TRACE', title: 'Trace', description: 'Evaluate individual agent traces' },
-  { id: 'TOOL_CALL', title: 'Tool Call', description: 'Evaluate individual tool calls' },
+  { id: 'SESSION', title: 'Session', description: 'Overall quality across an entire conversation' },
+  { id: 'TRACE', title: 'Trace', description: 'Per-turn accuracy of individual agent responses' },
+  { id: 'TOOL_CALL', title: 'Tool Call', description: 'Correctness of individual tool selections and usage' },
 ] as const;
 
 // Cross-region inference profile ID — works in all US regions where AgentCore is available
@@ -99,6 +99,14 @@ export const LEVEL_PLACEHOLDERS: Record<EvaluationLevel, string[]> = {
   SESSION: ['context', 'available_tools'],
   TRACE: ['context', 'assistant_turn'],
   TOOL_CALL: ['available_tools', 'context', 'tool_turn'],
+};
+
+/** Human-readable descriptions of what each placeholder expands to at eval time. */
+export const PLACEHOLDER_DESCRIPTIONS: Record<string, string> = {
+  context: 'full conversation history (user + assistant messages)',
+  assistant_turn: 'the specific assistant response being evaluated',
+  available_tools: 'list of tools the agent can call',
+  tool_turn: 'the specific tool call and its result',
 };
 
 /**

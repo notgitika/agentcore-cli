@@ -13,6 +13,7 @@ import {
   EVALUATOR_MODEL_OPTIONS,
   EVALUATOR_STEP_LABELS,
   LEVEL_PLACEHOLDERS,
+  PLACEHOLDER_DESCRIPTIONS,
   RATING_SCALE_PRESETS,
   RATING_SCALE_TYPE_OPTIONS,
   parseCustomRatingScale,
@@ -148,7 +149,7 @@ export function AddEvaluatorScreen({ onComplete, onExit, existingEvaluatorNames 
         {isModelStep && (
           <WizardSelect
             title="Select model"
-            description="Choose the LLM for evaluation judging"
+            description="Choose the LLM judge. Model availability varies by region."
             items={modelItems}
             selectedIndex={modelNav.selectedIndex}
           />
@@ -171,9 +172,13 @@ export function AddEvaluatorScreen({ onComplete, onExit, existingEvaluatorNames 
         {isInstructionsStep && (
           <Box flexDirection="column">
             <Text>Evaluation instructions</Text>
-            <Text dimColor>
-              Must include at least one: {LEVEL_PLACEHOLDERS[wizard.config.level].map(p => `{${p}}`).join(', ')}
-            </Text>
+            <Text dimColor>Must include at least one placeholder:</Text>
+            {LEVEL_PLACEHOLDERS[wizard.config.level].map(p => (
+              <Text key={p} dimColor>
+                {'  '}
+                {`{${p}}`} — {PLACEHOLDER_DESCRIPTIONS[p] ?? p}
+              </Text>
+            ))}
             <TextInput
               key="instructions"
               prompt=""

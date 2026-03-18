@@ -19,7 +19,7 @@ import type { EvaluatorItem } from '../online-eval/types';
 import type { AgentItem, RunEvalConfig } from './types';
 import { DEFAULT_LOOKBACK_DAYS, RUN_EVAL_STEP_LABELS } from './types';
 import { useRunEvalWizard } from './useRunEvalWizard';
-import { Text } from 'ink';
+import { Box, Text } from 'ink';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 interface RunEvalScreenProps {
@@ -210,23 +210,26 @@ export function RunEvalScreen({ agents, evaluatorItems: rawEvaluatorItems, onCom
         )}
 
         {isDaysStep && (
-          <TextInput
-            key="days"
-            prompt="Lookback window (days)"
-            initialValue={String(DEFAULT_LOOKBACK_DAYS)}
-            onSubmit={value => {
-              const days = parseInt(value, 10);
-              if (isNaN(days) || days < 1 || days > 90) return;
-              wizard.setDays(days);
-            }}
-            onCancel={() => wizard.goBack()}
-            customValidation={value => {
-              const days = parseInt(value, 10);
-              if (isNaN(days)) return 'Must be a number';
-              if (days < 1 || days > 90) return 'Must be between 1 and 90';
-              return true;
-            }}
-          />
+          <Box flexDirection="column">
+            <Text dimColor>Note: Traces may take 5–10 min to appear after agent invocations.</Text>
+            <TextInput
+              key="days"
+              prompt="Lookback window (days)"
+              initialValue={String(DEFAULT_LOOKBACK_DAYS)}
+              onSubmit={value => {
+                const days = parseInt(value, 10);
+                if (isNaN(days) || days < 1 || days > 90) return;
+                wizard.setDays(days);
+              }}
+              onCancel={() => wizard.goBack()}
+              customValidation={value => {
+                const days = parseInt(value, 10);
+                if (isNaN(days)) return 'Must be a number';
+                if (days < 1 || days > 90) return 'Must be between 1 and 90';
+                return true;
+              }}
+            />
+          </Box>
         )}
 
         {isSessionsStep && sessionPhase === 'loading' && <GradientText text="Discovering sessions..." />}
