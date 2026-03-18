@@ -375,6 +375,8 @@ export class AgentPrimitive extends BasePrimitive<AddAgentOptions, RemovableReso
         securityGroups && {
           networkConfig: { subnets, securityGroups },
         }),
+      // MCP uses mcp.run() which is incompatible with the opentelemetry-instrument wrapper
+      ...(protocol === 'MCP' && { instrumentation: { enableOtel: false } }),
     };
 
     project.agents.push(agent);

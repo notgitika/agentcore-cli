@@ -6,6 +6,10 @@ export interface InvokeOptions {
   userId?: string;
   json?: boolean;
   stream?: boolean;
+  /** MCP tool name (used with prompt "call-tool") */
+  tool?: string;
+  /** MCP tool arguments as JSON string (used with --tool) */
+  input?: string;
 }
 
 export interface InvokeResult {

@@ -220,6 +220,77 @@ describe('getDevConfig', () => {
     expect(config?.buildType).toBe('Container');
   });
 
+  it('returns protocol HTTP by default when agent has no protocol', () => {
+    const project: AgentCoreProjectSpec = {
+      name: 'TestProject',
+      version: 1,
+      agents: [
+        {
+          type: 'AgentCoreRuntime',
+          name: 'PythonAgent',
+          build: 'CodeZip',
+          runtimeVersion: 'PYTHON_3_12',
+          entrypoint: filePath('main.py'),
+          codeLocation: dirPath('./agents/python'),
+        },
+      ],
+      memories: [],
+      credentials: [],
+    };
+
+    const config = getDevConfig(workingDir, project, '/test/project/agentcore');
+    expect(config).not.toBeNull();
+    expect(config!.protocol).toBe('HTTP');
+  });
+
+  it('returns protocol MCP for MCP agents', () => {
+    const project: AgentCoreProjectSpec = {
+      name: 'TestProject',
+      version: 1,
+      agents: [
+        {
+          type: 'AgentCoreRuntime',
+          name: 'McpAgent',
+          build: 'CodeZip',
+          runtimeVersion: 'PYTHON_3_12',
+          entrypoint: filePath('main.py'),
+          codeLocation: dirPath('./agents/mcp'),
+          protocol: 'MCP',
+        },
+      ],
+      memories: [],
+      credentials: [],
+    };
+
+    const config = getDevConfig(workingDir, project, '/test/project/agentcore');
+    expect(config).not.toBeNull();
+    expect(config!.protocol).toBe('MCP');
+  });
+
+  it('returns protocol A2A for A2A agents', () => {
+    const project: AgentCoreProjectSpec = {
+      name: 'TestProject',
+      version: 1,
+      agents: [
+        {
+          type: 'AgentCoreRuntime',
+          name: 'A2aAgent',
+          build: 'CodeZip',
+          runtimeVersion: 'PYTHON_3_12',
+          entrypoint: filePath('main.py'),
+          codeLocation: dirPath('./agents/a2a'),
+          protocol: 'A2A',
+        },
+      ],
+      memories: [],
+      credentials: [],
+    };
+
+    const config = getDevConfig(workingDir, project, '/test/project/agentcore');
+    expect(config).not.toBeNull();
+    expect(config!.protocol).toBe('A2A');
+  });
+
   it('handles .py: entrypoint format (module:function)', () => {
     const project: AgentCoreProjectSpec = {
       name: 'TestProject',

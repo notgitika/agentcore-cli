@@ -17,11 +17,18 @@ export { streamLogs, searchLogs, type LogEvent, type StreamLogsOptions, type Sea
 export { enableTransactionSearch, type TransactionSearchEnableResult } from './transaction-search';
 export {
   DEFAULT_RUNTIME_USER_ID,
+  invokeA2ARuntime,
   invokeAgentRuntime,
   invokeAgentRuntimeStreaming,
+  mcpInitSession,
+  mcpListTools,
+  mcpCallTool,
   stopRuntimeSession,
   type InvokeAgentRuntimeOptions,
   type InvokeAgentRuntimeResult,
+  type McpInvokeOptions,
+  type McpToolDef,
+  type McpListToolsResult,
   type StreamingInvokeResult,
   type StopRuntimeSessionOptions,
   type StopRuntimeSessionResult,

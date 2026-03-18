@@ -296,9 +296,9 @@ describe('AgentEnvSpecSchema', () => {
       expect(result.success, `Should accept protocol ${mode}`).toBe(true);
     });
 
-    it('rejects agent without protocol', () => {
+    it('accepts agent without protocol (backwards compat)', () => {
       const { protocol: _protocol, ...agentWithoutProtocol } = { ...validPythonAgent, protocol: undefined };
-      expect(AgentEnvSpecSchema.safeParse(agentWithoutProtocol).success).toBe(false);
+      expect(AgentEnvSpecSchema.safeParse(agentWithoutProtocol).success).toBe(true);
     });
 
     it('rejects invalid protocol', () => {

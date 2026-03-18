@@ -143,7 +143,7 @@ export const AgentEnvSpecSchema = z
     /** Model provider used by this agent. Optional for backwards compatibility. */
     modelProvider: ModelProviderSchema.optional(),
     /** Protocol for the runtime (HTTP, MCP, A2A). */
-    protocol: ProtocolModeSchema,
+    protocol: ProtocolModeSchema.optional(),
   })
   .superRefine((data, ctx) => {
     if (data.networkMode === 'VPC' && !data.networkConfig) {

@@ -1,7 +1,15 @@
 import { ConfigIO } from '../../../lib';
 import type { AgentCoreProjectSpec, AwsDeploymentTargets, DeployedState } from '../../../schema';
-import { invokeAgentRuntime, invokeAgentRuntimeStreaming } from '../../aws';
+import {
+  invokeA2ARuntime,
+  invokeAgentRuntime,
+  invokeAgentRuntimeStreaming,
+  mcpCallTool,
+  mcpInitSession,
+  mcpListTools,
+} from '../../aws';
 import { InvokeLogger } from '../../logging';
+import { formatMcpToolList } from '../../operations/dev/utils';
 import type { InvokeOptions, InvokeResult } from './types';
 
 export interface InvokeContext {
@@ -81,8 +89,106 @@ export async function handleInvoke(context: InvokeContext, options: InvokeOption
     return { success: false, error: `Agent '${agentSpec.name}' is not deployed to target '${selectedTargetName}'` };
   }
 
+  // MCP protocol handling
+  if (agentSpec.protocol === 'MCP') {
+    const mcpOpts = {
+      region: targetConfig.region,
+      runtimeArn: agentState.runtimeArn,
+      userId: options.userId,
+    };
+
+    // list-tools: list available MCP tools
+    if (options.prompt === 'list-tools') {
+      try {
+        const result = await mcpListTools(mcpOpts);
+        const response = formatMcpToolList(result.tools);
+        return {
+          success: true,
+          agentName: agentSpec.name,
+          targetName: selectedTargetName,
+          response,
+        };
+      } catch (err) {
+        return {
+          success: false,
+          error: `Failed to list MCP tools: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    }
+
+    // call-tool: call an MCP tool by name
+    if (options.prompt === 'call-tool') {
+      if (!options.tool) {
+        return {
+          success: false,
+          error: 'MCP call-tool requires --tool <name>. Use "list-tools" to see available tools.',
+        };
+      }
+      let args: Record<string, unknown> = {};
+      if (options.input) {
+        try {
+          args = JSON.parse(options.input) as Record<string, unknown>;
+        } catch {
+          return { success: false, error: `Invalid JSON for --input: ${options.input}` };
+        }
+      }
+      try {
+        // Lightweight init to get session ID (no tools/list round-trip)
+        const mcpSessionId = await mcpInitSession(mcpOpts);
+        const response = await mcpCallTool({ ...mcpOpts, mcpSessionId }, options.tool, args);
+        return {
+          success: true,
+          agentName: agentSpec.name,
+          targetName: selectedTargetName,
+          response,
+        };
+      } catch (err) {
+        return {
+          success: false,
+          error: `Failed to call MCP tool: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    }
+
+    if (!options.prompt) {
+      return {
+        success: false,
+        error:
+          'MCP agents require a command. Usage:\n  agentcore invoke list-tools\n  agentcore invoke call-tool --tool <name> --input \'{"arg": "value"}\'',
+      };
+    }
+  }
+
   if (!options.prompt) {
     return { success: false, error: 'No prompt provided. Usage: agentcore invoke "your prompt"' };
+  }
+
+  // A2A protocol handling — send JSON-RPC message/send via InvokeAgentRuntime
+  if (agentSpec.protocol === 'A2A') {
+    try {
+      const a2aResult = await invokeA2ARuntime(
+        { region: targetConfig.region, runtimeArn: agentState.runtimeArn, userId: options.userId },
+        options.prompt
+      );
+      let response = '';
+      for await (const chunk of a2aResult.stream) {
+        response += chunk;
+        if (options.stream) {
+          process.stdout.write(chunk);
+        }
+      }
+      if (options.stream) {
+        process.stdout.write('\n');
+      }
+      return {
+        success: true,
+        agentName: agentSpec.name,
+        targetName: selectedTargetName,
+        response,
+      };
+    } catch (err) {
+      return { success: false, error: `A2A invoke failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
   }
 
   // Get provider info if available

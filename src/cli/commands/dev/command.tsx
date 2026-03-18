@@ -2,13 +2,17 @@ import { findConfigRoot, getWorkingDirectory, readEnvFile } from '../../../lib';
 import { getErrorMessage } from '../../errors';
 import { ExecLogger } from '../../logging';
 import {
+  callMcpTool,
   createDevServer,
   findAvailablePort,
   getAgentPort,
   getDevConfig,
   getDevSupportedAgents,
+  getEndpointUrl,
   invokeAgent,
   invokeAgentStreaming,
+  invokeForProtocol,
+  listMcpTools,
   loadProjectConfig,
 } from '../../operations/dev';
 import { getGatewayEnvVars } from '../../operations/dev/gateway-env.js';
@@ -48,6 +52,74 @@ async function invokeDevServer(port: number, prompt: string, stream: boolean): P
   }
 }
 
+async function invokeA2ADevServer(port: number, prompt: string): Promise<void> {
+  try {
+    for await (const chunk of invokeForProtocol('A2A', { port, message: prompt })) {
+      process.stdout.write(chunk);
+    }
+    process.stdout.write('\n');
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('ECONNREFUSED')) {
+      console.error(`Error: Dev server not running on port ${port}`);
+      console.error('Start it with: agentcore dev');
+    } else {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    process.exit(1);
+  }
+}
+
+async function handleMcpInvoke(port: number, invokeValue: string, toolName?: string, input?: string): Promise<void> {
+  try {
+    if (invokeValue === 'list-tools') {
+      const { tools } = await listMcpTools(port);
+      if (tools.length === 0) {
+        console.log('No tools available.');
+        return;
+      }
+      console.log('Available tools:');
+      for (const tool of tools) {
+        const desc = tool.description ? ` - ${tool.description}` : '';
+        console.log(`  ${tool.name}${desc}`);
+      }
+    } else if (invokeValue === 'call-tool') {
+      if (!toolName) {
+        console.error('Error: --tool is required with --invoke call-tool');
+        console.error('Usage: agentcore dev --invoke call-tool --tool <name> --input \'{"arg": "value"}\'');
+        process.exit(1);
+      }
+      // Initialize session first, then call tool with the session ID
+      const { sessionId } = await listMcpTools(port);
+      let args: Record<string, unknown> = {};
+      if (input) {
+        try {
+          args = JSON.parse(input) as Record<string, unknown>;
+        } catch {
+          console.error(`Error: Invalid JSON for --input: ${input}`);
+          console.error('Expected format: --input \'{"key": "value"}\'');
+          process.exit(1);
+        }
+      }
+      const result = await callMcpTool(port, toolName, args, sessionId);
+      console.log(result);
+    } else {
+      console.error(`Error: Unknown MCP invoke command "${invokeValue}"`);
+      console.error('Usage:');
+      console.error('  agentcore dev --invoke list-tools');
+      console.error('  agentcore dev --invoke call-tool --tool <name> --input \'{"arg": "value"}\'');
+      process.exit(1);
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('ECONNREFUSED')) {
+      console.error(`Error: Dev server not running on port ${port}`);
+      console.error('Start it with: agentcore dev');
+    } else {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    process.exit(1);
+  }
+}
+
 export const registerDev = (program: Command) => {
   program
     .command('dev')
@@ -58,6 +130,8 @@ export const registerDev = (program: Command) => {
     .option('-i, --invoke <prompt>', 'Invoke running dev server (use --agent if multiple) [non-interactive]')
     .option('-s, --stream', 'Stream response when using --invoke [non-interactive]')
     .option('-l, --logs', 'Run dev server with logs to stdout [non-interactive]')
+    .option('--tool <name>', 'MCP tool name (used with --invoke call-tool)')
+    .option('--input <json>', 'MCP tool arguments as JSON (used with --invoke call-tool)')
     .action(async opts => {
       try {
         const port = parseInt(opts.port, 10);
@@ -79,12 +153,25 @@ export const registerDev = (program: Command) => {
             process.exit(1);
           }
 
-          // Show model info if available
-          if (targetAgent?.modelProvider) {
+          const protocol = targetAgent?.protocol ?? 'HTTP';
+
+          // Override port for protocols with fixed framework ports
+          if (protocol === 'A2A') invokePort = 9000;
+          else if (protocol === 'MCP') invokePort = 8000;
+
+          // Show model info if available (not applicable to MCP)
+          if (protocol !== 'MCP' && targetAgent?.modelProvider) {
             console.log(`Provider: ${targetAgent.modelProvider}`);
           }
 
-          await invokeDevServer(invokePort, opts.invoke, opts.stream ?? false);
+          // Protocol-aware dispatch
+          if (protocol === 'MCP') {
+            await handleMcpInvoke(invokePort, opts.invoke, opts.tool, opts.input);
+          } else if (protocol === 'A2A') {
+            await invokeA2ADevServer(invokePort, opts.invoke);
+          } else {
+            await invokeDevServer(invokePort, opts.invoke, opts.stream ?? false);
+          }
           return;
         }
 
@@ -145,11 +232,17 @@ export const registerDev = (program: Command) => {
           // Create logger for log file path
           const logger = new ExecLogger({ command: 'dev' });
 
-          // Calculate port based on agent index
-          const basePort = getAgentPort(project, config.agentName, port);
-          const actualPort = await findAvailablePort(basePort);
-          if (actualPort !== basePort) {
-            console.log(`Port ${basePort} in use, using ${actualPort}`);
+          // Calculate port: A2A/MCP use fixed framework ports, HTTP uses configurable port
+          const isA2A = config.protocol === 'A2A';
+          const isMcp = config.protocol === 'MCP';
+          const fixedPort = isA2A ? 9000 : isMcp ? 8000 : getAgentPort(project, config.agentName, port);
+          const actualPort = await findAvailablePort(fixedPort);
+          if ((isA2A || isMcp) && actualPort !== fixedPort) {
+            console.error(`Error: Port ${fixedPort} is in use. ${config.protocol} agents require port ${fixedPort}.`);
+            process.exit(1);
+          }
+          if (actualPort !== fixedPort) {
+            console.log(`Port ${fixedPort} in use, using ${actualPort}`);
           }
 
           // Get provider info from agent config
@@ -158,8 +251,13 @@ export const registerDev = (program: Command) => {
 
           console.log(`Starting dev server...`);
           console.log(`Agent: ${config.agentName}`);
-          console.log(`Provider: ${providerInfo}`);
-          console.log(`Server: http://localhost:${actualPort}/invocations`);
+          if (config.protocol !== 'MCP') {
+            console.log(`Provider: ${providerInfo}`);
+          }
+          if (config.protocol !== 'HTTP') {
+            console.log(`Protocol: ${config.protocol}`);
+          }
+          console.log(`Server: ${getEndpointUrl(actualPort, config.protocol)}`);
           console.log(`Log: ${logger.getRelativeLogPath()}`);
           console.log(`Press Ctrl+C to stop\n`);
 

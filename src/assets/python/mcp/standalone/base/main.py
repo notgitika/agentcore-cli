@@ -1,24 +1,25 @@
 from mcp.server.fastmcp import FastMCP
-import uvicorn
 
-mcp = FastMCP("{{ name }}")
+mcp = FastMCP("{{ name }}", host="0.0.0.0", stateless_http=True)
 
 
 @mcp.tool()
 def add_numbers(a: int, b: int) -> int:
-    """Return the sum of two numbers."""
+    """Add two numbers together"""
     return a + b
 
 
 @mcp.tool()
-def greet(name: str) -> str:
-    """Return a greeting for the given name."""
-    return f"Hello, {name}!"
+def multiply_numbers(a: int, b: int) -> int:
+    """Multiply two numbers together"""
+    return a * b
+
+
+@mcp.tool()
+def greet_user(name: str) -> str:
+    """Greet a user by name"""
+    return f"Hello, {name}! Nice to meet you."
 
 
 if __name__ == "__main__":
-    uvicorn.run(
-        mcp.streamable_http_app(),
-        host="0.0.0.0",
-        port=8000,
-    )
+    mcp.run(transport="streamable-http")

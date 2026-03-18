@@ -129,6 +129,8 @@ export function mapGenerateConfigToAgent(config: GenerateConfig): AgentEnvSpec {
         },
       }),
     ...(protocol !== 'MCP' && { modelProvider: config.modelProvider }),
+    // MCP uses mcp.run() which is incompatible with the opentelemetry-instrument wrapper
+    ...(protocol === 'MCP' && { instrumentation: { enableOtel: false } }),
   };
 }
 

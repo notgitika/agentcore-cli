@@ -4,16 +4,31 @@ import type {
   AwsDeploymentTarget,
   ModelProvider,
   NetworkMode,
+  ProtocolMode,
   AgentCoreProjectSpec as _AgentCoreProjectSpec,
 } from '../../../../schema';
-import { DEFAULT_RUNTIME_USER_ID, invokeAgentRuntimeStreaming } from '../../../aws';
+import {
+  DEFAULT_RUNTIME_USER_ID,
+  type McpToolDef,
+  invokeA2ARuntime,
+  invokeAgentRuntimeStreaming,
+  mcpCallTool,
+  mcpListTools,
+} from '../../../aws';
 import { getErrorMessage } from '../../../errors';
 import { InvokeLogger } from '../../../logging';
+import { formatMcpToolList } from '../../../operations/dev/utils';
 import { generateSessionId } from '../../../operations/session';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface InvokeConfig {
-  agents: { name: string; state: AgentCoreDeployedState; modelProvider?: ModelProvider; networkMode?: NetworkMode }[];
+  agents: {
+    name: string;
+    state: AgentCoreDeployedState;
+    modelProvider?: ModelProvider;
+    networkMode?: NetworkMode;
+    protocol?: ProtocolMode;
+  }[];
   target: AwsDeploymentTarget;
   targetName: string;
   projectName: string;
@@ -28,15 +43,18 @@ export interface InvokeFlowState {
   phase: 'loading' | 'ready' | 'invoking' | 'error';
   config: InvokeConfig | null;
   selectedAgent: number;
-  messages: { role: 'user' | 'assistant'; content: string }[];
+  messages: { role: 'user' | 'assistant'; content: string; isHint?: boolean }[];
   error: string | null;
   logFilePath: string | null;
   sessionId: string | null;
   userId: string;
+  mcpTools: McpToolDef[];
+  mcpToolsFetched: boolean;
   selectAgent: (index: number) => void;
   setUserId: (id: string) => void;
   invoke: (prompt: string) => Promise<void>;
   newSession: () => void;
+  fetchMcpTools: () => Promise<void>;
 }
 
 export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState {
@@ -44,11 +62,17 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
   const [phase, setPhase] = useState<'loading' | 'ready' | 'invoking' | 'error'>('loading');
   const [config, setConfig] = useState<InvokeConfig | null>(null);
   const [selectedAgent, setSelectedAgent] = useState(0);
-  const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
+  const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; content: string; isHint?: boolean }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [logFilePath, setLogFilePath] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string>(initialUserId ?? DEFAULT_RUNTIME_USER_ID);
+
+  // MCP state
+  const [mcpTools, setMcpTools] = useState<McpToolDef[]>([]);
+  const [mcpToolsFetched, setMcpToolsFetched] = useState(false);
+  const mcpToolsRef = useRef<McpToolDef[]>([]);
+  const mcpSessionIdRef = useRef<string | undefined>(undefined);
 
   // Persistent logger for the session
   const loggerRef = useRef<InvokeLogger | null>(null);
@@ -82,14 +106,14 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
         const agents: InvokeConfig['agents'] = [];
         for (const agent of project.agents) {
           const state = targetState?.resources?.agents?.[agent.name];
-          if (state) {
-            agents.push({
-              name: agent.name,
-              state,
-              modelProvider: agent.modelProvider,
-              networkMode: agent.networkMode,
-            });
-          }
+          if (!state) continue;
+          agents.push({
+            name: agent.name,
+            state,
+            modelProvider: agent.modelProvider,
+            networkMode: agent.networkMode,
+            protocol: agent.protocol,
+          });
         }
 
         if (agents.length === 0) {
@@ -102,10 +126,8 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
 
         // Initialize session ID - always generate fresh unless explicitly provided
         if (initialSessionId) {
-          // Use provided session ID from --session-id flag
           setSessionId(initialSessionId);
         } else {
-          // Always generate a new session for fresh invocations
           const newId = generateSessionId();
           setSessionId(newId);
         }
@@ -119,6 +141,40 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
     void load();
   }, [initialSessionId]);
 
+  const getMcpInvokeOptions = useCallback(() => {
+    if (!config) return null;
+    const agent = config.agents[selectedAgent];
+    if (!agent) return null;
+    return {
+      region: config.target.region,
+      runtimeArn: agent.state.runtimeArn,
+      userId,
+      mcpSessionId: mcpSessionIdRef.current,
+    };
+  }, [config, selectedAgent, userId]);
+
+  const fetchMcpTools = useCallback(async () => {
+    const opts = getMcpInvokeOptions();
+    if (!opts) return;
+
+    try {
+      const result = await mcpListTools(opts);
+      setMcpTools(result.tools);
+      mcpToolsRef.current = result.tools;
+      mcpSessionIdRef.current = result.mcpSessionId;
+      setMcpToolsFetched(true);
+      if (result.tools.length > 0) {
+        setMessages(prev => [...prev, { role: 'assistant', content: formatMcpToolList(result.tools), isHint: true }]);
+      }
+    } catch (err) {
+      const errMsg = getErrorMessage(err);
+      setMessages(prev => [...prev, { role: 'assistant', content: `Failed to list tools: ${errMsg}` }]);
+      setMcpTools([]);
+      mcpToolsRef.current = [];
+      setMcpToolsFetched(true);
+    }
+  }, [getMcpInvokeOptions]);
+
   // Track current streaming content to avoid stale closure issues
   const streamingContentRef = useRef('');
 
@@ -129,6 +185,8 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
       const agent = config.agents[selectedAgent];
       if (!agent) return;
 
+      const isMcp = agent.protocol === 'MCP';
+
       // Create logger on first invoke or if agent changed
       if (!loggerRef.current) {
         loggerRef.current = new InvokeLogger({
@@ -137,13 +195,73 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
           region: config.target.region,
           sessionId: sessionId ?? undefined,
         });
-        // Store the absolute path for the LogLink component
         setLogFilePath(loggerRef.current.getAbsoluteLogPath());
       }
 
       const logger = loggerRef.current;
 
-      // Append new user message and empty assistant message (conversation history is preserved)
+      // MCP: handle tool calls
+      if (isMcp) {
+        // "list" refreshes the tool list
+        if (prompt.trim().toLowerCase() === 'list') {
+          setMessages(prev => [...prev, { role: 'user', content: prompt }]);
+          setPhase('invoking');
+          await fetchMcpTools();
+          setPhase('ready');
+          return;
+        }
+
+        // Parse "tool_name {json_args}" or just "tool_name"
+        const match = /^(\S+)\s*(.*)/.exec(prompt);
+        if (!match) return;
+        const toolName = match[1]!;
+        const argsStr = match[2]?.trim() ?? '';
+
+        setMessages(prev => [...prev, { role: 'user', content: prompt }, { role: 'assistant', content: '' }]);
+        setPhase('invoking');
+
+        logger.logPrompt(`MCP tools/call: ${toolName}(${argsStr})`, sessionId ?? undefined, userId);
+
+        try {
+          let args: Record<string, unknown> = {};
+          if (argsStr) {
+            args = JSON.parse(argsStr) as Record<string, unknown>;
+          }
+          const opts = getMcpInvokeOptions();
+          if (!opts) throw new Error('No agent config available');
+
+          const result = await mcpCallTool(opts, toolName, args);
+
+          setMessages(prev => {
+            const updated = [...prev];
+            const lastIdx = updated.length - 1;
+            if (lastIdx >= 0 && updated[lastIdx]?.role === 'assistant') {
+              updated[lastIdx] = { role: 'assistant', content: `Result: ${result}` };
+            }
+            return updated;
+          });
+
+          logger.logResponse(result);
+        } catch (err) {
+          const errMsg = getErrorMessage(err);
+          logger.logError(err, 'MCP call failed');
+
+          setMessages(prev => {
+            const updated = [...prev];
+            const lastIdx = updated.length - 1;
+            if (lastIdx >= 0 && updated[lastIdx]?.role === 'assistant') {
+              updated[lastIdx] = { role: 'assistant', content: `Error: ${errMsg}` };
+            }
+            return updated;
+          });
+        }
+
+        setPhase('ready');
+        return;
+      }
+
+      // HTTP / A2A: streaming invoke
+      const isA2A = agent.protocol === 'A2A';
       setMessages(prev => [...prev, { role: 'user', content: prompt }, { role: 'assistant', content: '' }]);
       setPhase('invoking');
       streamingContentRef.current = '';
@@ -151,16 +269,20 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
       logger.logPrompt(prompt, sessionId ?? undefined, userId);
 
       try {
-        const result = await invokeAgentRuntimeStreaming({
-          region: config.target.region,
-          runtimeArn: agent.state.runtimeArn,
-          payload: prompt,
-          sessionId: sessionId ?? undefined,
-          userId,
-          logger, // Pass logger for SSE event debugging
-        });
+        const result = isA2A
+          ? await invokeA2ARuntime(
+              { region: config.target.region, runtimeArn: agent.state.runtimeArn, userId, logger },
+              prompt
+            )
+          : await invokeAgentRuntimeStreaming({
+              region: config.target.region,
+              runtimeArn: agent.state.runtimeArn,
+              payload: prompt,
+              sessionId: sessionId ?? undefined,
+              userId,
+              logger,
+            });
 
-        // Update session ID from response if available (for logging purposes)
         if (result.sessionId) {
           setSessionId(result.sessionId);
           logger.updateSessionId(result.sessionId);
@@ -169,7 +291,6 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
         for await (const chunk of result.stream) {
           streamingContentRef.current += chunk;
           const currentContent = streamingContentRef.current;
-          // Update the last message (assistant) with accumulated content
           setMessages(prev => {
             const updated = [...prev];
             const lastIdx = updated.length - 1;
@@ -187,7 +308,6 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
         const errMsg = getErrorMessage(err);
         logger.logError(err, 'invoke streaming failed');
 
-        // Update the last message with error
         setMessages(prev => {
           const updated = [...prev];
           const lastIdx = updated.length - 1;
@@ -199,13 +319,18 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
         setPhase('ready');
       }
     },
-    [config, selectedAgent, phase, sessionId, userId]
+    [config, selectedAgent, phase, sessionId, userId, fetchMcpTools, getMcpInvokeOptions]
   );
 
   const newSession = useCallback(() => {
     const newId = generateSessionId();
     setSessionId(newId);
     setMessages([]);
+    // Reset MCP session
+    mcpSessionIdRef.current = undefined;
+    setMcpTools([]);
+    mcpToolsRef.current = [];
+    setMcpToolsFetched(false);
   }, []);
 
   return {
@@ -217,9 +342,12 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
     logFilePath,
     sessionId,
     userId,
+    mcpTools,
+    mcpToolsFetched,
     selectAgent: setSelectedAgent,
     setUserId,
     invoke,
     newSession,
+    fetchMcpTools,
   };
 }

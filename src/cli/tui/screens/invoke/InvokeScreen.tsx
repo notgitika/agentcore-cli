@@ -18,7 +18,7 @@ type Mode = 'select-agent' | 'chat' | 'input';
 /**
  * Render conversation messages as a single string for scrolling.
  */
-function formatConversation(messages: { role: 'user' | 'assistant'; content: string }[]): string {
+function formatConversation(messages: { role: 'user' | 'assistant'; content: string; isHint?: boolean }[]): string {
   const lines: string[] = [];
 
   for (const msg of messages) {
@@ -106,15 +106,18 @@ export function InvokeScreen({
     logFilePath,
     sessionId,
     userId,
+    mcpToolsFetched,
     selectAgent,
     invoke,
     newSession,
+    fetchMcpTools,
   } = useInvokeFlow({ initialSessionId, initialUserId });
   const [mode, setMode] = useState<Mode>('select-agent');
   const [scrollOffset, setScrollOffset] = useState(0);
   const [userScrolled, setUserScrolled] = useState(false);
   const { stdout } = useStdout();
   const justCancelledRef = useRef(false);
+  const mcpFetchTriggeredRef = useRef(false);
 
   // Handle initial prompt - skip agent selection if only one agent
   useEffect(() => {
@@ -137,6 +140,15 @@ export function InvokeScreen({
       onExit();
     }
   }, [initialPrompt, phase, messages.length, onExit]);
+
+  // MCP: auto-list tools when agent is selected and ready, show hint after fetch
+  useEffect(() => {
+    const agent = config?.agents[selectedAgent];
+    if (agent?.protocol === 'MCP' && phase === 'ready' && mode !== 'select-agent' && !mcpFetchTriggeredRef.current) {
+      mcpFetchTriggeredRef.current = true;
+      void fetchMcpTools();
+    }
+  }, [config, selectedAgent, phase, mode, fetchMcpTools]);
 
   // Return to input mode after invoke completes
   const prevPhaseRef = useRef(phase);
@@ -278,23 +290,32 @@ export function InvokeScreen({
           agentName: agent.name,
         })
       : undefined;
+  const agentProtocol = agent?.protocol ?? 'HTTP';
+
   const agentItems = config.agents.map((a, i) => ({
     id: String(i),
     title: a.name,
-    description: `Runtime: ${a.state.runtimeId}`,
+    description: `${a.protocol && a.protocol !== 'HTTP' ? `${a.protocol} · ` : ''}Runtime: ${a.state.runtimeId}`,
   }));
 
+  const isMcp = agentProtocol === 'MCP';
+
   // Dynamic help text
+  const backOrQuit = config.agents.length > 1 ? 'Esc back' : 'Esc quit';
   const helpText =
     mode === 'select-agent'
       ? '↑↓ select · Enter confirm · Esc quit'
       : mode === 'input'
-        ? 'Enter send · Esc cancel'
+        ? isMcp
+          ? 'Enter send · Esc cancel · "list" to refresh tools'
+          : 'Enter send · Esc cancel'
         : phase === 'invoking'
           ? '↑↓ scroll'
           : messages.length > 0
-            ? `↑↓ scroll · Enter invoke · N new session · ${config.agents.length > 1 ? 'Esc back' : 'Esc quit'}`
-            : `Enter to send a message · ${config.agents.length > 1 ? 'Esc back' : 'Esc quit'}`;
+            ? `↑↓ scroll · Enter invoke · N new session · ${backOrQuit}`
+            : isMcp
+              ? `Enter to call a tool · N new session · ${backOrQuit}`
+              : `Enter to send a message · ${backOrQuit}`;
 
   const headerContent = (
     <Box flexDirection="column">
@@ -306,6 +327,12 @@ export function InvokeScreen({
         <Box>
           <Text>Agent: </Text>
           <Text color="cyan">{agent?.name}</Text>
+        </Box>
+      )}
+      {mode !== 'select-agent' && agentProtocol !== 'HTTP' && (
+        <Box>
+          <Text>Protocol: </Text>
+          <Text color="cyan">{agentProtocol}</Text>
         </Box>
       )}
       {mode !== 'select-agent' && agent?.modelProvider && (
@@ -391,13 +418,18 @@ export function InvokeScreen({
         )}
 
         {/* Input area */}
+        {/* MCP: show loading indicator while fetching tools */}
+        {isMcp && !mcpToolsFetched && phase === 'ready' && messages.length === 0 && (
+          <GradientText text="Fetching tools..." />
+        )}
+
         {mode === 'chat' && phase === 'ready' && messages.length > 0 && (
           <Box>
             <Text dimColor>&gt; </Text>
           </Box>
         )}
-        {mode === 'chat' && phase === 'ready' && messages.length === 0 && (
-          <Text dimColor>Press Enter to send a message</Text>
+        {mode === 'chat' && phase === 'ready' && messages.length === 0 && (!isMcp || mcpToolsFetched) && (
+          <Text dimColor>{isMcp ? 'Press Enter to call a tool' : 'Press Enter to send a message'}</Text>
         )}
         {mode === 'input' && phase === 'ready' && (
           <Box>
@@ -405,6 +437,9 @@ export function InvokeScreen({
             <TextInput
               prompt=""
               hideArrow
+              placeholder={
+                isMcp ? 'tool_name {"arg": "value"}' : agentProtocol === 'A2A' ? 'Send a message...' : undefined
+              }
               onSubmit={text => {
                 if (text.trim()) {
                   setMode('chat');

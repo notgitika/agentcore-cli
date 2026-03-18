@@ -1,28 +1,9 @@
-/** Error thrown when the dev server returns a non-OK HTTP response. */
-export class ServerError extends Error {
-  constructor(
-    public readonly statusCode: number,
-    body: string
-  ) {
-    super(body || `Server returned ${statusCode}`);
-    this.name = 'ServerError';
-  }
-}
+import { invokeA2AStreaming } from './invoke-a2a';
+import { ConnectionError, type InvokeStreamingOptions, type SSELogger, ServerError } from './invoke-types';
+import { isConnectionError, sleep } from './utils';
 
-/** Error thrown when the connection to the dev server fails. */
-export class ConnectionError extends Error {
-  constructor(cause: Error) {
-    super(cause.message);
-    this.name = 'ConnectionError';
-  }
-}
-
-/** Logger interface for SSE events and error logging */
-export interface SSELogger {
-  logSSEEvent(rawLine: string): void;
-  /** Optional method to log errors and debug info */
-  log?(level: 'error' | 'warn' | 'system', message: string): void;
-}
+// Re-export shared types so existing consumers don't break
+export { ConnectionError, ServerError, type InvokeStreamingOptions, type SSELogger } from './invoke-types';
 
 /**
  * Parse a single SSE data line and extract the content.
@@ -70,13 +51,6 @@ function parseSSE(text: string): string {
 }
 
 /**
- * Sleep helper for retry delays.
- */
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
  * Extract result from a JSON response object.
  * Handles both {"result": "..."} and plain text responses.
  */
@@ -91,13 +65,6 @@ function extractResult(text: string): string {
   } catch {
     return text;
   }
-}
-
-export interface InvokeStreamingOptions {
-  port: number;
-  message: string;
-  /** Optional logger for SSE event debugging */
-  logger?: SSELogger;
 }
 
 /**
@@ -209,9 +176,8 @@ export async function* invokeAgentStreaming(
       }
 
       lastError = err instanceof Error ? err : new Error(String(err));
-      const isConnectionError = lastError.message.includes('fetch') || lastError.message.includes('ECONNREFUSED');
 
-      if (isConnectionError) {
+      if (isConnectionError(lastError)) {
         const delay = baseDelay * Math.pow(2, attempt);
         logger?.log?.(
           'warn',
@@ -238,6 +204,26 @@ export interface InvokeOptions {
   message: string;
   /** Optional logger for error logging */
   logger?: SSELogger;
+}
+
+/**
+ * Protocol-aware invoke dispatcher.
+ * Routes to the appropriate invoke implementation based on protocol.
+ * MCP uses a separate tool-based interface (listMcpTools/callMcpTool).
+ */
+export async function* invokeForProtocol(
+  protocol: string,
+  options: InvokeStreamingOptions
+): AsyncGenerator<string, void, unknown> {
+  switch (protocol) {
+    case 'MCP':
+      throw new Error('Use listMcpTools/callMcpTool for MCP agents');
+    case 'A2A':
+      yield* invokeA2AStreaming(options);
+      break;
+    default:
+      yield* invokeAgentStreaming(options);
+  }
 }
 
 /**
@@ -292,9 +278,8 @@ export async function invokeAgent(portOrOptions: number | InvokeOptions, message
       }
 
       lastError = err instanceof Error ? err : new Error(String(err));
-      const isConnectionError = lastError.message.includes('fetch') || lastError.message.includes('ECONNREFUSED');
 
-      if (isConnectionError) {
+      if (isConnectionError(lastError)) {
         const delay = baseDelay * Math.pow(2, attempt);
         logger?.log?.(
           'warn',

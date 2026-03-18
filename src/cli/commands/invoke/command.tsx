@@ -101,6 +101,8 @@ export const registerInvoke = (program: Command) => {
     .option('--user-id <id>', 'User ID for runtime invocation (default: "default-user")')
     .option('--json', 'Output as JSON [non-interactive]')
     .option('--stream', 'Stream response in real-time (TUI streams by default) [non-interactive]')
+    .option('--tool <name>', 'MCP tool name (use with "call-tool" prompt) [non-interactive]')
+    .option('--input <json>', 'MCP tool arguments as JSON (use with --tool) [non-interactive]')
     .action(
       async (
         positionalPrompt: string | undefined,
@@ -112,6 +114,8 @@ export const registerInvoke = (program: Command) => {
           userId?: string;
           json?: boolean;
           stream?: boolean;
+          tool?: string;
+          input?: string;
         }
       ) => {
         try {
@@ -120,7 +124,14 @@ export const registerInvoke = (program: Command) => {
           const prompt = cliOptions.prompt ?? positionalPrompt;
 
           // CLI mode if any CLI-specific options provided (follows deploy command pattern)
-          if (prompt || cliOptions.json || cliOptions.target || cliOptions.stream || cliOptions.agent) {
+          if (
+            prompt ||
+            cliOptions.json ||
+            cliOptions.target ||
+            cliOptions.stream ||
+            cliOptions.agent ||
+            cliOptions.tool
+          ) {
             await handleInvokeCLI({
               prompt,
               agentName: cliOptions.agent,
@@ -129,6 +140,8 @@ export const registerInvoke = (program: Command) => {
               userId: cliOptions.userId,
               json: cliOptions.json,
               stream: cliOptions.stream,
+              tool: cliOptions.tool,
+              input: cliOptions.input,
             });
           } else {
             // No CLI options - interactive TUI mode
