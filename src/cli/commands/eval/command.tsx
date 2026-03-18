@@ -12,9 +12,9 @@ export const registerEval = (program: Command) => {
 
   evalCmd
     .command('history')
-    .description('Show past eval run results')
-    .option('-a, --agent <name>', 'Filter by agent name')
-    .option('-n, --limit <count>', 'Maximum number of runs to show')
+    .description('Show past on-demand eval run results saved locally')
+    .option('-a, --agent <name>', 'Filter results by agent name')
+    .option('-n, --limit <count>', 'Max number of runs to display')
     .option('--json', 'Output as JSON')
     .action((cliOptions: { agent?: string; limit?: string; json?: boolean }) => {
       requireProject();

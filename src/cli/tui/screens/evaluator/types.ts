@@ -194,8 +194,8 @@ export function parseCustomRatingScale(
 export const RATING_SCALE_PRESETS: RatingScalePreset[] = [
   {
     id: '1-5-quality',
-    title: '1–5 Quality (Numerical)',
-    description: 'Five-point quality scale from Poor to Excellent',
+    title: '1–5 Quality',
+    description: 'Numerical · Poor(1), Fair(2), Good(3), Very Good(4), Excellent(5)',
     ratingScale: {
       numerical: [
         { value: 1, label: 'Poor', definition: 'Fails to meet expectations' },
@@ -208,8 +208,8 @@ export const RATING_SCALE_PRESETS: RatingScalePreset[] = [
   },
   {
     id: '1-3-simple',
-    title: '1–3 Simple (Numerical)',
-    description: 'Three-point scale: Low, Medium, High',
+    title: '1–3 Simple',
+    description: 'Numerical · Low(1), Medium(2), High(3)',
     ratingScale: {
       numerical: [
         { value: 1, label: 'Low', definition: 'Below acceptable quality' },
@@ -220,8 +220,8 @@ export const RATING_SCALE_PRESETS: RatingScalePreset[] = [
   },
   {
     id: 'pass-fail',
-    title: 'Pass / Fail (Categorical)',
-    description: 'Binary pass or fail assessment',
+    title: 'Pass / Fail',
+    description: 'Categorical · binary pass or fail assessment',
     ratingScale: {
       categorical: [
         { label: 'Pass', definition: 'Meets the evaluation criteria' },
@@ -231,8 +231,8 @@ export const RATING_SCALE_PRESETS: RatingScalePreset[] = [
   },
   {
     id: 'good-neutral-bad',
-    title: 'Good / Neutral / Bad (Categorical)',
-    description: 'Three-tier categorical assessment',
+    title: 'Good / Neutral / Bad',
+    description: 'Categorical · three-tier quality assessment',
     ratingScale: {
       categorical: [
         { label: 'Good', definition: 'Positive outcome, meets or exceeds criteria' },

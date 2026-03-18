@@ -8,15 +8,18 @@ import { Text, render } from 'ink';
 import React from 'react';
 
 function registerOnlineEvalSubcommand(parent: Command, action: 'pause' | 'resume') {
-  const description = action === 'pause' ? 'Pause a deployed online eval config' : 'Resume a paused online eval config';
+  const description =
+    action === 'pause'
+      ? 'Pause a deployed online eval config. Use --arn to target configs outside the project.'
+      : 'Resume a paused online eval config. Use --arn to target configs outside the project.';
   const pastTense = action === 'pause' ? 'Paused' : 'Resumed';
 
   parent
     .command('online-eval')
     .description(description)
-    .argument('[name]', 'Online eval config name (from project config)')
-    .option('--arn <arn>', 'Online eval config ARN (direct mode, bypasses project config)')
-    .option('--region <region>', 'AWS region (used with --arn)')
+    .argument('[name]', 'Config name from project (not needed with --arn)')
+    .option('--arn <arn>', 'Online eval config ARN — operate without a project directory')
+    .option('--region <region>', 'AWS region override (auto-detected from ARN otherwise)')
     .option('--json', 'Output as JSON')
     .action(async (name: string | undefined, cliOptions: { arn?: string; region?: string; json?: boolean }) => {
       if (!cliOptions.arn && !name) {

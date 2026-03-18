@@ -12,7 +12,11 @@ interface RunScreenProps {
 export function RunScreen({ onRunEval, onExit }: RunScreenProps) {
   const items: SelectableItem[] = useMemo(
     () => [
-      { id: 'run-eval', title: 'On-demand Evaluation', description: 'Evaluate agent traces with selected evaluators' },
+      {
+        id: 'run-eval',
+        title: 'On-demand Evaluation',
+        description: 'Evaluate agent traces with selected evaluators. CLI also supports --agent-arn.',
+      },
     ],
     []
   );

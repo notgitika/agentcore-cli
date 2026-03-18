@@ -37,12 +37,12 @@ export const registerRun = (program: Command) => {
 
   runCmd
     .command('eval')
-    .description('Run on-demand evaluation of agent traces')
-    .option('-a, --agent <name>', 'Agent to evaluate')
-    .option('--agent-arn <arn>', 'Agent runtime ARN (bypasses project config)')
-    .option('-e, --evaluator <names...>', 'Evaluator name(s) or Builtin.* IDs')
-    .option('--evaluator-arn <arns...>', 'Evaluator ARN(s) to use directly')
-    .option('--region <region>', 'AWS region (required with --agent-arn, inferred otherwise)')
+    .description('Run on-demand evaluation of agent traces. Use --agent-arn to evaluate agents outside the project.')
+    .option('-a, --agent <name>', 'Agent name from project config')
+    .option('--agent-arn <arn>', 'Agent runtime ARN — run outside a project directory')
+    .option('-e, --evaluator <names...>', 'Evaluator name(s) from project or Builtin.* IDs')
+    .option('--evaluator-arn <arns...>', 'Evaluator ARN(s) — use with --agent-arn for standalone mode')
+    .option('--region <region>', 'AWS region (required with --agent-arn, auto-detected otherwise)')
     .option('-s, --session-id <id>', 'Evaluate a specific session only')
     .option('-t, --trace-id <id>', 'Evaluate a specific trace only')
     .option('--days <days>', 'Lookback window in days', '7')

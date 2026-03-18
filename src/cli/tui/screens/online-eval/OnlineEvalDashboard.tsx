@@ -189,14 +189,18 @@ export function OnlineEvalDashboard({ onExit }: OnlineEvalDashboardProps) {
 
       {state.phase === 'loaded' && state.configs.length === 0 && (
         <Box flexDirection="column">
-          <Text dimColor>No online eval configs found.</Text>
+          <Text dimColor>No online eval configs found in this project.</Text>
           <Text dimColor>Run `agentcore add online-eval` then `agentcore deploy` to get started.</Text>
+          <Text dimColor>{'Tip: Use `agentcore pause online-eval --arn <ARN>` for configs outside the CLI.'}</Text>
         </Box>
       )}
 
       {state.phase === 'loaded' && state.configs.length > 0 && (
         <Panel fullWidth>
           <Box flexDirection="column">
+            <Box marginBottom={1}>
+              <Text dimColor>Note: Evaluation results may take 5–10 minutes to appear after agent invocations.</Text>
+            </Box>
             {state.configs.map((config, idx) => {
               const selected = idx === nav.selectedIndex;
               const isDeployed = Boolean(config.configId);
