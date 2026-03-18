@@ -1,7 +1,6 @@
 import { getCredentialProvider } from './account';
 import {
   BedrockAgentCoreControlClient,
-  DeleteOnlineEvaluationConfigCommand,
   GetAgentRuntimeCommand,
   GetEvaluatorCommand,
   GetOnlineEvaluationConfigCommand,
@@ -239,41 +238,5 @@ export async function getOnlineEvaluationConfig(
     description: response.description,
     failureReason: response.failureReason,
     outputLogGroupName: logGroupName,
-  };
-}
-
-// ============================================================================
-// Delete Online Eval Config
-// ============================================================================
-
-export interface DeleteOnlineEvalConfigOptions {
-  region: string;
-  onlineEvaluationConfigId: string;
-}
-
-export interface DeleteOnlineEvalConfigResult {
-  configId: string;
-  configArn: string;
-  status: string;
-}
-
-export async function deleteOnlineEvalConfig(
-  options: DeleteOnlineEvalConfigOptions
-): Promise<DeleteOnlineEvalConfigResult> {
-  const client = new BedrockAgentCoreControlClient({
-    region: options.region,
-    credentials: getCredentialProvider(),
-  });
-
-  const command = new DeleteOnlineEvaluationConfigCommand({
-    onlineEvaluationConfigId: options.onlineEvaluationConfigId,
-  });
-
-  const response = await client.send(command);
-
-  return {
-    configId: response.onlineEvaluationConfigId ?? options.onlineEvaluationConfigId,
-    configArn: response.onlineEvaluationConfigArn ?? '',
-    status: response.status ?? 'DELETING',
   };
 }

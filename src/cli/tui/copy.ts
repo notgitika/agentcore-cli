@@ -43,7 +43,6 @@ export const COMMAND_DESCRIPTIONS = {
   eval: 'Manage evaluations and view history.',
   pause: 'Pause a running resource.',
   resume: 'Resume a paused resource.',
-  stop: 'Stop and delete a running resource.',
   run: 'Run operations (eval, etc.).',
   update: 'Check for and install CLI updates',
   validate: 'Validate agentcore/ config files.',

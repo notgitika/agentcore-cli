@@ -7,7 +7,7 @@ import { registerHelp } from './commands/help';
 import { registerInvoke } from './commands/invoke';
 import { registerLogs } from './commands/logs';
 import { registerPackage } from './commands/package';
-import { registerPause, registerStop } from './commands/pause';
+import { registerPause } from './commands/pause';
 import { registerRemove } from './commands/remove';
 import { registerResume } from './commands/resume';
 import { registerRun } from './commands/run';
@@ -143,7 +143,6 @@ export function registerCommands(program: Command) {
   const removeCmd = registerRemove(program);
   registerResume(program);
   registerRun(program);
-  registerStop(program);
   registerStatus(program);
   registerTraces(program);
   registerUpdate(program);

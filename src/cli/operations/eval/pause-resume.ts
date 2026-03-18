@@ -1,5 +1,5 @@
 import type { OnlineEvalExecutionStatus } from '../../aws/agentcore-control';
-import { deleteOnlineEvalConfig, updateOnlineEvalExecutionStatus } from '../../aws/agentcore-control';
+import { updateOnlineEvalExecutionStatus } from '../../aws/agentcore-control';
 import { loadDeployedProjectConfig } from '../resolve-agent';
 import type { OnlineEvalActionOptions } from './types';
 
@@ -8,13 +8,6 @@ export interface PauseResumeResult {
   error?: string;
   configId?: string;
   executionStatus?: string;
-}
-
-export interface DeleteResult {
-  success: boolean;
-  error?: string;
-  configId?: string;
-  status?: string;
 }
 
 async function resolveOnlineEvalConfig(
@@ -111,28 +104,6 @@ export async function handlePauseResume(
       success: true,
       configId: result.configId,
       executionStatus: result.executionStatus,
-    };
-  } catch (err) {
-    return { success: false, error: (err as Error).message };
-  }
-}
-
-export async function handleDeleteOnlineEval(options: OnlineEvalActionOptions): Promise<DeleteResult> {
-  const resolution = await resolveConfig(options);
-  if (!resolution.success) {
-    return resolution;
-  }
-
-  try {
-    const result = await deleteOnlineEvalConfig({
-      region: resolution.region,
-      onlineEvaluationConfigId: resolution.configId,
-    });
-
-    return {
-      success: true,
-      configId: result.configId,
-      status: result.status,
     };
   } catch (err) {
     return { success: false, error: (err as Error).message };
