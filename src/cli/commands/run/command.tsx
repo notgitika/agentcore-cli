@@ -61,7 +61,10 @@ export const registerRun = (program: Command) => {
         output?: string;
         json?: boolean;
       }) => {
-        requireProject();
+        const isArnMode = !!(cliOptions.agentArn && cliOptions.evaluatorArn);
+        if (!isArnMode) {
+          requireProject();
+        }
 
         if (!cliOptions.evaluator && !cliOptions.evaluatorArn) {
           const error = 'At least one --evaluator or --evaluator-arn is required';
