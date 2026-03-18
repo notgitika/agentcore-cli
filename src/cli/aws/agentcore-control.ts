@@ -151,7 +151,6 @@ export interface UpdateOnlineEvalOptions {
   region: string;
   onlineEvaluationConfigId: string;
   executionStatus?: OnlineEvalExecutionStatus;
-  description?: string;
 }
 
 export interface UpdateOnlineEvalStatusResult {
@@ -181,7 +180,6 @@ export async function updateOnlineEvalConfig(options: UpdateOnlineEvalOptions): 
   const command = new UpdateOnlineEvaluationConfigCommand({
     onlineEvaluationConfigId: options.onlineEvaluationConfigId,
     ...(options.executionStatus && { executionStatus: options.executionStatus }),
-    ...(options.description !== undefined && { description: options.description }),
   });
 
   const response = await client.send(command);
