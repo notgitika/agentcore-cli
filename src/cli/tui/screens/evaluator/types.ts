@@ -43,6 +43,7 @@ export const EVALUATION_LEVEL_OPTIONS = [
   { id: 'TOOL_CALL', title: 'Tool Call', description: 'Evaluate individual tool calls' },
 ] as const;
 
+// Cross-region inference profile ID — works in all US regions where AgentCore is available
 export const DEFAULT_MODEL = 'us.anthropic.claude-sonnet-4-5-20250929-v1:0';
 
 export const CUSTOM_MODEL_ID = '__custom__';

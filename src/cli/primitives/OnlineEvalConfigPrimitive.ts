@@ -141,9 +141,10 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
                 process.exit(1);
               }
 
+              // Sampling rate as a percentage of requests to evaluate (0.01% to 100%)
               const samplingRate = parseFloat(cliOptions.samplingRate);
               if (isNaN(samplingRate) || samplingRate < 0.01 || samplingRate > 100) {
-                const error = `Invalid --sampling-rate "${cliOptions.samplingRate}". Must be a number between 0.01 and 100`;
+                const error = `Invalid --sampling-rate "${cliOptions.samplingRate}". Must be a percentage between 0.01 and 100`;
                 if (cliOptions.json) {
                   console.log(JSON.stringify({ success: false, error }));
                 } else {
