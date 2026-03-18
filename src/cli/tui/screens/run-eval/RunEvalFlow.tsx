@@ -137,6 +137,7 @@ export function RunEvalFlow({ onExit, onViewRuns }: RunEvalFlowProps) {
           evaluator: [],
           evaluatorArn: config.evaluators,
           days: config.days,
+          sessionIds: config.sessionIds.length > 0 ? config.sessionIds : undefined,
         });
 
         if (cancelled) return;

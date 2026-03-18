@@ -5,7 +5,7 @@ import { DEFAULT_ENDPOINT_NAME } from '../../constants';
 import type { DeployedProjectConfig } from '../resolve-agent';
 import { loadDeployedProjectConfig, resolveAgent } from '../resolve-agent';
 import { generateFilename, saveEvalRun } from './storage';
-import type { EvalEvaluatorResult, EvalRunResult, EvalSessionScore, RunEvalOptions } from './types';
+import type { EvalEvaluatorResult, EvalRunResult, EvalSessionScore, RunEvalOptions, SessionInfo } from './types';
 import { CloudWatchLogsClient, GetQueryResultsCommand, StartQueryCommand } from '@aws-sdk/client-cloudwatch-logs';
 import type { ResultField } from '@aws-sdk/client-cloudwatch-logs';
 import type { DocumentType } from '@smithy/types';
@@ -363,6 +363,51 @@ function sanitizeQueryValue(value: string): string {
   return value.replace(/'/g, '');
 }
 
+const MAX_DISCOVERED_SESSIONS = 50;
+
+export interface DiscoverSessionsOptions {
+  runtimeId: string;
+  region: string;
+  lookbackDays: number;
+}
+
+/**
+ * Lightweight session discovery — returns session IDs with span counts,
+ * without fetching full span data. Used by the TUI to let users pick sessions.
+ */
+export async function discoverSessions(opts: DiscoverSessionsOptions): Promise<SessionInfo[]> {
+  const endTimeMs = Date.now();
+  const startTimeMs = endTimeMs - opts.lookbackDays * 24 * 60 * 60 * 1000;
+  const startTimeSec = Math.floor(startTimeMs / 1000);
+  const endTimeSec = Math.floor(endTimeMs / 1000);
+
+  const client = new CloudWatchLogsClient({
+    credentials: getCredentialProvider(),
+    region: opts.region,
+  });
+
+  const query = `fields attributes.session.id as sessionId
+     | parse resource.attributes.cloud.resource_id "runtime/*/" as parsedAgentId
+     | filter parsedAgentId = '${sanitizeQueryValue(opts.runtimeId)}'
+     | stats count(*) as spanCount, min(@timestamp) as firstSeen by sessionId
+     | sort firstSeen desc
+     | limit ${MAX_DISCOVERED_SESSIONS}`;
+
+  const rows = await executeQuery(client, SPANS_LOG_GROUP, query, startTimeSec, endTimeSec);
+
+  const sessions: SessionInfo[] = [];
+  for (const row of rows) {
+    const sessionId = row.find(f => f.field === 'sessionId')?.value;
+    const spanCount = parseInt(row.find(f => f.field === 'spanCount')?.value ?? '0', 10);
+    const firstSeen = row.find(f => f.field === 'firstSeen')?.value ?? '';
+    if (sessionId && sessionId !== 'unknown') {
+      sessions.push({ sessionId, spanCount, firstSeen });
+    }
+  }
+
+  return sessions;
+}
+
 interface SessionSpans {
   sessionId: string;
   spans: DocumentType[];
@@ -526,7 +571,7 @@ export async function handleRunEval(options: RunEvalOptions): Promise<RunEvalRes
   const { ctx } = resolution;
 
   // Fetch spans grouped by session
-  const sessions = await fetchSessionSpans({
+  let sessions = await fetchSessionSpans({
     runtimeId: ctx.runtimeId,
     runtimeLogGroup: ctx.runtimeLogGroup,
     region: ctx.region,
@@ -534,6 +579,12 @@ export async function handleRunEval(options: RunEvalOptions): Promise<RunEvalRes
     sessionId: options.sessionId,
     traceId: options.traceId,
   });
+
+  // Filter to selected session IDs if provided (from TUI multi-select)
+  if (options.sessionIds && options.sessionIds.length > 0) {
+    const selected = new Set(options.sessionIds);
+    sessions = sessions.filter(s => selected.has(s.sessionId));
+  }
 
   if (sessions.length === 0) {
     return {

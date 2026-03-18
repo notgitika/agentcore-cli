@@ -31,6 +31,13 @@ export interface EvalRunResult {
   results: EvalEvaluatorResult[];
 }
 
+/** Lightweight session info returned by session discovery */
+export interface SessionInfo {
+  sessionId: string;
+  spanCount: number;
+  firstSeen: string;
+}
+
 /** Options for running an eval */
 export interface RunEvalOptions {
   /** Agent name (project mode) */
@@ -45,6 +52,8 @@ export interface RunEvalOptions {
   region?: string;
   /** Filter to a specific session */
   sessionId?: string;
+  /** Filter to specific session IDs (from TUI multi-select) */
+  sessionIds?: string[];
   /** Filter to a specific trace */
   traceId?: string;
   days: number;

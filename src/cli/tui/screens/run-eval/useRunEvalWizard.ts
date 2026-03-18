@@ -4,9 +4,9 @@ import { useCallback, useState } from 'react';
 
 function getAllSteps(agentCount: number): RunEvalStep[] {
   if (agentCount <= 1) {
-    return ['evaluators', 'days', 'confirm'];
+    return ['evaluators', 'days', 'sessions', 'confirm'];
   }
-  return ['agent', 'evaluators', 'days', 'confirm'];
+  return ['agent', 'evaluators', 'days', 'sessions', 'confirm'];
 }
 
 function getDefaultConfig(): RunEvalConfig {
@@ -14,6 +14,7 @@ function getDefaultConfig(): RunEvalConfig {
     agent: '',
     evaluators: [],
     days: DEFAULT_LOOKBACK_DAYS,
+    sessionIds: [],
   };
 }
 
@@ -64,6 +65,15 @@ export function useRunEvalWizard(agentCount: number) {
     [nextStep, setConfig, setStep]
   );
 
+  const setSessions = useCallback(
+    (sessionIds: string[]) => {
+      setConfig(c => ({ ...c, sessionIds }));
+      const next = nextStep('sessions');
+      if (next) setStep(next);
+    },
+    [nextStep, setConfig, setStep]
+  );
+
   const reset = useCallback(() => {
     setConfig(getDefaultConfig());
     setStep(allSteps[0]!);
@@ -78,6 +88,7 @@ export function useRunEvalWizard(agentCount: number) {
     setAgent,
     setEvaluators,
     setDays,
+    setSessions,
     reset,
   };
 }
