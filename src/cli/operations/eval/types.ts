@@ -59,14 +59,7 @@ export interface ListEvalRunsOptions {
   json?: boolean;
 }
 
-/** Options for getting a single eval run */
-export interface GetEvalRunOptions {
-  filename: string;
-  sessions?: boolean;
-  json?: boolean;
-}
-
-/** Options for pause/resume/delete online eval */
+/** Options for pause/resume online eval */
 export interface OnlineEvalActionOptions {
   name: string;
   /** Online eval config ARN (direct mode — bypasses project config) */

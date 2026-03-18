@@ -119,4 +119,60 @@ describe('handlePauseResume', () => {
     expect(result.success).toBe(false);
     expect(result.error).toBe('Service unavailable');
   });
+
+  describe('ARN mode', () => {
+    it('pauses using ARN without loading project config', async () => {
+      mockUpdateOnlineEvalExecutionStatus.mockResolvedValue({
+        configId: 'my-cfg-id',
+        executionStatus: 'DISABLED',
+        status: 'ACTIVE',
+      });
+
+      const arn = 'arn:aws:bedrock-agentcore:us-west-2:123456789012:online-evaluation-config/my-cfg-id';
+      const result = await handlePauseResume({ name: '', arn }, 'pause');
+
+      expect(result.success).toBe(true);
+      expect(result.executionStatus).toBe('DISABLED');
+      expect(mockLoadDeployedProjectConfig).not.toHaveBeenCalled();
+      expect(mockUpdateOnlineEvalExecutionStatus).toHaveBeenCalledWith({
+        region: 'us-west-2',
+        onlineEvaluationConfigId: 'my-cfg-id',
+        executionStatus: 'DISABLED',
+      });
+    });
+
+    it('resumes using ARN with region override', async () => {
+      mockUpdateOnlineEvalExecutionStatus.mockResolvedValue({
+        configId: 'my-cfg-id',
+        executionStatus: 'ENABLED',
+        status: 'ACTIVE',
+      });
+
+      const arn = 'arn:aws:bedrock-agentcore:us-west-2:123456789012:online-evaluation-config/my-cfg-id';
+      const result = await handlePauseResume({ name: '', arn, region: 'eu-west-1' }, 'resume');
+
+      expect(result.success).toBe(true);
+      expect(result.executionStatus).toBe('ENABLED');
+      expect(mockUpdateOnlineEvalExecutionStatus).toHaveBeenCalledWith({
+        region: 'eu-west-1',
+        onlineEvaluationConfigId: 'my-cfg-id',
+        executionStatus: 'ENABLED',
+      });
+    });
+
+    it('returns error for invalid ARN', async () => {
+      const result = await handlePauseResume({ name: '', arn: 'not-an-arn' }, 'pause');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Invalid online eval config ARN');
+    });
+
+    it('returns error when config ID cannot be extracted from ARN', async () => {
+      const arn = 'arn:aws:bedrock-agentcore:us-east-1:123456789012:some-other-resource/foo';
+      const result = await handlePauseResume({ name: '', arn }, 'pause');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Could not extract config ID');
+    });
+  });
 });
