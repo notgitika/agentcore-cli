@@ -53,7 +53,6 @@ Note: CDK L3 constructs are in a separate package `@aws/agentcore-cdk`.
 
 ## Primitives Architecture
 
-
 All resource types (agent, memory, identity, gateway, mcp-tool) are modeled as **primitives** -- self-contained classes
 in `src/cli/primitives/` that own the full add/remove lifecycle for their resource type.
 
