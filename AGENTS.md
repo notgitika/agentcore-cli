@@ -30,10 +30,14 @@ Note: CDK L3 constructs are in a separate package `@aws/agentcore-cdk`.
 - `status` - Check deployment status
 - `dev` - Local development server (CodeZip: uvicorn with hot-reload; Container: Docker build + run with volume mount)
 - `invoke` - Invoke agents (local or deployed)
-- `run eval` - Run on-demand evaluation against agent sessions
-- `eval history` - View past eval run results
+- `run evals` - Run on-demand evaluation against agent sessions
+- `evals history` - View past eval run results
 - `pause online-eval` - Pause (disable) a deployed online eval config
 - `resume online-eval` - Resume (enable) a paused online eval config
+- `logs` - Stream or search agent runtime logs
+- `logs evals` - Stream or search online eval logs
+- `traces list` - List recent traces for a deployed agent
+- `traces get` - Download a trace to a JSON file
 - `package` - Package agent artifacts without deploying (zip for CodeZip, container image build for Container)
 - `validate` - Validate configuration files
 - `update` - Check for CLI updates
@@ -53,8 +57,8 @@ Note: CDK L3 constructs are in a separate package `@aws/agentcore-cdk`.
 
 ## Primitives Architecture
 
-All resource types (agent, memory, identity, gateway, mcp-tool) are modeled as **primitives** -- self-contained classes
-in `src/cli/primitives/` that own the full add/remove lifecycle for their resource type.
+All resource types (agent, memory, identity, evaluator, online-eval, gateway, mcp-tool) are modeled as **primitives** --
+self-contained classes in `src/cli/primitives/` that own the full add/remove lifecycle for their resource type.
 
 Each primitive extends `BasePrimitive` and implements: `add()`, `remove()`, `previewRemove()`, `getRemovable()`,
 `registerCommands()`, and `addScreen()`.
