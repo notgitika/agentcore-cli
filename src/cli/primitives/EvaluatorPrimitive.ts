@@ -3,6 +3,12 @@ import type { EvaluationLevel, Evaluator, EvaluatorConfig } from '../../schema';
 import { EvaluationLevelSchema, EvaluatorSchema } from '../../schema';
 import { getErrorMessage } from '../errors';
 import type { RemovalPreview, RemovalResult, SchemaChange } from '../operations/remove/types';
+import {
+  LEVEL_PLACEHOLDERS,
+  RATING_SCALE_PRESETS,
+  parseCustomRatingScale,
+  validateInstructionPlaceholders,
+} from '../tui/screens/evaluator/types';
 import { BasePrimitive } from './BasePrimitive';
 import type { AddResult, AddScreenComponent, RemovableResource } from './types';
 import type { Command } from '@commander-js/extra-typings';
@@ -113,14 +119,23 @@ export class EvaluatorPrimitive extends BasePrimitive<AddEvaluatorOptions, Remov
   }
 
   registerCommands(addCmd: Command, removeCmd: Command): void {
+    const presetIds = RATING_SCALE_PRESETS.map(p => p.id);
+
     addCmd
       .command(this.kind)
       .description('Add a custom evaluator to the project')
       .option('--name <name>', 'Evaluator name')
       .option('--level <level>', 'Evaluation level: SESSION, TRACE, TOOL_CALL')
       .option('--model <model>', 'Bedrock model ID for LLM-as-a-Judge')
-      .option('--instructions <text>', 'Evaluation prompt instructions')
-      .option('--config <path>', 'Path to evaluator config JSON file (overrides --model, --instructions)')
+      .option(
+        '--instructions <text>',
+        'Evaluation prompt instructions (must include level-appropriate placeholders, e.g. {context})'
+      )
+      .option('--rating-scale <preset>', `Rating scale preset: ${presetIds.join(', ')} (default: 1-5-quality)`)
+      .option(
+        '--config <path>',
+        'Path to evaluator config JSON file (overrides --model, --instructions, --rating-scale)'
+      )
       .option('--json', 'Output as JSON')
       .action(
         async (cliOptions: {
@@ -128,6 +143,7 @@ export class EvaluatorPrimitive extends BasePrimitive<AddEvaluatorOptions, Remov
           level?: string;
           model?: string;
           instructions?: string;
+          ratingScale?: string;
           config?: string;
           json?: boolean;
         }) => {
@@ -138,35 +154,26 @@ export class EvaluatorPrimitive extends BasePrimitive<AddEvaluatorOptions, Remov
             }
 
             if (cliOptions.name || cliOptions.json) {
-              if (!cliOptions.name || !cliOptions.level) {
-                const error = '--name and --level are required in non-interactive mode';
+              const fail = (error: string) => {
                 if (cliOptions.json) {
                   console.log(JSON.stringify({ success: false, error }));
                 } else {
                   console.error(error);
                 }
                 process.exit(1);
+              };
+
+              if (!cliOptions.name || !cliOptions.level) {
+                fail('--name and --level are required in non-interactive mode');
               }
 
               if (!cliOptions.config && !cliOptions.model) {
-                const error = 'Either --config or --model is required';
-                if (cliOptions.json) {
-                  console.log(JSON.stringify({ success: false, error }));
-                } else {
-                  console.error(error);
-                }
-                process.exit(1);
+                fail('Either --config or --model is required');
               }
 
               const levelResult = EvaluationLevelSchema.safeParse(cliOptions.level);
               if (!levelResult.success) {
-                const error = `Invalid --level "${cliOptions.level}". Must be one of: SESSION, TRACE, TOOL_CALL`;
-                if (cliOptions.json) {
-                  console.log(JSON.stringify({ success: false, error }));
-                } else {
-                  console.error(error);
-                }
-                process.exit(1);
+                fail(`Invalid --level "${cliOptions.level}". Must be one of: SESSION, TRACE, TOOL_CALL`);
               }
 
               let configJson: EvaluatorConfig;
@@ -174,26 +181,55 @@ export class EvaluatorPrimitive extends BasePrimitive<AddEvaluatorOptions, Remov
                 const { readFileSync } = await import('fs');
                 configJson = JSON.parse(readFileSync(cliOptions.config, 'utf-8')) as EvaluatorConfig;
               } else {
+                // --instructions is required when not using --config
+                if (!cliOptions.instructions) {
+                  const level = levelResult.data!;
+                  const placeholders = LEVEL_PLACEHOLDERS[level].map(p => `{${p}}`).join(', ');
+                  fail(
+                    `--instructions is required in non-interactive mode (or use --config). ` +
+                      `Must include at least one placeholder for ${level}: ${placeholders}`
+                  );
+                }
+
+                // Validate placeholders
+                const placeholderCheck = validateInstructionPlaceholders(cliOptions.instructions!, levelResult.data!);
+                if (placeholderCheck !== true) {
+                  fail(placeholderCheck);
+                }
+
+                // Resolve rating scale
+                let ratingScale: EvaluatorConfig['llmAsAJudge']['ratingScale'];
+                const scaleInput = cliOptions.ratingScale ?? '1-5-quality';
+
+                const preset = RATING_SCALE_PRESETS.find(p => p.id === scaleInput);
+                if (preset) {
+                  ratingScale = preset.ratingScale;
+                } else {
+                  // Try parsing as custom format: "1:Poor:Fails, 2:Fair:Partially meets" or "Pass:Meets, Fail:Does not"
+                  const isNumerical = /^\d/.test(scaleInput.trim());
+                  const parsed = parseCustomRatingScale(scaleInput, isNumerical ? 'numerical' : 'categorical');
+                  if (!parsed.success) {
+                    fail(
+                      `Invalid --rating-scale "${scaleInput}". Use a preset (${presetIds.join(', ')}) ` +
+                        `or custom format: "1:Label:Definition, 2:Label:Definition" (numerical) ` +
+                        `or "Label:Definition, Label:Definition" (categorical)`
+                    );
+                  }
+                  ratingScale = parsed.success ? parsed.ratingScale : undefined!;
+                }
+
                 configJson = {
                   llmAsAJudge: {
                     model: cliOptions.model!,
-                    instructions: cliOptions.instructions ?? `Evaluate the quality. Context: {context}`,
-                    ratingScale: {
-                      numerical: [
-                        { value: 1, label: 'Poor', definition: 'Fails to meet expectations' },
-                        { value: 2, label: 'Fair', definition: 'Partially meets expectations' },
-                        { value: 3, label: 'Good', definition: 'Meets expectations' },
-                        { value: 4, label: 'Very Good', definition: 'Exceeds expectations' },
-                        { value: 5, label: 'Excellent', definition: 'Far exceeds expectations' },
-                      ],
-                    },
+                    instructions: cliOptions.instructions!,
+                    ratingScale,
                   },
                 };
               }
 
               const result = await this.add({
-                name: cliOptions.name,
-                level: levelResult.data,
+                name: cliOptions.name!,
+                level: levelResult.data!,
                 config: configJson,
               });
 
