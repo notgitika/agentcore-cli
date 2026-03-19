@@ -308,6 +308,51 @@ agentcore add identity \
 | `--scopes <scopes>`        | OAuth scopes, comma-separated    |
 | `--json`                   | JSON output                      |
 
+### add evaluator
+
+Add a custom LLM-as-a-Judge evaluator. See [Evaluations](evals.md) for full details.
+
+```bash
+agentcore add evaluator \
+  --name ResponseQuality \
+  --level SESSION \
+  --model us.anthropic.claude-sonnet-4-5-20250929-v1:0 \
+  --instructions "Evaluate the response quality. Context: {context}" \
+  --rating-scale 1-5-quality
+```
+
+| Flag                      | Description                                                                |
+| ------------------------- | -------------------------------------------------------------------------- |
+| `--name <name>`           | Evaluator name                                                             |
+| `--level <level>`         | `SESSION`, `TRACE`, or `TOOL_CALL`                                         |
+| `--model <model>`         | Bedrock model ID for the LLM judge                                         |
+| `--instructions <text>`   | Evaluation prompt with placeholders (e.g. `{context}`)                     |
+| `--rating-scale <preset>` | `1-5-quality`, `1-3-simple`, `pass-fail`, `good-neutral-bad`, or custom    |
+| `--config <path>`         | Config JSON file (overrides `--model`, `--instructions`, `--rating-scale`) |
+| `--json`                  | JSON output                                                                |
+
+### add online-eval
+
+Add an online eval config for continuous agent monitoring.
+
+```bash
+agentcore add online-eval \
+  --name QualityMonitor \
+  --agent MyAgent \
+  --evaluator ResponseQuality Builtin.Faithfulness \
+  --sampling-rate 10
+```
+
+| Flag                         | Description                                   |
+| ---------------------------- | --------------------------------------------- |
+| `--name <name>`              | Config name                                   |
+| `-a, --agent <name>`         | Agent to monitor                              |
+| `-e, --evaluator <names...>` | Evaluator name(s), `Builtin.*` IDs, or ARNs   |
+| `--evaluator-arn <arns...>`  | Evaluator ARN(s)                              |
+| `--sampling-rate <rate>`     | Percentage of requests to evaluate (0.01–100) |
+| `--enable-on-create`         | Enable immediately after deploy               |
+| `--json`                     | JSON output                                   |
+
 ### remove
 
 Remove resources from project.
@@ -316,6 +361,8 @@ Remove resources from project.
 agentcore remove agent --name MyAgent --force
 agentcore remove memory --name SharedMemory
 agentcore remove identity --name OpenAI
+agentcore remove evaluator --name ResponseQuality
+agentcore remove online-eval --name QualityMonitor
 agentcore remove gateway --name MyGateway
 agentcore remove gateway-target --name WeatherTools
 
@@ -375,6 +422,105 @@ agentcore invoke --json                   # JSON output
 | `--new-session`     | Start fresh session       |
 | `--stream`          | Stream response           |
 | `--json`            | JSON output               |
+
+---
+
+## Evaluations
+
+See [Evaluations](evals.md) for the full guide on evaluators, scoring, and online monitoring.
+
+### run evals
+
+Run on-demand evaluation against historical agent traces.
+
+```bash
+# Project mode
+agentcore run evals --agent MyAgent --evaluator ResponseQuality --days 7
+
+# Standalone mode (no project required)
+agentcore run evals \
+  --agent-arn arn:aws:...:runtime/abc123 \
+  --evaluator-arn arn:aws:...:evaluator/eval123 \
+  --region us-east-1
+```
+
+| Flag                         | Description                               |
+| ---------------------------- | ----------------------------------------- |
+| `-a, --agent <name>`         | Agent name from project                   |
+| `--agent-arn <arn>`          | Agent runtime ARN (standalone mode)       |
+| `-e, --evaluator <names...>` | Evaluator name(s) or `Builtin.*` IDs      |
+| `--evaluator-arn <arns...>`  | Evaluator ARN(s) (use with `--agent-arn`) |
+| `--region <region>`          | AWS region (required with `--agent-arn`)  |
+| `-s, --session-id <id>`      | Evaluate a specific session               |
+| `-t, --trace-id <id>`        | Evaluate a specific trace                 |
+| `--days <days>`              | Lookback window in days (default: 7)      |
+| `--output <path>`            | Custom output file path                   |
+| `--json`                     | JSON output                               |
+
+### evals history
+
+View past on-demand eval run results.
+
+```bash
+agentcore evals history
+agentcore evals history --agent MyAgent --limit 5 --json
+```
+
+| Flag                  | Description          |
+| --------------------- | -------------------- |
+| `-a, --agent <name>`  | Filter by agent name |
+| `-n, --limit <count>` | Max runs to display  |
+| `--json`              | JSON output          |
+
+### pause online-eval
+
+Pause a deployed online eval config.
+
+```bash
+agentcore pause online-eval QualityMonitor
+agentcore pause online-eval --arn arn:aws:...:online-eval-config/abc123
+```
+
+| Flag                | Description                                        |
+| ------------------- | -------------------------------------------------- |
+| `[name]`            | Config name from project (not needed with `--arn`) |
+| `--arn <arn>`       | Online eval config ARN (standalone mode)           |
+| `--region <region>` | AWS region override                                |
+| `--json`            | JSON output                                        |
+
+### resume online-eval
+
+Resume a paused online eval config.
+
+```bash
+agentcore resume online-eval QualityMonitor
+agentcore resume online-eval --arn arn:aws:...:online-eval-config/abc123
+```
+
+| Flag                | Description                                        |
+| ------------------- | -------------------------------------------------- |
+| `[name]`            | Config name from project (not needed with `--arn`) |
+| `--arn <arn>`       | Online eval config ARN (standalone mode)           |
+| `--region <region>` | AWS region override                                |
+| `--json`            | JSON output                                        |
+
+### logs evals
+
+Stream or search online eval logs.
+
+```bash
+agentcore logs evals --agent MyAgent --since 1h
+agentcore logs evals --follow --json
+```
+
+| Flag                  | Description                                   |
+| --------------------- | --------------------------------------------- |
+| `-a, --agent <name>`  | Filter by agent                               |
+| `--since <time>`      | Start time (e.g. `1h`, `30m`, `2d`, ISO 8601) |
+| `--until <time>`      | End time                                      |
+| `-n, --lines <count>` | Maximum log lines                             |
+| `-f, --follow`        | Stream in real-time                           |
+| `--json`              | JSON Lines output                             |
 
 ---
 
