@@ -254,6 +254,8 @@ describe('getDevConfig', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     const config = getDevConfig(workingDir, project, '/test/project/agentcore');
@@ -278,6 +280,8 @@ describe('getDevConfig', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     const config = getDevConfig(workingDir, project, '/test/project/agentcore');
@@ -302,6 +306,8 @@ describe('getDevConfig', () => {
       ],
       memories: [],
       credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
     };
 
     const config = getDevConfig(workingDir, project, '/test/project/agentcore');
