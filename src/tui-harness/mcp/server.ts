@@ -1,0 +1,538 @@
+/**
+ * MCP server for the TUI harness.
+ *
+ * Creates and configures an MCP Server instance that exposes seven tools for
+ * interacting with TUI applications through headless pseudo-terminals:
+ *
+ *   tui_launch        - Spawn a TUI process in a PTY
+ *   tui_send_keys     - Send keystrokes (text or special keys)
+ *   tui_read_screen   - Read the current terminal screen
+ *   tui_wait_for      - Wait for a pattern to appear on screen
+ *   tui_screenshot    - Capture a bordered, numbered screenshot
+ *   tui_close         - Close a session and terminate its process
+ *   tui_list_sessions - List all active sessions
+ *
+ * Tool schemas are defined inline as Zod raw shapes and registered via
+ * McpServer.registerTool(). This module owns the runtime dispatch logic that
+ * maps tool calls to TuiSession methods.
+ */
+import { LaunchError, TuiSession, WaitForTimeoutError, closeAll } from '../index.js';
+import type { SpecialKey } from '../index.js';
+import { LAUNCH_DEFAULTS, SPECIAL_KEY_ENUM, TOOL_NAMES } from './tools.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** Maximum number of concurrent TUI sessions the server will manage. */
+const MAX_SESSIONS = 10;
+
+// ---------------------------------------------------------------------------
+// Internal state
+// ---------------------------------------------------------------------------
+
+/** Active TUI sessions keyed by session ID. */
+const sessions = new Map<string, TuiSession>();
+
+// ---------------------------------------------------------------------------
+// Response helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Build an MCP error response with the `isError` flag set.
+ *
+ * @param message - Human-readable error description.
+ */
+function errorResponse(message: string) {
+  return {
+    content: [{ type: 'text' as const, text: message }],
+    isError: true,
+  };
+}
+
+/**
+ * Build a successful MCP response containing a JSON-serialized payload.
+ *
+ * @param data - Arbitrary data to serialize as JSON.
+ */
+function jsonResponse(data: unknown) {
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Session lookup
+// ---------------------------------------------------------------------------
+
+/**
+ * Look up a session by ID.
+ *
+ * Returns the session or `undefined` if no session with that ID exists.
+ */
+function getSession(sessionId: string): TuiSession | undefined {
+  return sessions.get(sessionId);
+}
+
+// ---------------------------------------------------------------------------
+// Tool handlers
+// ---------------------------------------------------------------------------
+
+/**
+ * Handle the `tui_launch` tool call.
+ *
+ * Spawns a new TUI session in a pseudo-terminal and returns its initial screen
+ * state along with session metadata.
+ */
+async function handleLaunch(args: {
+  command?: string;
+  args?: string[];
+  cwd?: string;
+  cols?: number;
+  rows?: number;
+  env?: Record<string, string>;
+}) {
+  if (sessions.size >= MAX_SESSIONS) {
+    return errorResponse(
+      `Maximum number of concurrent sessions (${MAX_SESSIONS}) reached. ` +
+        'Close an existing session before launching a new one.'
+    );
+  }
+
+  const command = args.command ?? LAUNCH_DEFAULTS.command;
+  const commandArgs = args.args ?? [...LAUNCH_DEFAULTS.args];
+
+  try {
+    const session = await TuiSession.launch({
+      command,
+      args: commandArgs,
+      cwd: args.cwd,
+      cols: args.cols,
+      rows: args.rows,
+      env: args.env,
+    });
+
+    sessions.set(session.sessionId, session);
+
+    const screen = session.readScreen();
+    const { sessionId } = session;
+    const { pid, dimensions } = session.info;
+
+    return jsonResponse({ sessionId, pid, dimensions, screen });
+  } catch (err) {
+    if (err instanceof LaunchError) {
+      return errorResponse(
+        `Launch failed: ${err.message}\n` +
+          `Command: ${err.command} ${err.args.join(' ')}\n` +
+          `CWD: ${err.cwd}\n` +
+          `Exit code: ${err.exitCode}`
+      );
+    }
+    throw err;
+  }
+}
+
+/**
+ * Handle the `tui_send_keys` tool call.
+ *
+ * Sends raw text or a named special key to the session's PTY and returns the
+ * screen state after output settles.
+ */
+async function handleSendKeys(args: { sessionId: string; keys?: string; specialKey?: SpecialKey; waitMs?: number }) {
+  const { sessionId } = args;
+  const session = getSession(sessionId);
+  if (!session) {
+    return errorResponse(`Session not found: ${sessionId}`);
+  }
+
+  const { keys, specialKey, waitMs } = args;
+
+  if (!keys && !specialKey) {
+    return errorResponse('Either keys or specialKey must be provided.');
+  }
+
+  try {
+    let screen;
+    if (keys !== undefined) {
+      screen = await session.sendKeys(keys, waitMs);
+    }
+    if (specialKey !== undefined) {
+      screen = await session.sendSpecialKey(specialKey, waitMs);
+    }
+    return jsonResponse({ screen });
+  } catch (err) {
+    return errorResponse(
+      `Failed to send keys to session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+}
+
+/**
+ * Handle the `tui_read_screen` tool call.
+ *
+ * Reads the current terminal screen state. This is a safe, read-only operation.
+ */
+function handleReadScreen(args: { sessionId: string; includeScrollback?: boolean; numbered?: boolean }) {
+  const { sessionId } = args;
+  const session = getSession(sessionId);
+  if (!session) {
+    return errorResponse(`Session not found: ${sessionId}`);
+  }
+
+  try {
+    const screen = session.readScreen({
+      includeScrollback: args.includeScrollback,
+      numbered: args.numbered,
+    });
+
+    return jsonResponse({ screen });
+  } catch (err) {
+    return errorResponse(
+      `Failed to read screen for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+}
+
+/**
+ * Handle the `tui_wait_for` tool call.
+ *
+ * Waits for a text or regex pattern to appear on the terminal screen. A timeout
+ * is NOT treated as an error -- it is an expected outcome that returns
+ * `{ found: false }` so the agent can decide what to do next.
+ */
+async function handleWaitFor(args: { sessionId: string; pattern: string; timeoutMs?: number; isRegex?: boolean }) {
+  const { sessionId } = args;
+  const session = getSession(sessionId);
+  if (!session) {
+    return errorResponse(`Session not found: ${sessionId}`);
+  }
+
+  const { isRegex, timeoutMs } = args;
+  const patternStr = args.pattern;
+
+  let pattern: string | RegExp;
+  if (isRegex) {
+    try {
+      pattern = new RegExp(patternStr);
+    } catch (err) {
+      return errorResponse(
+        `Invalid regex pattern "${patternStr}": ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  } else {
+    pattern = patternStr;
+  }
+
+  const start = Date.now();
+
+  try {
+    const screen = await session.waitFor(pattern, timeoutMs);
+    const elapsed = Date.now() - start;
+    return jsonResponse({ found: true, elapsed, screen });
+  } catch (err) {
+    if (err instanceof WaitForTimeoutError) {
+      return jsonResponse({
+        found: false,
+        elapsed: err.elapsed,
+        screen: err.screen,
+      });
+    }
+    return errorResponse(
+      `Error waiting for pattern in session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+}
+
+/**
+ * Handle the `tui_screenshot` tool call.
+ *
+ * Captures the current screen with line numbers and renders it inside a
+ * Unicode-bordered box for easy visual inspection.
+ */
+function handleScreenshot(args: { sessionId: string }) {
+  const { sessionId } = args;
+  const session = getSession(sessionId);
+  if (!session) {
+    return errorResponse(`Session not found: ${sessionId}`);
+  }
+
+  try {
+    const screen = session.readScreen({ numbered: true });
+    const { dimensions, cursor, bufferType } = screen;
+
+    // Build the bordered screenshot.
+    const header = `TUI Screenshot (${dimensions.cols}x${dimensions.rows})`;
+    const topBorder = `\u250C\u2500 ${header} ${'\u2500'.repeat(Math.max(0, dimensions.cols - header.length - 4))}\u2510`;
+    const bottomBorder = `\u2514${'\u2500'.repeat(Math.max(0, dimensions.cols + 2))}\u2518`;
+
+    const body = screen.lines.map(line => ` ${line}`).join('\n');
+
+    const screenshot = `${topBorder}\n${body}\n${bottomBorder}`;
+
+    return jsonResponse({
+      screenshot,
+      metadata: {
+        cursor,
+        dimensions,
+        bufferType,
+        timestamp: new Date().toISOString(),
+      },
+    });
+  } catch (err) {
+    return errorResponse(
+      `Failed to capture screenshot for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+}
+
+/**
+ * Handle the `tui_close` tool call.
+ *
+ * Closes a TUI session, terminates the PTY process, and removes the session
+ * from the active sessions map.
+ */
+async function handleClose(args: { sessionId: string; signal?: string }) {
+  const { sessionId } = args;
+  const session = getSession(sessionId);
+  if (!session) {
+    return errorResponse(`Session not found: ${sessionId}`);
+  }
+
+  try {
+    const { signal } = args;
+    const result = await session.close(signal);
+    sessions.delete(sessionId);
+
+    return jsonResponse({
+      exitCode: result.exitCode,
+      signal: result.signal,
+      finalScreen: result.finalScreen,
+    });
+  } catch (err) {
+    // Even if close throws, remove the session from the map to avoid leaks.
+    sessions.delete(sessionId);
+    return errorResponse(`Error closing session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * Handle the `tui_list_sessions` tool call.
+ *
+ * Returns metadata for all active sessions.
+ */
+function handleListSessions() {
+  const sessionList = Array.from(sessions.values()).map(session => session.info);
+  return jsonResponse({ sessions: sessionList });
+}
+
+// ---------------------------------------------------------------------------
+// Server factory
+// ---------------------------------------------------------------------------
+
+/**
+ * Create and configure an MCP Server instance with all TUI harness tools
+ * registered.
+ *
+ * The returned server is fully configured but not yet connected to a transport.
+ * Call `server.connect(transport)` to start serving requests.
+ *
+ * @returns A configured McpServer instance.
+ */
+export function createServer(): McpServer {
+  const server = new McpServer({ name: 'tui-harness', version: '1.0.0' });
+
+  // --- tui_launch ---
+  server.registerTool(
+    TOOL_NAMES.LAUNCH,
+    {
+      description:
+        'Launch a TUI application in a pseudo-terminal. Returns session ID and initial screen state. ' +
+        'Defaults to launching AgentCore CLI if no command is specified.',
+      inputSchema: {
+        command: z
+          .string()
+          .optional()
+          .describe('The executable to spawn (e.g. "vim", "htop", "agentcore"). Defaults to "node".'),
+        args: z
+          .array(z.string())
+          .optional()
+          .describe('Arguments passed to the command. Defaults to ["dist/cli/index.mjs"] (AgentCore CLI).'),
+        cwd: z.string().optional().describe('Working directory for the spawned process.'),
+        cols: z.number().int().min(40).max(300).optional().describe('Terminal width in columns (default: 100).'),
+        rows: z.number().int().min(10).max(100).optional().describe('Terminal height in rows (default: 30).'),
+        env: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe('Additional environment variables merged with the default environment.'),
+      },
+    },
+    async args => {
+      return await handleLaunch(args);
+    }
+  );
+
+  // --- tui_send_keys ---
+  server.registerTool(
+    TOOL_NAMES.SEND_KEYS,
+    {
+      description: 'Send keystrokes to a TUI session. Returns updated screen state after rendering settles.',
+      inputSchema: {
+        sessionId: z.string().describe('The session ID returned by tui_launch.'),
+        keys: z
+          .string()
+          .optional()
+          .describe('Raw text to type into the terminal. For special keys, use the specialKey parameter instead.'),
+        specialKey: z
+          .enum(SPECIAL_KEY_ENUM)
+          .optional()
+          .describe('A named special key to send (e.g. "enter", "tab", "ctrl+c", "f1"). Mutually usable with keys.'),
+        waitMs: z
+          .number()
+          .int()
+          .min(0)
+          .max(10000)
+          .optional()
+          .describe('Milliseconds to wait for the screen to settle after sending keys (default: 300).'),
+      },
+    },
+    async args => {
+      return await handleSendKeys(args);
+    }
+  );
+
+  // --- tui_read_screen ---
+  server.registerTool(
+    TOOL_NAMES.READ_SCREEN,
+    {
+      description: 'Read the current terminal screen state. Safe read-only operation.',
+      inputSchema: {
+        sessionId: z.string().describe('The session ID returned by tui_launch.'),
+        includeScrollback: z
+          .boolean()
+          .optional()
+          .describe('When true, include lines above the visible viewport (scrollback history).'),
+        numbered: z.boolean().optional().describe('When true, prefix each line with its 1-indexed line number.'),
+      },
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    args => {
+      return handleReadScreen(args);
+    }
+  );
+
+  // --- tui_wait_for ---
+  server.registerTool(
+    TOOL_NAMES.WAIT_FOR,
+    {
+      description:
+        'Wait for a text pattern to appear on the terminal screen. Useful for synchronizing with async TUI operations.',
+      inputSchema: {
+        sessionId: z.string().describe('The session ID returned by tui_launch.'),
+        pattern: z
+          .string()
+          .describe(
+            'The text or regex pattern to search for on screen. Interpreted as a plain substring unless isRegex is true.'
+          ),
+        timeoutMs: z
+          .number()
+          .int()
+          .min(100)
+          .max(30000)
+          .optional()
+          .describe('Maximum time in milliseconds to wait for the pattern to appear (default: 5000).'),
+        isRegex: z.boolean().optional().describe('When true, interpret the pattern as a regular expression.'),
+      },
+    },
+    async args => {
+      return await handleWaitFor(args);
+    }
+  );
+
+  // --- tui_screenshot ---
+  server.registerTool(
+    TOOL_NAMES.SCREENSHOT,
+    {
+      description: 'Capture a formatted screenshot of the terminal with line numbers and borders for debugging.',
+      inputSchema: {
+        sessionId: z.string().describe('The session ID returned by tui_launch.'),
+      },
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    args => {
+      return handleScreenshot(args);
+    }
+  );
+
+  // --- tui_close ---
+  server.registerTool(
+    TOOL_NAMES.CLOSE,
+    {
+      description: 'Close a TUI session and terminate the process.',
+      inputSchema: {
+        sessionId: z.string().describe('The session ID returned by tui_launch.'),
+        signal: z
+          .enum(['SIGTERM', 'SIGKILL', 'SIGHUP'])
+          .optional()
+          .describe('The signal to send to the process (default: SIGTERM).'),
+      },
+      annotations: {
+        destructiveHint: true,
+      },
+    },
+    async args => {
+      return await handleClose(args);
+    }
+  );
+
+  // --- tui_list_sessions ---
+  server.registerTool(
+    TOOL_NAMES.LIST_SESSIONS,
+    {
+      description: 'List all active TUI sessions.',
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    () => {
+      return handleListSessions();
+    }
+  );
+
+  return server;
+}
+
+// ---------------------------------------------------------------------------
+// Cleanup
+// ---------------------------------------------------------------------------
+
+/**
+ * Close all active sessions managed by this server and clear the session map.
+ *
+ * Also calls the session-manager's `closeAll()` to ensure sessions registered
+ * at the harness level are cleaned up as well.
+ */
+export async function closeAllSessions(): Promise<void> {
+  // Close each session in the local map.
+  const closePromises = Array.from(sessions.values()).map(async session => {
+    try {
+      await session.close();
+    } catch {
+      // Best-effort cleanup -- swallow errors from dead or already-closed sessions.
+    }
+  });
+
+  await Promise.allSettled(closePromises);
+  sessions.clear();
+
+  // Also close any sessions tracked by the harness-level session manager.
+  await closeAll();
+}

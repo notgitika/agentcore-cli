@@ -40,7 +40,8 @@
   },
   "files": [
     "dist",
-    "scripts"
+    "scripts",
+    "!dist/mcp-harness"
   ],
   "scripts": {
     "preinstall": "node scripts/check-old-cli.mjs",
@@ -48,6 +49,7 @@
     "build:lib": "tsc -p tsconfig.build.json",
     "build:cli": "node esbuild.config.mjs",
     "build:assets": "node scripts/copy-assets.mjs",
+    "build:harness": "BUILD_HARNESS=1 node esbuild.config.mjs",
     "cli": "npx tsx src/cli/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
@@ -64,7 +66,8 @@
     "test:integ": "vitest run --project integ",
     "test:unit": "vitest run --project unit --coverage",
     "test:e2e": "vitest run --project e2e",
-    "test:update-snapshots": "vitest run --project unit --update"
+    "test:update-snapshots": "vitest run --project unit --update",
+    "test:tui": "npm run build:harness && vitest run --project tui"
   },
   "dependencies": {
     "@aws-cdk/toolkit-lib": "^1.16.0",
@@ -96,6 +99,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
+    "@modelcontextprotocol/sdk": "^1.0.0",
     "@secretlint/secretlint-rule-preset-recommend": "^11.3.0",
     "@trivago/prettier-plugin-sort-imports": "^6.0.2",
     "@types/node": "^25.0.3",
@@ -103,6 +107,7 @@
     "@typescript-eslint/eslint-plugin": "^8.50.0",
     "@typescript-eslint/parser": "^8.50.0",
     "@vitest/coverage-v8": "^4.0.18",
+    "@xterm/headless": "^6.0.0",
     "aws-cdk-lib": "^2.240.0",
     "constructs": "^10.4.4",
     "esbuild": "^0.27.2",
@@ -117,6 +122,7 @@
     "husky": "^9.1.7",
     "ink-testing-library": "^4.0.0",
     "lint-staged": "^16.2.7",
+    "node-pty": "^1.1.0",
     "prettier": "^3.7.4",
     "secretlint": "^11.3.0",
     "tsx": "^4.21.0",

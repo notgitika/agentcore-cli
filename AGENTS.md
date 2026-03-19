@@ -53,8 +53,9 @@ Note: CDK L3 constructs are in a separate package `@aws/agentcore-cdk`.
 
 ## Primitives Architecture
 
-All resource types (agent, memory, identity, evaluator, online-eval, gateway, mcp-tool) are modeled as **primitives** —
-self-contained classes in `src/cli/primitives/` that own the full add/remove lifecycle for their resource type.
+
+All resource types (agent, memory, identity, gateway, mcp-tool) are modeled as **primitives** -- self-contained classes
+in `src/cli/primitives/` that own the full add/remove lifecycle for their resource type.
 
 Each primitive extends `BasePrimitive` and implements: `add()`, `remove()`, `previewRemove()`, `getRemovable()`,
 `registerCommands()`, and `addScreen()`.
@@ -123,3 +124,8 @@ See `docs/TESTING.md` for details.
 
 - Always look for existing types before creating a new type inline.
 - Re-usable constants must be defined in a constants file in the closest sensible subdirectory.
+
+## TUI Harness
+
+See `docs/tui-harness.md` for the full TUI harness usage guide (MCP tools, screen markers, examples, and error
+recovery).

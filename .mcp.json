@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "tui-harness": {
+      "command": "node",
+      "args": ["dist/mcp-harness/index.mjs"]
+    }
+  }
+}
