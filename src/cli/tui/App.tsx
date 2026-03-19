@@ -36,8 +36,8 @@ type Route =
   | { name: 'status' }
   | { name: 'remove' }
   | { name: 'run' }
-  | { name: 'run-eval'; from?: 'run' | 'eval' }
-  | { name: 'eval' }
+  | { name: 'run-eval'; from?: 'run' | 'evals' }
+  | { name: 'evals' }
   | { name: 'eval-runs' }
   | { name: 'online-evals' }
   | { name: 'validate' }
@@ -94,8 +94,8 @@ function AppContent() {
       setRoute({ name: 'remove' });
     } else if (id === 'run') {
       setRoute({ name: 'run' });
-    } else if (id === 'eval') {
-      setRoute({ name: 'eval' });
+    } else if (id === 'evals') {
+      setRoute({ name: 'evals' });
     } else if (id === 'validate') {
       setRoute({ name: 'validate' });
     } else if (id === 'package') {
@@ -200,11 +200,11 @@ function AppContent() {
     );
   }
 
-  if (route.name === 'eval') {
+  if (route.name === 'evals') {
     return (
       <EvalHubScreen
         onSelect={view => {
-          if (view === 'run-eval') setRoute({ name: 'run-eval', from: 'eval' });
+          if (view === 'run-eval') setRoute({ name: 'run-eval', from: 'evals' });
           if (view === 'runs') setRoute({ name: 'eval-runs' });
           if (view === 'online-dashboard') setRoute({ name: 'online-evals' });
         }}
@@ -214,7 +214,7 @@ function AppContent() {
   }
 
   if (route.name === 'run-eval') {
-    const backRoute = route.from ?? 'eval';
+    const backRoute = route.from ?? 'evals';
     return (
       <RunEvalFlow
         onExit={() => setRoute({ name: backRoute } as Route)}
@@ -224,11 +224,11 @@ function AppContent() {
   }
 
   if (route.name === 'eval-runs') {
-    return <EvalScreen isInteractive={true} onExit={() => setRoute({ name: 'eval' })} />;
+    return <EvalScreen isInteractive={true} onExit={() => setRoute({ name: 'evals' })} />;
   }
 
   if (route.name === 'online-evals') {
-    return <OnlineEvalDashboard isInteractive={true} onExit={() => setRoute({ name: 'eval' })} />;
+    return <OnlineEvalDashboard isInteractive={true} onExit={() => setRoute({ name: 'evals' })} />;
   }
 
   if (route.name === 'validate') {

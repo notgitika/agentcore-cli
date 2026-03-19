@@ -8,7 +8,7 @@ import { Text, render } from 'ink';
 import React from 'react';
 
 export const registerEval = (program: Command) => {
-  const evalCmd = program.command('eval').description(COMMAND_DESCRIPTIONS.eval);
+  const evalCmd = program.command('evals').description(COMMAND_DESCRIPTIONS.evals);
 
   evalCmd
     .command('history')
@@ -39,7 +39,7 @@ export const registerEval = (program: Command) => {
 
         const runs = result.runs ?? [];
         if (runs.length === 0) {
-          console.log('No eval runs found. Run `agentcore run eval` to create one.');
+          console.log('No eval runs found. Run `agentcore run evals` to create one.');
           return;
         }
 

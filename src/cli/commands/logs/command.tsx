@@ -11,7 +11,7 @@ import React from 'react';
 
 export const registerLogs = (program: Command) => {
   // enablePositionalOptions + passThroughOptions ensure options like --since and --agent
-  // are passed to the 'eval' subcommand rather than being consumed by the parent 'logs' command.
+  // are passed to the 'evals' subcommand rather than being consumed by the parent 'logs' command.
   program.enablePositionalOptions();
 
   const logsCmd = program
@@ -44,7 +44,7 @@ export const registerLogs = (program: Command) => {
     });
 
   logsCmd
-    .command('eval')
+    .command('evals')
     .description('Stream or search online eval logs')
     .option('-a, --agent <name>', 'Select specific agent')
     .option('--since <time>', 'Start time (e.g. "1h", "30m", "2d", ISO 8601)')

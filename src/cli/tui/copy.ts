@@ -40,7 +40,7 @@ export const COMMAND_DESCRIPTIONS = {
   remove: 'Remove resources from project config.',
   status: 'Show deployed resource details and status.',
   traces: 'View and download agent traces.',
-  eval: 'View past eval run results. Also supports --agent-arn.',
+  evals: 'View past eval run results. Also supports --agent-arn.',
   pause: 'Pause an online eval config. Supports --arn for configs outside the project.',
   resume: 'Resume a paused online eval config. Supports --arn for configs outside the project.',
   run: 'Run on-demand evaluation. Supports --agent-arn for agents outside the project.',

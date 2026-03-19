@@ -36,7 +36,7 @@ export const registerRun = (program: Command) => {
   const runCmd = program.command('run').description(COMMAND_DESCRIPTIONS.run);
 
   runCmd
-    .command('eval')
+    .command('evals')
     .description('Run on-demand evaluation of agent traces. Use --agent-arn to evaluate agents outside the project.')
     .option('-a, --agent <name>', 'Agent name from project config')
     .option('--agent-arn <arn>', 'Agent runtime ARN — run outside a project directory')

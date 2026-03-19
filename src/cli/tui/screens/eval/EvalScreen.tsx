@@ -403,9 +403,9 @@ export function EvalScreen({ onExit }: EvalScreenProps) {
       {noRuns && (
         <Box flexDirection="column">
           <Text dimColor>No eval runs found.</Text>
-          <Text dimColor>Run `agentcore run eval` to evaluate a project agent,</Text>
+          <Text dimColor>Run `agentcore run evals` to evaluate a project agent,</Text>
           <Text dimColor>
-            or `agentcore run eval --agent-arn <Text bold>ARN</Text> --evaluator-arn <Text bold>ARN</Text>` for agents
+            or `agentcore run evals --agent-arn <Text bold>ARN</Text> --evaluator-arn <Text bold>ARN</Text>` for agents
             outside the project.
           </Text>
           {resultsDir && <Text dimColor>Results saved to: {resultsDir}</Text>}
