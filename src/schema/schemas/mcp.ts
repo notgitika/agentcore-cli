@@ -672,18 +672,15 @@ export const AgentCoreMcpRuntimeToolSchema = z
 export type AgentCoreMcpRuntimeTool = z.infer<typeof AgentCoreMcpRuntimeToolSchema>;
 
 // ============================================================================
-// Top-Level MCP Spec
+// MCP Spec Type (convenience alias)
 // ============================================================================
 
 /**
- * Top-level MCP schema.
+ * Shape of MCP-related fields within AgentCoreProjectSpec.
+ * These fields are now part of agentcore.json (previously in mcp.json).
  */
-export const AgentCoreMcpSpecSchema = z
-  .object({
-    agentCoreGateways: z.array(AgentCoreGatewaySchema),
-    mcpRuntimeTools: z.array(AgentCoreMcpRuntimeToolSchema).optional(),
-    unassignedTargets: z.array(AgentCoreGatewayTargetSchema).optional(),
-  })
-  .strict();
-
-export type AgentCoreMcpSpec = z.infer<typeof AgentCoreMcpSpecSchema>;
+export interface AgentCoreMcpSpec {
+  agentCoreGateways: AgentCoreGateway[];
+  mcpRuntimeTools?: AgentCoreMcpRuntimeTool[];
+  unassignedTargets?: AgentCoreGatewayTarget[];
+}

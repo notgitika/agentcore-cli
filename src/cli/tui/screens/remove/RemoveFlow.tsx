@@ -793,7 +793,7 @@ export function RemoveFlow({
       <RemoveSuccessScreen
         isInteractive={isInteractive}
         message={`Removed gateway: ${flow.gatewayName}`}
-        detail="Gateway removed from mcp.json. Deploy with `agentcore deploy` to apply changes."
+        detail="Gateway removed from agentcore.json. Deploy with `agentcore deploy` to apply changes."
         logFilePath={flow.logFilePath}
         onRemoveAnother={() => {
           resetAll();

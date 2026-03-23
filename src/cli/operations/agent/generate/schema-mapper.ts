@@ -200,13 +200,9 @@ export function mapModelProviderToIdentityProviders(
 async function mapGatewaysToGatewayProviders(): Promise<GatewayProviderRenderConfig[]> {
   try {
     const configIO = new ConfigIO();
-    if (!configIO.configExists('mcp')) {
-      return [];
-    }
-    const mcpSpec = await configIO.readMcpSpec();
     const project = await configIO.readProjectSpec();
 
-    return mcpSpec.agentCoreGateways.map(gateway => {
+    return project.agentCoreGateways.map(gateway => {
       const config: GatewayProviderRenderConfig = {
         name: gateway.name,
         envVarName: GatewayPrimitive.computeDefaultGatewayEnvVarName(gateway.name),

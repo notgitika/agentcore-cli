@@ -28,13 +28,14 @@ async function main() {
   const spec = await configIO.readProjectSpec();
   const targets = await configIO.readAWSDeploymentTargets();
 
-  // Read MCP configuration if it exists
-  let mcpSpec;
-  try {
-    mcpSpec = await configIO.readMcpSpec();
-  } catch {
-    // MCP config is optional
-  }
+  // Extract MCP configuration from project spec
+  const mcpSpec = spec.agentCoreGateways?.length
+    ? {
+        agentCoreGateways: spec.agentCoreGateways,
+        mcpRuntimeTools: spec.mcpRuntimeTools,
+        unassignedTargets: spec.unassignedTargets,
+      }
+    : undefined;
 
   // Read deployed state for credential ARNs (populated by pre-deploy identity setup)
   let deployedState: Record<string, unknown> | undefined;

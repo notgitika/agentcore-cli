@@ -324,10 +324,8 @@ export async function validateAddGatewayTargetOptions(options: AddGatewayTargetO
   const gatewayConfigIO = new ConfigIO();
   let existingGateways: string[] = [];
   try {
-    if (gatewayConfigIO.configExists('mcp')) {
-      const mcpSpec = await gatewayConfigIO.readMcpSpec();
-      existingGateways = mcpSpec.agentCoreGateways.map(g => g.name);
-    }
+    const project = await gatewayConfigIO.readProjectSpec();
+    existingGateways = project.agentCoreGateways.map(g => g.name);
   } catch {
     // If we can't read the config, treat as no gateways
   }

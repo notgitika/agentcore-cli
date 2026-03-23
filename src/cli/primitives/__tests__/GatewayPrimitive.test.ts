@@ -1,18 +1,29 @@
-import type { AgentCoreMcpSpec } from '../../../schema';
+import type { AgentCoreProjectSpec } from '../../../schema';
 import { GatewayPrimitive } from '../GatewayPrimitive';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockConfigExists, mockReadMcpSpec, mockWriteMcpSpec } = vi.hoisted(() => ({
+const defaultProject: AgentCoreProjectSpec = {
+  name: 'test',
+  version: 1,
+  agents: [],
+  memories: [],
+  credentials: [],
+  evaluators: [],
+  onlineEvalConfigs: [],
+  agentCoreGateways: [],
+};
+
+const { mockConfigExists, mockReadProjectSpec, mockWriteProjectSpec } = vi.hoisted(() => ({
   mockConfigExists: vi.fn().mockReturnValue(true),
-  mockReadMcpSpec: vi.fn().mockResolvedValue({ agentCoreGateways: [] }),
-  mockWriteMcpSpec: vi.fn().mockResolvedValue(undefined),
+  mockReadProjectSpec: vi.fn(),
+  mockWriteProjectSpec: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../../lib', () => {
   const MockConfigIO = vi.fn(function (this: Record<string, unknown>) {
     this.configExists = mockConfigExists;
-    this.readMcpSpec = mockReadMcpSpec;
-    this.writeMcpSpec = mockWriteMcpSpec;
+    this.readProjectSpec = mockReadProjectSpec;
+    this.writeProjectSpec = mockWriteProjectSpec;
   });
   return {
     ConfigIO: MockConfigIO,
@@ -21,10 +32,10 @@ vi.mock('../../../lib', () => {
   };
 });
 
-/** Extract the first gateway written to writeMcpSpec. */
+/** Extract the first gateway written to writeProjectSpec. */
 function getWrittenGateway() {
-  expect(mockWriteMcpSpec).toHaveBeenCalledTimes(1);
-  const spec = mockWriteMcpSpec.mock.calls[0]![0] as AgentCoreMcpSpec;
+  expect(mockWriteProjectSpec).toHaveBeenCalledTimes(1);
+  const spec = mockWriteProjectSpec.mock.calls[0]![0] as AgentCoreProjectSpec;
   const gw = spec.agentCoreGateways[0];
   expect(gw).toBeDefined();
   return gw!;
@@ -35,7 +46,7 @@ describe('GatewayPrimitive', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockReadMcpSpec.mockResolvedValue({ agentCoreGateways: [] });
+    mockReadProjectSpec.mockImplementation(() => Promise.resolve({ ...defaultProject, agentCoreGateways: [] }));
     primitive = new GatewayPrimitive();
   });
 

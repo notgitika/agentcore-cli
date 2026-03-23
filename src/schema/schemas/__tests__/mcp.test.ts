@@ -2,7 +2,6 @@ import {
   AgentCoreGatewaySchema,
   AgentCoreGatewayTargetSchema,
   AgentCoreMcpRuntimeToolSchema,
-  AgentCoreMcpSpecSchema,
   ApiGatewayConfigSchema,
   CustomJwtAuthorizerConfigSchema,
   GatewayAuthorizerTypeSchema,
@@ -989,76 +988,5 @@ describe('AgentCoreGatewayTargetSchema with outbound auth', () => {
       },
     });
     expect(result.success).toBe(false);
-  });
-});
-
-describe('AgentCoreMcpSpecSchema', () => {
-  it('accepts valid MCP spec', () => {
-    const validToolDef = {
-      name: 'tool',
-      description: 'A tool',
-      inputSchema: { type: 'object' as const },
-    };
-
-    const result = AgentCoreMcpSpecSchema.safeParse({
-      agentCoreGateways: [
-        {
-          name: 'gw1',
-          targets: [
-            {
-              name: 't1',
-              targetType: 'lambda',
-              toolDefinitions: [validToolDef],
-              compute: {
-                host: 'Lambda',
-                implementation: { language: 'Python', path: 'tools', handler: 'h' },
-                pythonVersion: 'PYTHON_3_12',
-              },
-            },
-          ],
-        },
-      ],
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it('rejects extra fields (strict)', () => {
-    const result = AgentCoreMcpSpecSchema.safeParse({
-      agentCoreGateways: [],
-      unknownField: true,
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('spec with unassignedTargets array parses correctly', () => {
-    const validToolDef = {
-      name: 'tool',
-      description: 'A tool',
-      inputSchema: { type: 'object' as const },
-    };
-
-    const result = AgentCoreMcpSpecSchema.safeParse({
-      agentCoreGateways: [],
-      unassignedTargets: [
-        {
-          name: 'unassigned-target',
-          targetType: 'lambda',
-          toolDefinitions: [validToolDef],
-          compute: {
-            host: 'Lambda',
-            implementation: { language: 'Python', path: 'tools', handler: 'h' },
-            pythonVersion: 'PYTHON_3_12',
-          },
-        },
-      ],
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it('spec without unassignedTargets parses correctly', () => {
-    const result = AgentCoreMcpSpecSchema.safeParse({
-      agentCoreGateways: [],
-    });
-    expect(result.success).toBe(true);
   });
 });

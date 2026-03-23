@@ -8,6 +8,7 @@
  */
 import { isReservedProjectName } from '../constants';
 import { AgentEnvSpecSchema } from './agent-env';
+import { AgentCoreGatewaySchema, AgentCoreGatewayTargetSchema, AgentCoreMcpRuntimeToolSchema } from './mcp';
 import { EvaluationLevelSchema, EvaluatorConfigSchema, EvaluatorNameSchema } from './primitives/evaluator';
 import { DEFAULT_STRATEGY_NAMESPACES, MemoryStrategySchema, MemoryStrategyTypeSchema } from './primitives/memory';
 import { OnlineEvalConfigSchema } from './primitives/online-eval-config';
@@ -22,6 +23,10 @@ export type { OnlineEvalConfig } from './primitives/online-eval-config';
 export { OnlineEvalConfigSchema, OnlineEvalConfigNameSchema } from './primitives/online-eval-config';
 export type { EvaluationLevel, EvaluatorConfig, LlmAsAJudgeConfig, RatingScale } from './primitives/evaluator';
 export { BedrockModelIdSchema, isValidBedrockModelId, EvaluatorNameSchema } from './primitives/evaluator';
+
+// Re-export MCP types (now part of unified schema)
+export type { AgentCoreGateway, AgentCoreGatewayTarget, AgentCoreMcpRuntimeTool } from './mcp';
+export { AgentCoreGatewaySchema, AgentCoreGatewayTargetSchema, AgentCoreMcpRuntimeToolSchema } from './mcp';
 
 // ============================================================================
 // Project Name Schema
@@ -196,6 +201,13 @@ export const AgentCoreProjectSpecSchema = z
           name => `Duplicate online eval config name: ${name}`
         )
       ),
+
+    // MCP / Gateway resources (previously in mcp.json)
+    agentCoreGateways: z.array(AgentCoreGatewaySchema).default([]),
+
+    mcpRuntimeTools: z.array(AgentCoreMcpRuntimeToolSchema).optional(),
+
+    unassignedTargets: z.array(AgentCoreGatewayTargetSchema).optional(),
   })
   .superRefine((spec, ctx) => {
     const agentNames = new Set(spec.agents.map(a => a.name));

@@ -237,9 +237,9 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     // Parse gateway outputs from CDK stack
     let gateways: Record<string, { gatewayId: string; gatewayArn: string }> = {};
     try {
-      const mcpSpec = await configIO.readMcpSpec();
+      const projectForGateways = await configIO.readProjectSpec();
       const gatewaySpecs =
-        mcpSpec?.agentCoreGateways?.reduce(
+        projectForGateways.agentCoreGateways?.reduce(
           (acc: Record<string, unknown>, gateway: { name: string }) => {
             acc[gateway.name] = gateway;
             return acc;
@@ -392,14 +392,7 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
           const agentNames = context?.projectSpec.agents?.map((a: { name: string }) => a.name) ?? [];
           const targetRegion = context?.awsTargets[0]?.region;
           const targetAccount = context?.awsTargets[0]?.account;
-          let hasGateways = false;
-          try {
-            const tsConfigIO = new ConfigIO();
-            const mcpSpec = await tsConfigIO.readMcpSpec();
-            hasGateways = (mcpSpec?.agentCoreGateways?.length ?? 0) > 0;
-          } catch {
-            // No mcp.json or invalid -- no gateways
-          }
+          const hasGateways = (context?.projectSpec.agentCoreGateways?.length ?? 0) > 0;
           if ((agentNames.length > 0 || hasGateways) && targetRegion && targetAccount) {
             try {
               const tsResult = await setupTransactionSearch({

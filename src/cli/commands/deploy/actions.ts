@@ -79,13 +79,13 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     }
     endStep('success');
 
-    // Read MCP spec for gateway information
-    let mcpSpec;
+    // Read project spec for gateway information (used later for deploy step name and outputs)
+    let mcpSpec: { agentCoreGateways: typeof context.projectSpec.agentCoreGateways } | null = null;
     try {
-      mcpSpec = await configIO.readMcpSpec();
+      const projectSpec = await configIO.readProjectSpec();
+      mcpSpec = { agentCoreGateways: projectSpec.agentCoreGateways };
     } catch {
-      // No mcp.json or invalid — no gateways
-      mcpSpec = null;
+      // Project read failed — no gateways
     }
 
     // Preflight: validate project

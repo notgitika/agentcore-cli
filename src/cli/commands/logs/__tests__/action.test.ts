@@ -58,6 +58,7 @@ describe('resolveAgentContext', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
     },
     deployedState: {
       targets: {
@@ -118,6 +119,7 @@ describe('resolveAgentContext', () => {
         credentials: [],
         evaluators: [],
         onlineEvalConfigs: [],
+        agentCoreGateways: [],
       },
     });
     const result = resolveAgentContext(context, {});
@@ -158,6 +160,7 @@ describe('resolveAgentContext', () => {
         credentials: [],
         evaluators: [],
         onlineEvalConfigs: [],
+        agentCoreGateways: [],
       },
       deployedState: {
         targets: {
@@ -206,6 +209,7 @@ describe('resolveAgentContext', () => {
         credentials: [],
         evaluators: [],
         onlineEvalConfigs: [],
+        agentCoreGateways: [],
       },
     });
     const result = resolveAgentContext(context, {});
