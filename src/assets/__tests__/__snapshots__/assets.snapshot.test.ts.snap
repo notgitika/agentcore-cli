@@ -73,12 +73,17 @@ async function main() {
   const spec = await configIO.readProjectSpec();
   const targets = await configIO.readAWSDeploymentTargets();
 
-  // Extract MCP configuration from project spec
-  const mcpSpec = spec.agentCoreGateways?.length
+  // Extract MCP configuration from project spec.
+  // Gateway fields are stored in agentcore.json but may not yet be on the
+  // AgentCoreProjectSpec type from @aws/agentcore-cdk, so we read them
+  // dynamically and cast the resulting object.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const specAny = spec as any;
+  const mcpSpec = specAny.agentCoreGateways?.length
     ? {
-        agentCoreGateways: spec.agentCoreGateways,
-        mcpRuntimeTools: spec.mcpRuntimeTools,
-        unassignedTargets: spec.unassignedTargets,
+        agentCoreGateways: specAny.agentCoreGateways,
+        mcpRuntimeTools: specAny.mcpRuntimeTools,
+        unassignedTargets: specAny.unassignedTargets,
       }
     : undefined;
 
