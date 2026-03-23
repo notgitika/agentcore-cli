@@ -37,6 +37,7 @@ function createDefaultProjectSpec(projectName: string): AgentCoreProjectSpec {
     evaluators: [],
     onlineEvalConfigs: [],
     agentCoreGateways: [],
+    policyEngines: [],
   };
 }
 
@@ -89,6 +90,15 @@ export function useRemoveFlow({ force, dryRun }: RemoveFlowOptions): RemoveFlowS
           items.push(`${gatewayCount} gateway${gatewayCount > 1 ? 's' : ''}`);
           if (targetCount > 0) {
             items.push(`${targetCount} gateway target${targetCount > 1 ? 's' : ''}`);
+          }
+        }
+        if (projectSpec.policyEngines && projectSpec.policyEngines.length > 0) {
+          items.push(
+            `${projectSpec.policyEngines.length} policy engine${projectSpec.policyEngines.length > 1 ? 's' : ''}`
+          );
+          const totalPolicies = projectSpec.policyEngines.reduce((sum, e) => sum + (e.policies?.length ?? 0), 0);
+          if (totalPolicies > 0) {
+            items.push(`${totalPolicies} polic${totalPolicies > 1 ? 'ies' : 'y'}`);
           }
         }
       } catch {

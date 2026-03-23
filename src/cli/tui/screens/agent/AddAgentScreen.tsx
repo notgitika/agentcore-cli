@@ -23,6 +23,7 @@ import { useListNavigation, useProject } from '../../hooks';
 import { generateUniqueName } from '../../utils';
 import { BUILD_TYPE_OPTIONS, GenerateWizardUI, getWizardHelpText, useGenerateWizard } from '../generate';
 import type { BuildType } from '../generate';
+import { ADVANCED_OPTIONS } from '../generate/types';
 import type { AddAgentConfig, AgentType } from './types';
 import {
   ADD_AGENT_STEP_LABELS,
@@ -63,22 +64,19 @@ type ByoStep =
   | 'buildType'
   | 'modelProvider'
   | 'apiKey'
+  | 'advanced'
   | 'networkMode'
   | 'subnets'
   | 'securityGroups'
   | 'confirm';
 
 const INITIAL_STEPS: InitialStep[] = ['name', 'agentType'];
-const BYO_STEPS: ByoStep[] = [
-  'codeLocation',
-  'buildType',
-  'modelProvider',
-  'apiKey',
-  'networkMode',
-  'subnets',
-  'securityGroups',
-  'confirm',
-];
+const ADVANCED_ITEMS: SelectableItem[] = ADVANCED_OPTIONS.map(o => ({
+  id: o.id,
+  title: o.title,
+  description: o.description,
+}));
+const BYO_STEPS: ByoStep[] = ['codeLocation', 'buildType', 'modelProvider', 'apiKey', 'advanced', 'confirm'];
 
 export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAgentScreenProps) {
   // Phase 1: name + agentType selection
@@ -102,6 +100,7 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
     subnets: '' as string,
     securityGroups: '' as string,
   });
+  const [byoAdvancedSelected, setByoAdvancedSelected] = useState(false);
 
   const { project } = useProject();
 
@@ -210,11 +209,15 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
     if (byoConfig.modelProvider === 'Bedrock') {
       steps = steps.filter(s => s !== 'apiKey');
     }
-    if (byoConfig.networkMode !== 'VPC') {
-      steps = steps.filter(s => s !== 'subnets' && s !== 'securityGroups');
+    if (byoAdvancedSelected) {
+      const advancedIndex = steps.indexOf('advanced');
+      const afterAdvanced = advancedIndex + 1;
+      const networkSteps: ByoStep[] =
+        byoConfig.networkMode === 'VPC' ? ['networkMode', 'subnets', 'securityGroups'] : ['networkMode'];
+      steps = [...steps.slice(0, afterAdvanced), ...networkSteps, ...steps.slice(afterAdvanced)];
     }
     return steps;
-  }, [byoConfig.modelProvider, byoConfig.networkMode]);
+  }, [byoConfig.modelProvider, byoConfig.networkMode, byoAdvancedSelected]);
 
   const byoCurrentIndex = byoSteps.indexOf(byoStep);
 
@@ -292,7 +295,7 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
       if (provider !== 'Bedrock') {
         setByoStep('apiKey');
       } else {
-        setByoStep('networkMode');
+        setByoStep('advanced');
       }
     },
     onExit: handleByoBack,
@@ -309,6 +312,22 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
       })),
     []
   );
+
+  const advancedNav = useListNavigation({
+    items: ADVANCED_ITEMS,
+    onSelect: item => {
+      if (item.id === 'yes') {
+        setByoAdvancedSelected(true);
+        setByoStep('networkMode');
+      } else {
+        setByoAdvancedSelected(false);
+        setByoConfig(c => ({ ...c, networkMode: 'PUBLIC' as NetworkMode, subnets: '', securityGroups: '' }));
+        setByoStep('confirm');
+      }
+    },
+    onExit: handleByoBack,
+    isActive: isByoPath && byoStep === 'advanced',
+  });
 
   const networkModeNav = useListNavigation({
     items: networkModeItems,
@@ -477,10 +496,18 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
             envVarName={getProviderInfo(byoConfig.modelProvider).envVarName}
             onSubmit={apiKey => {
               setByoConfig(c => ({ ...c, apiKey }));
-              setByoStep('networkMode');
+              setByoStep('advanced');
             }}
-            onSkip={() => setByoStep('networkMode')}
+            onSkip={() => setByoStep('advanced')}
             onCancel={handleByoBack}
+          />
+        )}
+
+        {byoStep === 'advanced' && (
+          <WizardSelect
+            title="Configure advanced settings?"
+            items={ADVANCED_ITEMS}
+            selectedIndex={advancedNav.selectedIndex}
           />
         )}
 

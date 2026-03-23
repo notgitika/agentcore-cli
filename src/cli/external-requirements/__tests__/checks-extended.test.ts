@@ -52,6 +52,7 @@ describe('requiresUv', () => {
       evaluators: [],
       onlineEvalConfigs: [],
       agentCoreGateways: [],
+      policyEngines: [],
     };
     expect(requiresUv(project)).toBe(true);
   });
@@ -76,6 +77,7 @@ describe('requiresUv', () => {
       evaluators: [],
       onlineEvalConfigs: [],
       agentCoreGateways: [],
+      policyEngines: [],
     };
     expect(requiresUv(project)).toBe(false);
   });
@@ -90,6 +92,7 @@ describe('requiresUv', () => {
       evaluators: [],
       onlineEvalConfigs: [],
       agentCoreGateways: [],
+      policyEngines: [],
     };
     expect(requiresUv(project)).toBe(false);
   });
@@ -116,6 +119,7 @@ describe('requiresContainerRuntime', () => {
       evaluators: [],
       onlineEvalConfigs: [],
       agentCoreGateways: [],
+      policyEngines: [],
     };
     expect(requiresContainerRuntime(project)).toBe(true);
   });
@@ -140,6 +144,7 @@ describe('requiresContainerRuntime', () => {
       evaluators: [],
       onlineEvalConfigs: [],
       agentCoreGateways: [],
+      policyEngines: [],
     };
     expect(requiresContainerRuntime(project)).toBe(false);
   });
@@ -154,6 +159,7 @@ describe('requiresContainerRuntime', () => {
       evaluators: [],
       onlineEvalConfigs: [],
       agentCoreGateways: [],
+      policyEngines: [],
     };
     expect(requiresContainerRuntime(project)).toBe(false);
   });
@@ -187,6 +193,7 @@ describe('requiresContainerRuntime', () => {
       evaluators: [],
       onlineEvalConfigs: [],
       agentCoreGateways: [],
+      policyEngines: [],
     };
     expect(requiresContainerRuntime(project)).toBe(true);
   });
@@ -252,6 +259,7 @@ describe('checkDependencyVersions', () => {
       evaluators: [],
       onlineEvalConfigs: [],
       agentCoreGateways: [],
+      policyEngines: [],
     };
 
     const result = await checkDependencyVersions(project);
@@ -270,6 +278,7 @@ describe('checkDependencyVersions', () => {
       evaluators: [],
       onlineEvalConfigs: [],
       agentCoreGateways: [],
+      policyEngines: [],
     };
 
     const result = await checkDependencyVersions(project);
@@ -297,6 +306,7 @@ describe('checkDependencyVersions', () => {
       evaluators: [],
       onlineEvalConfigs: [],
       agentCoreGateways: [],
+      policyEngines: [],
     };
 
     const result = await checkDependencyVersions(project);

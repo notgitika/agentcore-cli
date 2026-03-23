@@ -12,6 +12,7 @@ import { AgentCoreGatewaySchema, AgentCoreGatewayTargetSchema, AgentCoreMcpRunti
 import { EvaluationLevelSchema, EvaluatorConfigSchema, EvaluatorNameSchema } from './primitives/evaluator';
 import { DEFAULT_STRATEGY_NAMESPACES, MemoryStrategySchema, MemoryStrategyTypeSchema } from './primitives/memory';
 import { OnlineEvalConfigSchema } from './primitives/online-eval-config';
+import { PolicyEngineSchema } from './primitives/policy';
 import { uniqueBy } from './zod-util';
 import { z } from 'zod';
 
@@ -23,6 +24,9 @@ export type { OnlineEvalConfig } from './primitives/online-eval-config';
 export { OnlineEvalConfigSchema, OnlineEvalConfigNameSchema } from './primitives/online-eval-config';
 export type { EvaluationLevel, EvaluatorConfig, LlmAsAJudgeConfig, RatingScale } from './primitives/evaluator';
 export { BedrockModelIdSchema, isValidBedrockModelId, EvaluatorNameSchema } from './primitives/evaluator';
+export { PolicyEngineSchema };
+export type { Policy, PolicyEngine, ValidationMode } from './primitives/policy';
+export { PolicyEngineNameSchema, PolicyNameSchema, PolicySchema, ValidationModeSchema } from './primitives/policy';
 
 // Re-export MCP types (now part of unified schema)
 export type { AgentCoreGateway, AgentCoreGatewayTarget, AgentCoreMcpRuntimeTool } from './mcp';
@@ -208,6 +212,16 @@ export const AgentCoreProjectSpecSchema = z
     mcpRuntimeTools: z.array(AgentCoreMcpRuntimeToolSchema).optional(),
 
     unassignedTargets: z.array(AgentCoreGatewayTargetSchema).optional(),
+
+    policyEngines: z
+      .array(PolicyEngineSchema)
+      .default([])
+      .superRefine(
+        uniqueBy(
+          engine => engine.name,
+          name => `Duplicate policy engine name: ${name}`
+        )
+      ),
   })
   .superRefine((spec, ctx) => {
     const agentNames = new Set(spec.agents.map(a => a.name));

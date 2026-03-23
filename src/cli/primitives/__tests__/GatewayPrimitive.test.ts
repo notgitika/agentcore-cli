@@ -11,6 +11,7 @@ const defaultProject: AgentCoreProjectSpec = {
   evaluators: [],
   onlineEvalConfigs: [],
   agentCoreGateways: [],
+  policyEngines: [],
 };
 
 const { mockConfigExists, mockReadProjectSpec, mockWriteProjectSpec } = vi.hoisted(() => ({
