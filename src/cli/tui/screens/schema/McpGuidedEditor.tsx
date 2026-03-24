@@ -7,6 +7,7 @@ import {
   GatewayNameSchema,
   type OutboundAuth,
 } from '../../../../schema';
+import type { SaveDocumentResult } from '../../../schema';
 import { Header, Panel, ScreenLayout, TextInput } from '../../components';
 import { useSchemaDocument } from '../../hooks/useSchemaDocument';
 import { diffLines } from '../../utils';
@@ -71,7 +72,7 @@ export function McpGuidedEditor(props: McpGuidedEditorProps) {
   }
 
   // Wrap save to merge MCP fields back into the full project spec
-  const save = async (mcpContent: string): Promise<{ ok: boolean; error?: string }> => {
+  const save = async (mcpContent: string): Promise<SaveDocumentResult> => {
     if (!projectSpec) return { ok: false, error: 'No project spec loaded' };
     const mcpData = JSON.parse(mcpContent) as AgentCoreMcpSpec;
     const merged = { ...projectSpec, ...mcpData };

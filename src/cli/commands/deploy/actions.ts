@@ -1,5 +1,5 @@
 import { ConfigIO, SecureCredentials } from '../../../lib';
-import type { DeployedState } from '../../../schema';
+import type { AgentCoreMcpSpec, DeployedState } from '../../../schema';
 import { validateAwsCredentials } from '../../aws/account';
 import { createSwitchableIoHost } from '../../cdk/toolkit-lib';
 import {
@@ -82,7 +82,7 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     endStep('success');
 
     // Read project spec for gateway information (used later for deploy step name and outputs)
-    let mcpSpec: { agentCoreGateways: typeof context.projectSpec.agentCoreGateways } | null = null;
+    let mcpSpec: Pick<AgentCoreMcpSpec, 'agentCoreGateways'> | null = null;
     try {
       const projectSpec = await configIO.readProjectSpec();
       mcpSpec = { agentCoreGateways: projectSpec.agentCoreGateways };

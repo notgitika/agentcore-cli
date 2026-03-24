@@ -207,11 +207,37 @@ export const AgentCoreProjectSpecSchema = z
       ),
 
     // MCP / Gateway resources (previously in mcp.json)
-    agentCoreGateways: z.array(AgentCoreGatewaySchema).default([]),
+    agentCoreGateways: z
+      .array(AgentCoreGatewaySchema)
+      .default([])
+      .superRefine(
+        uniqueBy(
+          gateway => gateway.name,
+          name => `Duplicate gateway name: ${name}`
+        )
+      ),
 
-    mcpRuntimeTools: z.array(AgentCoreMcpRuntimeToolSchema).optional(),
+    mcpRuntimeTools: z
+      .array(AgentCoreMcpRuntimeToolSchema)
+      .optional()
+      .superRefine((tools, ctx) => {
+        if (!tools) return;
+        uniqueBy(
+          (tool: { name: string }) => tool.name,
+          (name: string) => `Duplicate MCP runtime tool name: ${name}`
+        )(tools, ctx);
+      }),
 
-    unassignedTargets: z.array(AgentCoreGatewayTargetSchema).optional(),
+    unassignedTargets: z
+      .array(AgentCoreGatewayTargetSchema)
+      .optional()
+      .superRefine((targets, ctx) => {
+        if (!targets) return;
+        uniqueBy(
+          (target: { name: string }) => target.name,
+          (name: string) => `Duplicate unassigned target name: ${name}`
+        )(targets, ctx);
+      }),
 
     policyEngines: z
       .array(PolicyEngineSchema)
@@ -223,6 +249,7 @@ export const AgentCoreProjectSpecSchema = z
         )
       ),
   })
+  .strict()
   .superRefine((spec, ctx) => {
     const agentNames = new Set(spec.agents.map(a => a.name));
     const evaluatorNames = new Set(spec.evaluators.map(e => e.name));
