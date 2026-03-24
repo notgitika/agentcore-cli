@@ -401,7 +401,7 @@ export class GatewayPrimitive extends BasePrimitive<AddGatewayOptions, Removable
 
   /**
    * Auto-create a managed OAuth credential for gateway inbound auth.
-   * Stores the credential in agentcore.json and writes the client secret to .env.
+   * Stores the credential in agentcore.json and writes the client ID and client secret to .env.
    */
   private async createManagedOAuthCredential(
     gatewayName: string,
