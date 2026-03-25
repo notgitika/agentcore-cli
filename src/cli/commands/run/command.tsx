@@ -72,6 +72,11 @@ export const registerRun = (program: Command) => {
     .option('-A, --assertion <text...>', 'Assertion the agent should satisfy (repeatable)')
     .option('--expected-trajectory <names>', 'Expected tool calls in order (comma-separated)')
     .option('--expected-response <text>', 'Expected agent response text')
+    .option(
+      '--custom-service-name <name>',
+      'Custom service name for external agents — filters by service.name instead of cloud.resource_id'
+    )
+    .option('--custom-log-group-name <name>', 'Custom CloudWatch log group name for external agents')
     .option('--output <path>', 'Custom output file path for results')
     .option('--json', 'Output as JSON')
     .action(
@@ -88,11 +93,14 @@ export const registerRun = (program: Command) => {
         expectedTrajectory?: string;
         expectedResponse?: string;
         days: string;
+        customServiceName?: string;
+        customLogGroupName?: string;
         output?: string;
         json?: boolean;
       }) => {
         const isArnMode = !!(cliOptions.runtimeArn && cliOptions.evaluatorArn);
-        if (!isArnMode) {
+        const isCustomMode = !!cliOptions.customServiceName;
+        if (!isArnMode && !isCustomMode) {
           requireProject();
         }
 
@@ -120,6 +128,8 @@ export const registerRun = (program: Command) => {
             ? cliOptions.expectedTrajectory.split(',').map(s => s.trim())
             : undefined,
           expectedResponse: cliOptions.expectedResponse,
+          customServiceName: cliOptions.customServiceName,
+          customLogGroupName: cliOptions.customLogGroupName,
           days: parseInt(cliOptions.days, 10),
           output: cliOptions.output,
           json: cliOptions.json,

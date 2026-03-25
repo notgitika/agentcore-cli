@@ -24,10 +24,12 @@ const SUPPORTED_SCOPES = new Set([
 interface ResolvedEvalContext {
   agentLabel: string;
   region: string;
-  runtimeId: string;
+  runtimeId?: string;
   runtimeLogGroup: string;
   evaluatorIds: string[];
   evaluatorLabels: string[];
+  /** When set, queries filter by service.name instead of cloud.resource_id */
+  customServiceName?: string;
 }
 
 type ResolveResult = { success: true; ctx: ResolvedEvalContext } | { success: false; error: string };
@@ -166,6 +168,62 @@ function resolveFromProject(context: DeployedProjectConfig, options: RunEvalOpti
       runtimeLogGroup,
       evaluatorIds,
       evaluatorLabels,
+    },
+  };
+}
+
+/**
+ * Custom mode: resolve context from explicit custom service name and log group.
+ * Evaluators must come from --evaluator-arn or Builtin.* names.
+ */
+function resolveFromCustom(options: RunEvalOptions): ResolveResult {
+  const { customServiceName, customLogGroupName } = options;
+
+  if (!customServiceName || !customLogGroupName) {
+    return {
+      success: false,
+      error: 'Both --custom-service-name and --custom-log-group-name are required for external agent evaluation',
+    };
+  }
+
+  if (!options.region) {
+    return { success: false, error: '--region is required when using --custom-service-name' };
+  }
+
+  const evaluatorIds: string[] = [];
+  const evaluatorLabels: string[] = [];
+
+  for (const evalName of options.evaluator) {
+    if (evalName.startsWith('Builtin.')) {
+      evaluatorIds.push(evalName);
+      evaluatorLabels.push(evalName);
+    } else {
+      return {
+        success: false,
+        error: `Custom evaluator "${evalName}" cannot be resolved in custom mode. Use --evaluator-arn with an evaluator ARN or ID, or use Builtin.* evaluators.`,
+      };
+    }
+  }
+
+  if (options.evaluatorArn) {
+    const resolved = resolveEvaluatorArns(options.evaluatorArn);
+    evaluatorIds.push(...resolved);
+    evaluatorLabels.push(...options.evaluatorArn);
+  }
+
+  if (evaluatorIds.length === 0) {
+    return { success: false, error: 'No evaluators specified. Use -e/--evaluator with Builtin.* or --evaluator-arn.' };
+  }
+
+  return {
+    success: true,
+    ctx: {
+      agentLabel: customServiceName,
+      region: options.region,
+      runtimeLogGroup: customLogGroupName,
+      evaluatorIds,
+      evaluatorLabels,
+      customServiceName,
     },
   };
 }
@@ -369,9 +427,11 @@ function sanitizeQueryValue(value: string): string {
 const MAX_DISCOVERED_SESSIONS = 50;
 
 export interface DiscoverSessionsOptions {
-  runtimeId: string;
+  runtimeId?: string;
   region: string;
   lookbackDays: number;
+  /** When set, filter by service.name instead of cloud.resource_id */
+  customServiceName?: string;
 }
 
 /**
@@ -389,9 +449,16 @@ export async function discoverSessions(opts: DiscoverSessionsOptions): Promise<S
     region: opts.region,
   });
 
+  let agentFilter: string;
+  if (opts.customServiceName) {
+    agentFilter = `filter resource.attributes.service.name = '${sanitizeQueryValue(opts.customServiceName)}'`;
+  } else {
+    agentFilter = `parse resource.attributes.cloud.resource_id "runtime/*/" as parsedAgentId
+     | filter parsedAgentId = '${sanitizeQueryValue(opts.runtimeId!)}'`;
+  }
+
   const query = `fields attributes.session.id as sessionId
-     | parse resource.attributes.cloud.resource_id "runtime/*/" as parsedAgentId
-     | filter parsedAgentId = '${sanitizeQueryValue(opts.runtimeId)}'
+     | ${agentFilter}
      | stats count(*) as spanCount, min(@timestamp) as firstSeen by sessionId
      | sort firstSeen desc
      | limit ${MAX_DISCOVERED_SESSIONS}`;
@@ -417,12 +484,14 @@ interface SessionSpans {
 }
 
 interface FetchSpansOptions {
-  runtimeId: string;
+  runtimeId?: string;
   runtimeLogGroup: string;
   region: string;
   lookbackDays: number;
   sessionId?: string;
   traceId?: string;
+  /** When set, filter by service.name instead of cloud.resource_id */
+  customServiceName?: string;
 }
 
 /**
@@ -444,10 +513,16 @@ async function fetchSessionSpans(opts: FetchSpansOptions): Promise<SessionSpans[
   });
 
   // 1. Query proper OTel spans from the aws/spans log group
-  let spanQuery = `fields @message, attributes.session.id as sessionId, traceId
+  let spanQuery: string;
+  if (opts.customServiceName) {
+    spanQuery = `fields @message, attributes.session.id as sessionId, traceId
+     | filter resource.attributes.service.name = '${sanitizeQueryValue(opts.customServiceName)}'`;
+  } else {
+    spanQuery = `fields @message, attributes.session.id as sessionId, traceId
      | parse resource.attributes.cloud.resource_id "runtime/*/" as parsedAgentId
-     | filter parsedAgentId = '${sanitizeQueryValue(runtimeId)}'
+     | filter parsedAgentId = '${sanitizeQueryValue(runtimeId!)}'
      | filter ispresent(scope.name)`;
+  }
 
   if (opts.sessionId) {
     spanQuery += `\n     | filter attributes.session.id = '${sanitizeQueryValue(opts.sessionId)}'`;
@@ -561,7 +636,9 @@ export interface RunEvalResult {
 export async function handleRunEval(options: RunEvalOptions): Promise<RunEvalResult> {
   let resolution: ResolveResult;
 
-  if (options.agentArn) {
+  if (options.customServiceName) {
+    resolution = resolveFromCustom(options);
+  } else if (options.agentArn) {
     resolution = resolveFromArn(options);
   } else {
     const context = await loadDeployedProjectConfig();
@@ -582,6 +659,7 @@ export async function handleRunEval(options: RunEvalOptions): Promise<RunEvalRes
     lookbackDays: options.days,
     sessionId: options.sessionId,
     traceId: options.traceId,
+    customServiceName: ctx.customServiceName,
   });
 
   // Filter to selected session IDs if provided (from TUI multi-select)
@@ -751,8 +829,8 @@ export async function handleRunEval(options: RunEvalOptions): Promise<RunEvalRes
   if (options.output) {
     writeFileSync(options.output, JSON.stringify(run, null, 2));
     filePath = options.output;
-  } else if (options.agentArn) {
-    // ARN mode may not have a project directory — save to cwd
+  } else if (options.agentArn || options.customServiceName) {
+    // ARN/custom mode may not have a project directory — save to cwd
     const fallbackPath = join(process.cwd(), `${generateFilename(timestamp)}.json`);
     writeFileSync(fallbackPath, JSON.stringify(run, null, 2));
     filePath = fallbackPath;

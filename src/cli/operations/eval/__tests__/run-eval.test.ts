@@ -1053,6 +1053,125 @@ describe('handleRunEval', () => {
     expect(query).not.toContain("sess'");
   });
 
+  // ─── Custom mode (external agents) ──────────────────────────────────────
+
+  it('resolves context from custom service name without project config', async () => {
+    setupCloudWatchToReturn([makeOtelSpanRow('s1', 't1')]);
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 4.0, context: { spanContext: { sessionId: 's1' } } }],
+    });
+
+    const result = await handleRunEval({
+      evaluator: ['Builtin.Helpfulness'],
+      customServiceName: 'my-external-agent',
+      customLogGroupName: '/custom/log-group',
+      region: 'us-west-2',
+      days: 7,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.run!.agent).toBe('my-external-agent');
+    expect(mockLoadDeployedProjectConfig).not.toHaveBeenCalled();
+    expect(mockResolveAgent).not.toHaveBeenCalled();
+  });
+
+  it('returns error when custom mode is missing region', async () => {
+    const result = await handleRunEval({
+      evaluator: ['Builtin.Helpfulness'],
+      customServiceName: 'my-external-agent',
+      customLogGroupName: '/custom/log-group',
+      days: 7,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('--region is required');
+  });
+
+  it('returns error when custom mode is missing log group name', async () => {
+    const result = await handleRunEval({
+      evaluator: ['Builtin.Helpfulness'],
+      customServiceName: 'my-external-agent',
+      region: 'us-west-2',
+      days: 7,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('--custom-log-group-name');
+  });
+
+  it('rejects custom evaluator names in custom mode', async () => {
+    const result = await handleRunEval({
+      evaluator: ['MyCustomEval'],
+      customServiceName: 'my-external-agent',
+      customLogGroupName: '/custom/log-group',
+      region: 'us-west-2',
+      days: 7,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('cannot be resolved in custom mode');
+  });
+
+  it('resolves evaluator ARNs in custom mode', async () => {
+    setupCloudWatchToReturn([makeOtelSpanRow('s1', 't1')]);
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 5.0, context: { spanContext: { sessionId: 's1' } } }],
+    });
+
+    const result = await handleRunEval({
+      evaluator: [],
+      evaluatorArn: ['arn:aws:bedrock-agentcore:us-west-2:123456789012:evaluator/eval-custom-ext'],
+      customServiceName: 'my-external-agent',
+      customLogGroupName: '/custom/log-group',
+      region: 'us-west-2',
+      days: 7,
+    });
+
+    expect(result.success).toBe(true);
+    expect(mockEvaluate).toHaveBeenCalledWith(expect.objectContaining({ evaluatorId: 'eval-custom-ext' }));
+  });
+
+  it('filters CloudWatch query by service.name in custom mode', async () => {
+    setupCloudWatchToReturn([makeOtelSpanRow('s1', 't1')]);
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 3.0, context: { spanContext: { sessionId: 's1' } } }],
+    });
+
+    await handleRunEval({
+      evaluator: ['Builtin.GoalSuccessRate'],
+      customServiceName: 'my-external-agent',
+      customLogGroupName: '/custom/log-group',
+      region: 'us-west-2',
+      days: 7,
+    });
+
+    const query = getFirstQueryString();
+    expect(query).toContain("resource.attributes.service.name = 'my-external-agent'");
+    expect(query).not.toContain('cloud.resource_id');
+  });
+
+  it('saves to cwd in custom mode when no --output is specified', async () => {
+    setupCloudWatchToReturn([makeOtelSpanRow('s1', 't1')]);
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 4.0, context: { spanContext: { sessionId: 's1' } } }],
+    });
+
+    const result = await handleRunEval({
+      evaluator: ['Builtin.Helpfulness'],
+      customServiceName: 'my-external-agent',
+      customLogGroupName: '/custom/log-group',
+      region: 'us-west-2',
+      days: 7,
+    });
+
+    expect(result.success).toBe(true);
+    expect(mockSaveEvalRun).not.toHaveBeenCalled();
+    expect(mockWriteFileSync).toHaveBeenCalledWith(
+      expect.stringContaining('eval_2025-01-15_10-00-00.json'),
+      expect.any(String)
+    );
+  });
+
   // ─── Query sanitization ───────────────────────────────────────────────────
 
   it('sanitizes runtimeId in CloudWatch query to prevent injection', async () => {

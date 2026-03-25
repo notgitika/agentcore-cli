@@ -1,0 +1,16 @@
+{"t":0,"agent":"hook-ag","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"hook-ag","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"hook-ag","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"a160d74","agent_type":"Explore","event":"agent_start","parent_mode":"none"}
+{"t":0,"agent":"a740f6b","agent_type":"general-purpose","event":"agent_start","parent_mode":"none"}
+{"t":0,"agent":"hook-ag","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"a160d74","agent_type":"Explore","event":"agent_stop","success":true,"duration_ms":208069}
+{"t":0,"agent":"a740f6b","agent_type":"general-purpose","event":"agent_stop","success":true,"duration_ms":240447}
+{"t":0,"agent":"system","event":"skill_invoked","skill_name":"commit-ready"}
+{"t":0,"agent":"hook-ag","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"hook-ag","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"hook-ag","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"hook-ag","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"hook-ag","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"hook-ag","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"hook-ag","agent_type":"unknown","event":"agent_stop","success":true}

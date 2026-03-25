@@ -53,7 +53,7 @@ export interface RunEvalOptions {
   evaluatorArn?: string[];
   /** Agent runtime ARN (ARN mode — bypasses project config) */
   agentArn?: string;
-  /** AWS region (required with --agent-arn, inferred otherwise) */
+  /** AWS region (required with --agent-arn or --custom-service-name, inferred otherwise) */
   region?: string;
   /** Filter to a specific session */
   sessionId?: string;
@@ -69,6 +69,10 @@ export interface RunEvalOptions {
   expectedTrajectory?: string[];
   /** Expected agent response text */
   expectedResponse?: string;
+  /** Custom service name for external agents (filters by service.name instead of cloud.resource_id) */
+  customServiceName?: string;
+  /** Custom CloudWatch log group name for external agents */
+  customLogGroupName?: string;
   days: number;
   output?: string;
   json?: boolean;
