@@ -41,7 +41,7 @@ export function probePath(execSyncFn, platform = process.platform) {
   }
   // Skip binaries installed via npm/node — a broken new CLI install would also
   // fail --version, and we don't want to block reinstallation.
-  if (/node_modules|\/npm\/|\/nvm\/|\/fnm\/|\\npm\\/.test(binaryPath)) {
+  if (/node_modules|[/\\]\.?(?:npm|nvm|fnm)[/\\]/.test(binaryPath)) {
     return null;
   }
   try {
@@ -75,30 +75,28 @@ export function detectOldToolkit(execSyncFn) {
 }
 
 /**
- * Format a user-facing error message listing per-installer uninstall commands.
+ * Format a user-facing warning message listing per-installer uninstall commands.
  */
-export function formatErrorMessage(detected) {
+export function formatWarningMessage(detected) {
+  const yellow = '\x1b[33m';
+  const bold = '\x1b[1m';
+  const reset = '\x1b[0m';
   const lines = [
     '',
-    '\x1b[31mError: The old Bedrock AgentCore Starter Toolkit is installed and conflicts with @aws/agentcore.\x1b[0m',
+    `${bold}${yellow}╔══════════════════════════════════════════════════════════════════╗${reset}`,
+    `${bold}${yellow}║  WARNING: Old Bedrock AgentCore Starter Toolkit detected        ║${reset}`,
+    `${bold}${yellow}╚══════════════════════════════════════════════════════════════════╝${reset}`,
     '',
-    'Uninstall it first, then re-run the install:',
+    `${yellow}The old Starter Toolkit CLI uses the same "agentcore" command name.${reset}`,
+    `${yellow}To avoid confusion, please uninstall it:${reset}`,
     '',
   ];
 
   for (const { installer, uninstallCmd } of detected) {
-    lines.push(`  ${uninstallCmd}  # installed via ${installer}`);
+    lines.push(`${yellow}  ${uninstallCmd}  # installed via ${installer}${reset}`);
   }
 
-  lines.push(
-    '',
-    'Then re-run:',
-    '',
-    '  npm install -g @aws/agentcore',
-    '',
-    'To bypass this check, set AGENTCORE_SKIP_CONFLICT_CHECK=1',
-    ''
-  );
+  lines.push('');
 
   return lines.join('\n');
 }

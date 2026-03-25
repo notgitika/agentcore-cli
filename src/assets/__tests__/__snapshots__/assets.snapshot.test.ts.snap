@@ -73,13 +73,19 @@ async function main() {
   const spec = await configIO.readProjectSpec();
   const targets = await configIO.readAWSDeploymentTargets();
 
-  // Read MCP configuration if it exists
-  let mcpSpec;
-  try {
-    mcpSpec = await configIO.readMcpSpec();
-  } catch {
-    // MCP config is optional
-  }
+  // Extract MCP configuration from project spec.
+  // Gateway fields are stored in agentcore.json but may not yet be on the
+  // AgentCoreProjectSpec type from @aws/agentcore-cdk, so we read them
+  // dynamically and cast the resulting object.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const specAny = spec as any;
+  const mcpSpec = specAny.agentCoreGateways?.length
+    ? {
+        agentCoreGateways: specAny.agentCoreGateways,
+        mcpRuntimeTools: specAny.mcpRuntimeTools,
+        unassignedTargets: specAny.unassignedTargets,
+      }
+    : undefined;
 
   // Read deployed state for credential ARNs (populated by pre-deploy identity setup)
   let deployedState: Record<string, unknown> | undefined;
@@ -301,6 +307,7 @@ export class AgentCoreStack extends Stack {
         mcpSpec,
         agentCoreApplication: this.application,
         credentials,
+        projectTags: spec.tags,
       });
     }
 
@@ -375,6 +382,9 @@ test('AgentCoreStack synthesizes with empty spec', () => {
       evaluators: [],
       onlineEvalConfigs: [],
       policyEngines: [],
+      agentCoreGateways: [],
+      mcpRuntimeTools: [],
+      unassignedTargets: [],
     },
   });
   const template = Template.fromStack(stack);
@@ -4266,7 +4276,7 @@ model** where agents, memories, and credentials are top-level arrays.
 The project uses a **flat resource model**. Agents, memories, and credentials are independent top-level arrays in
 \`agentcore.json\`. There is no binding or attachment between resources in the schema — each resource is provisioned
 independently. To use a memory or credential from an agent, the application code discovers the resource at runtime
-(e.g., via environment variables or SDK calls).
+(e.g., via environment variables or SDK calls). Tags defined in \`agentcore.json\` flow through to deployed CloudFormation resources.
 
 ## Critical Invariants
 

@@ -17,13 +17,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockReadProjectSpec = vi.fn();
 const mockConfigExists = vi.fn().mockReturnValue(true);
-const mockReadMcpSpec = vi.fn();
 
 vi.mock('../../../../lib/index.js', () => ({
   ConfigIO: class {
     readProjectSpec = mockReadProjectSpec;
     configExists = mockConfigExists;
-    readMcpSpec = mockReadMcpSpec;
   },
   findConfigRoot: vi.fn().mockReturnValue('/mock/project/agentcore'),
 }));
@@ -220,40 +218,29 @@ describe('validate', () => {
       expect(result.error?.includes('Invalid authorizer type')).toBeTruthy();
     });
 
-    // AC11: CUSTOM_JWT requires discoveryUrl
-    it('returns error for CUSTOM_JWT missing discoveryUrl', () => {
-      const opts = { ...validGatewayOptionsJwt, discoveryUrl: undefined };
-      const result = validateAddGatewayOptions(opts);
+    // AC11: CUSTOM_JWT requires discoveryUrl; at least one of allowedAudience/allowedClients/allowedScopes
+    it('returns error for CUSTOM_JWT missing required fields', () => {
+      // discoveryUrl is always required
+      const result = validateAddGatewayOptions({ ...validGatewayOptionsJwt, discoveryUrl: undefined });
       expect(result.valid).toBe(false);
       expect(result.error).toBe('--discovery-url is required for CUSTOM_JWT authorizer');
-    });
 
-    // AC11b: at least one of audience/clients/scopes required
-    it('returns error when all of audience, clients, and scopes are missing', () => {
-      const opts = {
+      // All three optional fields absent fails
+      const noneResult = validateAddGatewayOptions({
         ...validGatewayOptionsJwt,
         allowedAudience: undefined,
         allowedClients: undefined,
         allowedScopes: undefined,
-      };
-      const result = validateAddGatewayOptions(opts);
-      expect(result.valid).toBe(false);
-      expect(result.error).toContain('At least one of');
+      });
+      expect(noneResult.valid).toBe(false);
+      expect(noneResult.error).toBe(
+        'At least one of --allowed-audience, --allowed-clients, --allowed-scopes, or --custom-claims must be provided for CUSTOM_JWT authorizer'
+      );
     });
 
-    it('allows CUSTOM_JWT with only allowedScopes', () => {
-      const opts = {
-        ...validGatewayOptionsJwt,
-        allowedAudience: undefined,
-        allowedClients: undefined,
-        allowedScopes: 'scope1',
-      };
-      const result = validateAddGatewayOptions(opts);
-      expect(result.valid).toBe(true);
-    });
-
-    it('allows CUSTOM_JWT with only allowedAudience', () => {
-      const opts = { ...validGatewayOptionsJwt, allowedClients: undefined, allowedScopes: undefined };
+    // AC11b: allowedAudience is optional
+    it('allows CUSTOM_JWT without allowedAudience', () => {
+      const opts = { ...validGatewayOptionsJwt, allowedAudience: undefined };
       const result = validateAddGatewayOptions(opts);
       expect(result.valid).toBe(true);
     });
@@ -271,19 +258,86 @@ describe('validate', () => {
       expect(result.error?.includes('.well-known/openid-configuration')).toBeTruthy();
     });
 
-    it('returns error for HTTP discoveryUrl (HTTPS required)', () => {
+    // AC13: At least one of audience/clients/scopes must be non-empty
+    it('returns error when all of audience, clients, and scopes are empty', () => {
       const result = validateAddGatewayOptions({
         ...validGatewayOptionsJwt,
-        discoveryUrl: 'http://example.com/.well-known/openid-configuration',
+        allowedAudience: '  ',
+        allowedClients: undefined,
+        allowedScopes: undefined,
       });
       expect(result.valid).toBe(false);
-      expect(result.error).toBe('Discovery URL must use HTTPS');
+      expect(result.error).toBe(
+        'At least one of --allowed-audience, --allowed-clients, --allowed-scopes, or --custom-claims must be provided for CUSTOM_JWT authorizer'
+      );
     });
 
-    it('allows CUSTOM_JWT with only allowedClients', () => {
-      const opts = { ...validGatewayOptionsJwt, allowedAudience: undefined, allowedScopes: undefined };
-      const result = validateAddGatewayOptions(opts);
+    // AC-claims1: --custom-claims with valid JSON passes validation
+    it('accepts valid --custom-claims JSON', () => {
+      const result = validateAddGatewayOptions({
+        ...validGatewayOptionsJwt,
+        customClaims: JSON.stringify([
+          {
+            inboundTokenClaimName: 'dept',
+            inboundTokenClaimValueType: 'STRING',
+            authorizingClaimMatchValue: {
+              claimMatchOperator: 'EQUALS',
+              claimMatchValue: { matchValueString: 'engineering' },
+            },
+          },
+        ]),
+      });
       expect(result.valid).toBe(true);
+    });
+
+    // AC-claims2: --custom-claims alone satisfies the "at least one constraint" check
+    it('allows CUSTOM_JWT with only --custom-claims (no audience/clients/scopes)', () => {
+      const result = validateAddGatewayOptions({
+        name: 'test-gw',
+        authorizerType: 'CUSTOM_JWT',
+        discoveryUrl: 'https://example.com/.well-known/openid-configuration',
+        customClaims: JSON.stringify([
+          {
+            inboundTokenClaimName: 'role',
+            inboundTokenClaimValueType: 'STRING_ARRAY',
+            authorizingClaimMatchValue: {
+              claimMatchOperator: 'CONTAINS_ANY',
+              claimMatchValue: { matchValueStringList: ['admin'] },
+            },
+          },
+        ]),
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    // AC-claims3: --custom-claims with invalid JSON fails
+    it('returns error for --custom-claims with invalid JSON', () => {
+      const result = validateAddGatewayOptions({
+        ...validGatewayOptionsJwt,
+        customClaims: 'not json',
+      });
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('--custom-claims must be valid JSON');
+    });
+
+    // AC-claims4: --custom-claims with empty array fails
+    it('returns error for --custom-claims with empty array', () => {
+      const result = validateAddGatewayOptions({
+        ...validGatewayOptionsJwt,
+        customClaims: '[]',
+      });
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('--custom-claims must be a non-empty JSON array');
+    });
+
+    // AC-claims5: --custom-claims with invalid claim structure fails
+    it('returns error for --custom-claims with invalid claim structure', () => {
+      const result = validateAddGatewayOptions({
+        ...validGatewayOptionsJwt,
+        customClaims: JSON.stringify([{ badField: 'value' }]),
+      });
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('Invalid custom claim at index 0');
     });
 
     // AC14: Valid options pass
@@ -311,8 +365,8 @@ describe('validate', () => {
       expect(result.error).toBe('Both --client-id and --client-secret must be provided together');
     });
 
-    // AC16: OAuth credentials only valid with CUSTOM_JWT
-    it('returns error when OAuth credentials used with non-CUSTOM_JWT authorizer', () => {
+    // AC16: OAuth client credentials only valid with CUSTOM_JWT
+    it('returns error when OAuth client credentials used with non-CUSTOM_JWT authorizer', () => {
       const result = validateAddGatewayOptions({
         ...validGatewayOptionsNone,
         clientId: 'my-client-id',
@@ -322,8 +376,8 @@ describe('validate', () => {
       expect(result.error).toBe('OAuth client credentials are only valid with CUSTOM_JWT authorizer');
     });
 
-    // AC17: valid CUSTOM_JWT with OAuth credentials passes
-    it('passes for CUSTOM_JWT with OAuth credentials', () => {
+    // AC17: valid CUSTOM_JWT with OAuth client credentials passes
+    it('passes for CUSTOM_JWT with OAuth client credentials', () => {
       const result = validateAddGatewayOptions({
         ...validGatewayOptionsJwt,
         clientId: 'my-client-id',
@@ -337,7 +391,7 @@ describe('validate', () => {
   describe('validateAddGatewayTargetOptions', () => {
     beforeEach(() => {
       // By default, mock that the gateway from validGatewayTargetOptions exists
-      mockReadMcpSpec.mockResolvedValue({ agentCoreGateways: [{ name: 'my-gateway' }] });
+      mockReadProjectSpec.mockResolvedValue({ agentCoreGateways: [{ name: 'my-gateway' }] });
     });
 
     // AC15: Required fields validated
@@ -356,7 +410,7 @@ describe('validate', () => {
     });
 
     it('returns error when no gateways exist', async () => {
-      mockReadMcpSpec.mockResolvedValue({ agentCoreGateways: [] });
+      mockReadProjectSpec.mockResolvedValue({ agentCoreGateways: [] });
       const result = await validateAddGatewayTargetOptions({ ...validGatewayTargetOptions });
       expect(result.valid).toBe(false);
       expect(result.error).toContain('No gateways found');
@@ -364,7 +418,7 @@ describe('validate', () => {
     });
 
     it('returns error when specified gateway does not exist', async () => {
-      mockReadMcpSpec.mockResolvedValue({ agentCoreGateways: [{ name: 'other-gateway' }] });
+      mockReadProjectSpec.mockResolvedValue({ agentCoreGateways: [{ name: 'other-gateway' }] });
       const result = await validateAddGatewayTargetOptions({ ...validGatewayTargetOptions });
       expect(result.valid).toBe(false);
       expect(result.error).toContain('Gateway "my-gateway" not found');
@@ -470,6 +524,7 @@ describe('validate', () => {
     // AC21: credential validation through outbound auth
     it('returns error when credential not found', async () => {
       mockReadProjectSpec.mockResolvedValue({
+        agentCoreGateways: [{ name: 'my-gateway' }],
         credentials: [{ name: 'existing-cred', type: 'ApiKey' }],
       });
 
@@ -488,6 +543,7 @@ describe('validate', () => {
 
     it('returns error when no credentials configured', async () => {
       mockReadProjectSpec.mockResolvedValue({
+        agentCoreGateways: [{ name: 'my-gateway' }],
         credentials: [],
       });
 
@@ -506,6 +562,7 @@ describe('validate', () => {
 
     it('passes when credential exists', async () => {
       mockReadProjectSpec.mockResolvedValue({
+        agentCoreGateways: [{ name: 'my-gateway' }],
         credentials: [{ name: 'valid-cred', type: 'ApiKey' }],
       });
 

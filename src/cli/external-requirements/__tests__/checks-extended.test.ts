@@ -51,6 +51,7 @@ describe('requiresUv', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
     expect(requiresUv(project)).toBe(true);
@@ -75,6 +76,7 @@ describe('requiresUv', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
     expect(requiresUv(project)).toBe(false);
@@ -89,6 +91,7 @@ describe('requiresUv', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
     expect(requiresUv(project)).toBe(false);
@@ -115,6 +118,7 @@ describe('requiresContainerRuntime', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
     expect(requiresContainerRuntime(project)).toBe(true);
@@ -139,6 +143,7 @@ describe('requiresContainerRuntime', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
     expect(requiresContainerRuntime(project)).toBe(false);
@@ -153,6 +158,7 @@ describe('requiresContainerRuntime', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
     expect(requiresContainerRuntime(project)).toBe(false);
@@ -186,6 +192,7 @@ describe('requiresContainerRuntime', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
     expect(requiresContainerRuntime(project)).toBe(true);
@@ -251,6 +258,7 @@ describe('checkDependencyVersions', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -269,6 +277,7 @@ describe('checkDependencyVersions', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -296,6 +305,7 @@ describe('checkDependencyVersions', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 

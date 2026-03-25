@@ -72,11 +72,16 @@ function createDefaultProjectSpec(projectName: string): AgentCoreProjectSpec {
   return {
     name: projectName,
     version: 1,
+    tags: {
+      'agentcore:created-by': 'agentcore-cli',
+      'agentcore:project-name': projectName,
+    },
     agents: [],
     memories: [],
     credentials: [],
     evaluators: [],
     onlineEvalConfigs: [],
+    agentCoreGateways: [],
     policyEngines: [],
   };
 }
@@ -280,6 +285,7 @@ export function useCreateFlow(cwd: string): CreateFlowState {
                   networkMode: addAgentConfig.networkMode,
                   subnets: addAgentConfig.subnets,
                   securityGroups: addAgentConfig.securityGroups,
+                  requestHeaderAllowlist: addAgentConfig.requestHeaderAllowlist,
                 };
 
                 logger.logSubStep(`Framework: ${generateConfig.sdk}`);

@@ -85,14 +85,8 @@ export async function validateProject(): Promise<PreflightContext> {
   const hasEvaluators = projectSpec.evaluators && projectSpec.evaluators.length > 0;
   const hasPolicyEngines = projectSpec.policyEngines && projectSpec.policyEngines.length > 0;
 
-  // Check for gateways in mcp.json
-  let hasGateways = false;
-  try {
-    const mcpSpec = await configIO.readMcpSpec();
-    hasGateways = mcpSpec.agentCoreGateways && mcpSpec.agentCoreGateways.length > 0;
-  } catch {
-    // No mcp.json or invalid — no gateways
-  }
+  // Check for gateways in agentcore.json
+  const hasGateways = projectSpec.agentCoreGateways && projectSpec.agentCoreGateways.length > 0;
 
   if (!hasAgents && !hasGateways && !hasMemories && !hasEvaluators && !hasPolicyEngines) {
     let hasExistingStack = false;

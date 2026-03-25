@@ -30,7 +30,7 @@ Note: CDK L3 constructs are in a separate package `@aws/agentcore-cdk`.
 - `status` - Check deployment status
 - `dev` - Local development server (CodeZip: uvicorn with hot-reload; Container: Docker build + run with volume mount)
 - `invoke` - Invoke agents (local or deployed)
-- `run evals` - Run on-demand evaluation against agent sessions
+- `run eval` - Run on-demand evaluation against agent sessions
 - `evals history` - View past eval run results
 - `pause online-eval` - Pause (disable) a deployed online eval config
 - `resume online-eval` - Resume (enable) a paused online eval config
@@ -60,6 +60,8 @@ Note: CDK L3 constructs are in a separate package `@aws/agentcore-cdk`.
 
 All resource types (agent, memory, identity, evaluator, online-eval, gateway, mcp-tool) are modeled as **primitives** --
 self-contained classes in `src/cli/primitives/` that own the full add/remove lifecycle for their resource type.
+Resources support config-driven tagging via `agentcore.json` and `mcp.json`, with tags flowing through to deployed
+CloudFormation resources.
 
 Each primitive extends `BasePrimitive` and implements: `add()`, `remove()`, `previewRemove()`, `getRemovable()`,
 `registerCommands()`, and `addScreen()`.

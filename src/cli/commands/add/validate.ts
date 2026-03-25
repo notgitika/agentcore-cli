@@ -2,6 +2,7 @@ import { ConfigIO, findConfigRoot } from '../../../lib';
 import {
   AgentNameSchema,
   BuildTypeSchema,
+  CustomClaimValidationSchema,
   GatewayExceptionLevelSchema,
   GatewayNameSchema,
   ModelProviderSchema,
@@ -275,16 +276,36 @@ export function validateAddGatewayOptions(options: AddGatewayOptions): Validatio
       return { valid: false, error: `Discovery URL must end with ${OIDC_WELL_KNOWN_SUFFIX}` };
     }
 
-    // allowedAudience, allowedClients, allowedScopes are all optional individually,
+    // Validate custom claims JSON if provided
+    if (options.customClaims) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(options.customClaims);
+      } catch {
+        return { valid: false, error: '--custom-claims must be valid JSON' };
+      }
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        return { valid: false, error: '--custom-claims must be a non-empty JSON array' };
+      }
+      for (const [i, entry] of parsed.entries()) {
+        const result = CustomClaimValidationSchema.safeParse(entry);
+        if (!result.success) {
+          return { valid: false, error: `Invalid custom claim at index ${i}: ${result.error.issues[0]?.message}` };
+        }
+      }
+    }
+
+    // allowedAudience, allowedClients, allowedScopes, customClaims are all optional individually,
     // but at least one must be provided
     const hasAudience = !!options.allowedAudience?.trim();
     const hasClients = !!options.allowedClients?.trim();
     const hasScopes = !!options.allowedScopes?.trim();
-    if (!hasAudience && !hasClients && !hasScopes) {
+    const hasClaims = !!options.customClaims?.trim();
+    if (!hasAudience && !hasClients && !hasScopes && !hasClaims) {
       return {
         valid: false,
         error:
-          'At least one of --allowed-audience, --allowed-clients, or --allowed-scopes must be provided for CUSTOM_JWT authorizer',
+          'At least one of --allowed-audience, --allowed-clients, --allowed-scopes, or --custom-claims must be provided for CUSTOM_JWT authorizer',
       };
     }
   }
@@ -370,10 +391,8 @@ export async function validateAddGatewayTargetOptions(options: AddGatewayTargetO
   const gatewayConfigIO = new ConfigIO();
   let existingGateways: string[] = [];
   try {
-    if (gatewayConfigIO.configExists('mcp')) {
-      const mcpSpec = await gatewayConfigIO.readMcpSpec();
-      existingGateways = mcpSpec.agentCoreGateways.map(g => g.name);
-    }
+    const project = await gatewayConfigIO.readProjectSpec();
+    existingGateways = project.agentCoreGateways.map(g => g.name);
   } catch {
     // If we can't read the config, treat as no gateways
   }

@@ -10,6 +10,7 @@ import {
   RuntimeVersionSchema as RuntimeVersionSchemaFromConstants,
 } from '../constants';
 import type { DirectoryPath, FilePath } from '../types';
+import { TagsSchema } from './primitives/tags';
 import { z } from 'zod';
 
 // Re-export path types
@@ -121,6 +122,25 @@ export const NetworkConfigSchema = z.object({
 export type NetworkConfig = z.infer<typeof NetworkConfigSchema>;
 
 /**
+ * Allowed request headers for the runtime.
+ * Each header must be 'Authorization' or start with 'X-Amzn-Bedrock-AgentCore-Runtime-Custom-'.
+ * Maximum 20 headers.
+ */
+export const HEADER_ALLOWLIST_PREFIX = 'X-Amzn-Bedrock-AgentCore-Runtime-Custom-';
+export const MAX_HEADER_ALLOWLIST_SIZE = 20;
+
+export const RequestHeaderAllowlistSchema = z
+  .array(
+    z
+      .string()
+      .refine(
+        val => val === 'Authorization' || val.startsWith(HEADER_ALLOWLIST_PREFIX),
+        `Must be "Authorization" or start with "${HEADER_ALLOWLIST_PREFIX}"`
+      )
+  )
+  .max(MAX_HEADER_ALLOWLIST_SIZE, `Maximum ${MAX_HEADER_ALLOWLIST_SIZE} headers allowed`);
+
+/**
  * AgentEnvSpec - represents an AgentCore Runtime.
  * This is a top-level resource in the schema.
  */
@@ -144,6 +164,9 @@ export const AgentEnvSpecSchema = z
     modelProvider: ModelProviderSchema.optional(),
     /** Protocol for the runtime (HTTP, MCP, A2A). */
     protocol: ProtocolModeSchema.optional(),
+    /** Allowed request headers forwarded to the runtime at invocation time. */
+    requestHeaderAllowlist: RequestHeaderAllowlistSchema.optional(),
+    tags: TagsSchema.optional(),
   })
   .superRefine((data, ctx) => {
     if (data.networkMode === 'VPC' && !data.networkConfig) {

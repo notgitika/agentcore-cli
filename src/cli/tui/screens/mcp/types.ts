@@ -1,5 +1,6 @@
 import type {
   ApiGatewayHttpMethod,
+  CustomClaimValidation,
   GatewayAuthorizerType,
   GatewayExceptionLevel,
   GatewayPolicyEngineConfiguration,
@@ -35,6 +36,7 @@ export interface AddGatewayConfig {
     allowedAudience?: string[];
     allowedClients?: string[];
     allowedScopes?: string[];
+    customClaims?: CustomClaimValidation[];
     clientId?: string;
     clientSecret?: string;
   };

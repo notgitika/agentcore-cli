@@ -37,6 +37,7 @@ export interface AddGatewayOptions {
   allowedAudience?: string;
   allowedClients?: string;
   allowedScopes?: string;
+  customClaims?: string;
   clientId?: string;
   clientSecret?: string;
   agents?: string;

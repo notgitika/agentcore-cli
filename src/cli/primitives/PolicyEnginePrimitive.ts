@@ -53,19 +53,16 @@ export class PolicyEnginePrimitive extends BasePrimitive<AddPolicyEngineOptions,
       project.policyEngines.splice(index, 1);
       await this.writeProjectSpec(project);
 
-      // Clean up any gateway references to this engine in mcp.json
-      if (this.configIO.configExists('mcp')) {
-        const mcpSpec = await this.configIO.readMcpSpec();
-        let changed = false;
-        for (const gw of mcpSpec.agentCoreGateways) {
-          if (gw.policyEngineConfiguration?.policyEngineName === engineName) {
-            delete gw.policyEngineConfiguration;
-            changed = true;
-          }
+      // Clean up any gateway references to this engine in agentcore.json
+      let changed = false;
+      for (const gw of project.agentCoreGateways) {
+        if (gw.policyEngineConfiguration?.policyEngineName === engineName) {
+          delete gw.policyEngineConfiguration;
+          changed = true;
         }
-        if (changed) {
-          await this.configIO.writeMcpSpec(mcpSpec);
-        }
+      }
+      if (changed) {
+        await this.writeProjectSpec(project);
       }
 
       return { success: true };
@@ -99,33 +96,17 @@ export class PolicyEnginePrimitive extends BasePrimitive<AddPolicyEngineOptions,
       after: afterSpec,
     });
 
-    // Show mcp.json changes if any gateways reference this engine
-    if (this.configIO.configExists('mcp')) {
-      const mcpSpec = await this.configIO.readMcpSpec();
-      const affectedGateways = mcpSpec.agentCoreGateways.filter(
-        gw => gw.policyEngineConfiguration?.policyEngineName === engineName
+    // Show changes if any gateways reference this engine
+    const affectedGateways = project.agentCoreGateways.filter(
+      gw => gw.policyEngineConfiguration?.policyEngineName === engineName
+    );
+    if (affectedGateways.length > 0) {
+      summary.push(
+        `Note: ${affectedGateways.length} gateway(s) referencing this engine will have policyEngineConfiguration removed`
       );
-      if (affectedGateways.length > 0) {
-        summary.push(
-          `Note: ${affectedGateways.length} gateway(s) referencing this engine will have policyEngineConfiguration removed`
-        );
-        summary.push(
-          'Warning: this may grant agents escalated permissions to invoke gateway tools that were previously restricted'
-        );
-        const afterMcpSpec = {
-          ...mcpSpec,
-          agentCoreGateways: mcpSpec.agentCoreGateways.map(gw =>
-            gw.policyEngineConfiguration?.policyEngineName === engineName
-              ? { ...gw, policyEngineConfiguration: undefined }
-              : gw
-          ),
-        };
-        schemaChanges.push({
-          file: 'agentcore/mcp.json',
-          before: mcpSpec,
-          after: afterMcpSpec,
-        });
-      }
+      summary.push(
+        'Warning: this may grant agents escalated permissions to invoke gateway tools that were previously restricted'
+      );
     }
 
     return { summary, directoriesToDelete: [], schemaChanges };
@@ -154,9 +135,8 @@ export class PolicyEnginePrimitive extends BasePrimitive<AddPolicyEngineOptions,
    */
   async getUnprotectedGateways(): Promise<string[]> {
     try {
-      if (!this.configIO.configExists('mcp')) return [];
-      const mcpSpec = await this.configIO.readMcpSpec();
-      return mcpSpec.agentCoreGateways.filter(gw => !gw.policyEngineConfiguration).map(gw => gw.name);
+      const project = await this.readProjectSpec();
+      return project.agentCoreGateways.filter(gw => !gw.policyEngineConfiguration).map(gw => gw.name);
     } catch {
       return [];
     }
@@ -166,15 +146,15 @@ export class PolicyEnginePrimitive extends BasePrimitive<AddPolicyEngineOptions,
    * Attach a policy engine to the specified gateways in mcp.json.
    */
   async attachToGateways(engineName: string, gatewayNames: string[], mode: 'LOG_ONLY' | 'ENFORCE'): Promise<void> {
-    if (gatewayNames.length === 0 || !this.configIO.configExists('mcp')) return;
-    const mcpSpec = await this.configIO.readMcpSpec();
+    if (gatewayNames.length === 0) return;
+    const project = await this.readProjectSpec();
     const nameSet = new Set(gatewayNames);
-    for (const gw of mcpSpec.agentCoreGateways) {
+    for (const gw of project.agentCoreGateways) {
       if (nameSet.has(gw.name)) {
         gw.policyEngineConfiguration = { policyEngineName: engineName, mode };
       }
     }
-    await this.configIO.writeMcpSpec(mcpSpec);
+    await this.writeProjectSpec(project);
   }
 
   async getDeployedEngineId(engineName: string): Promise<string | null> {

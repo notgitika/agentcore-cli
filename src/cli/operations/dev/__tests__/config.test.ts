@@ -18,6 +18,7 @@ describe('getDevConfig', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -44,6 +45,7 @@ describe('getDevConfig', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -70,6 +72,7 @@ describe('getDevConfig', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -102,6 +105,7 @@ describe('getDevConfig', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -129,6 +133,7 @@ describe('getDevConfig', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -154,6 +159,7 @@ describe('getDevConfig', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -182,6 +188,7 @@ describe('getDevConfig', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -210,6 +217,7 @@ describe('getDevConfig', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -238,6 +246,7 @@ describe('getDevConfig', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -265,6 +274,7 @@ describe('getDevConfig', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -292,6 +302,7 @@ describe('getDevConfig', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -319,6 +330,7 @@ describe('getDevConfig', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -346,6 +358,7 @@ describe('getDevConfig', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -388,6 +401,7 @@ describe('getAgentPort', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -404,6 +418,7 @@ describe('getAgentPort', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -425,6 +440,7 @@ describe('getDevSupportedAgents', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -450,6 +466,7 @@ describe('getDevSupportedAgents', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -484,6 +501,7 @@ describe('getDevSupportedAgents', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -511,6 +529,7 @@ describe('getDevSupportedAgents', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 
@@ -547,6 +566,7 @@ describe('getDevSupportedAgents', () => {
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
+      agentCoreGateways: [],
       policyEngines: [],
     };
 

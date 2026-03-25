@@ -1,6 +1,7 @@
 import { PolicyNameSchema } from '../../../../schema';
 import { detectRegion } from '../../../aws';
 import { getPolicyGeneration, startPolicyGeneration } from '../../../aws/policy-generation';
+import { policyEnginePrimitive } from '../../../primitives/registry';
 import { ConfirmReview, Panel, PathInput, Screen, StepIndicator, TextInput, WizardSelect } from '../../components';
 import type { SelectableItem } from '../../components';
 import { HELP_TEXT } from '../../constants';
@@ -187,7 +188,6 @@ export function AddPolicyScreen({
         const region = regionResult.region;
 
         // policyEngineId is needed; get it from deployed state
-        const { policyEnginePrimitive } = await import('../../../primitives/registry');
         const policyEngineId = await policyEnginePrimitive.getDeployedEngineId(wizard.config.engine);
 
         if (!policyEngineId) {

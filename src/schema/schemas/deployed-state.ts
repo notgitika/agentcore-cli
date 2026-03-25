@@ -1,4 +1,5 @@
 import { DeploymentTargetNameSchema } from './aws-targets';
+import { CustomClaimValidationSchema } from './mcp';
 import { z } from 'zod';
 
 // ============================================================================
@@ -89,6 +90,7 @@ export const CustomJwtAuthorizerSchema = ExternallyManagedResourceSchema.extend(
   allowedAudience: z.array(z.string()).optional(),
   allowedClients: z.array(z.string()).optional(),
   allowedScopes: z.array(z.string()).optional(),
+  customClaims: z.array(CustomClaimValidationSchema).optional(),
   discoveryUrl: z.string(),
 });
 

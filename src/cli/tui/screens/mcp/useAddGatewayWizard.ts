@@ -1,4 +1,9 @@
-import type { GatewayAuthorizerType, GatewayExceptionLevel, PolicyEngineMode } from '../../../../schema';
+import type {
+  CustomClaimValidation,
+  GatewayAuthorizerType,
+  GatewayExceptionLevel,
+  PolicyEngineMode,
+} from '../../../../schema';
 import type { AddGatewayConfig, AddGatewayStep } from './types';
 import { useCallback, useMemo, useState } from 'react';
 
@@ -84,6 +89,7 @@ export function useAddGatewayWizard(unassignedTargetsCount = 0, policyEngineCoun
       allowedAudience?: string[];
       allowedClients?: string[];
       allowedScopes?: string[];
+      customClaims?: CustomClaimValidation[];
       clientId?: string;
       clientSecret?: string;
     }) => {

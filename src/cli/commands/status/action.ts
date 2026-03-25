@@ -1,11 +1,5 @@
 import { ConfigIO } from '../../../lib';
-import type {
-  AgentCoreMcpSpec,
-  AgentCoreProjectSpec,
-  AwsDeploymentTargets,
-  DeployedResourceState,
-  DeployedState,
-} from '../../../schema';
+import type { AgentCoreProjectSpec, AwsDeploymentTargets, DeployedResourceState, DeployedState } from '../../../schema';
 import { getAgentRuntimeStatus } from '../../aws';
 import { getEvaluator, getOnlineEvaluationConfig } from '../../aws/agentcore-control';
 import { getErrorMessage } from '../../errors';
@@ -45,7 +39,6 @@ export interface StatusContext {
   project: AgentCoreProjectSpec;
   deployedState: DeployedState;
   awsTargets: AwsDeploymentTargets;
-  mcpSpec?: AgentCoreMcpSpec;
 }
 
 export interface RuntimeLookupResult {
@@ -62,16 +55,15 @@ export interface RuntimeLookupResult {
  * Gracefully handles missing deployed-state by returning empty targets.
  */
 export async function loadStatusConfig(configIO: ConfigIO = new ConfigIO()): Promise<StatusContext> {
-  const [project, awsTargets, deployedState, mcpSpec] = await Promise.all([
+  const [project, awsTargets, deployedState] = await Promise.all([
     configIO.readProjectSpec(),
     configIO.readAWSDeploymentTargets(),
     configIO.configExists('state')
       ? configIO.readDeployedState()
       : (Promise.resolve({ targets: {} }) as Promise<DeployedState>),
-    configIO.configExists('mcp') ? configIO.readMcpSpec() : Promise.resolve(undefined),
   ]);
 
-  return { project, deployedState, awsTargets, mcpSpec };
+  return { project, deployedState, awsTargets };
 }
 
 /**
@@ -124,8 +116,7 @@ function diffResourceSet<TLocal extends { name: string }, TDeployed>({
 
 export function computeResourceStatuses(
   project: AgentCoreProjectSpec,
-  resources: DeployedResourceState | undefined,
-  mcpSpec?: AgentCoreMcpSpec
+  resources: DeployedResourceState | undefined
 ): ResourceStatusEntry[] {
   const agents = diffResourceSet({
     resourceType: 'agent',
@@ -155,7 +146,7 @@ export function computeResourceStatuses(
 
   const gateways = diffResourceSet({
     resourceType: 'gateway',
-    localItems: mcpSpec?.agentCoreGateways ?? [],
+    localItems: project.agentCoreGateways ?? [],
     deployedRecord: resources?.mcp?.gateways ?? {},
     getIdentifier: deployed => deployed.gatewayId,
     getLocalDetail: item => {
@@ -226,7 +217,7 @@ export async function handleProjectStatus(
   options: { targetName?: string } = {}
 ): Promise<ProjectStatusResult> {
   const logger = new ExecLogger({ command: 'status' });
-  const { project, deployedState, awsTargets, mcpSpec } = context;
+  const { project, deployedState, awsTargets } = context;
 
   logger.startStep('Resolve target');
   const deployedTargetNames = Object.keys(deployedState.targets);
@@ -259,7 +250,7 @@ export async function handleProjectStatus(
   const targetConfig = selectedTargetName ? awsTargets.find(t => t.name === selectedTargetName) : undefined;
   const targetResources = selectedTargetName ? deployedState.targets[selectedTargetName]?.resources : undefined;
 
-  const resources = computeResourceStatuses(project, targetResources, mcpSpec);
+  const resources = computeResourceStatuses(project, targetResources);
 
   const deployed = resources.filter(r => r.deploymentState === 'deployed').length;
   const localOnly = resources.filter(r => r.deploymentState === 'local-only').length;

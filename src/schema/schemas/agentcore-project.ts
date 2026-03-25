@@ -8,10 +8,12 @@
  */
 import { isReservedProjectName } from '../constants';
 import { AgentEnvSpecSchema } from './agent-env';
+import { AgentCoreGatewaySchema, AgentCoreGatewayTargetSchema, AgentCoreMcpRuntimeToolSchema } from './mcp';
 import { EvaluationLevelSchema, EvaluatorConfigSchema, EvaluatorNameSchema } from './primitives/evaluator';
 import { DEFAULT_STRATEGY_NAMESPACES, MemoryStrategySchema, MemoryStrategyTypeSchema } from './primitives/memory';
 import { OnlineEvalConfigSchema } from './primitives/online-eval-config';
 import { PolicyEngineSchema } from './primitives/policy';
+import { TagsSchema } from './primitives/tags';
 import { uniqueBy } from './zod-util';
 import { z } from 'zod';
 
@@ -26,6 +28,12 @@ export { BedrockModelIdSchema, isValidBedrockModelId, EvaluatorNameSchema } from
 export { PolicyEngineSchema };
 export type { Policy, PolicyEngine, ValidationMode } from './primitives/policy';
 export { PolicyEngineNameSchema, PolicyNameSchema, PolicySchema, ValidationModeSchema } from './primitives/policy';
+export { TagsSchema };
+export type { Tags } from './primitives/tags';
+
+// Re-export MCP types (now part of unified schema)
+export type { AgentCoreGateway, AgentCoreGatewayTarget, AgentCoreMcpRuntimeTool } from './mcp';
+export { AgentCoreGatewaySchema, AgentCoreGatewayTargetSchema, AgentCoreMcpRuntimeToolSchema } from './mcp';
 
 // ============================================================================
 // Project Name Schema
@@ -74,6 +82,7 @@ export const MemorySchema = z.object({
         type => `Duplicate memory strategy type: ${type}`
       )
     ),
+  tags: TagsSchema.optional(),
 });
 
 export type Memory = z.infer<typeof MemorySchema>;
@@ -135,6 +144,7 @@ export const EvaluatorSchema = z.object({
   level: EvaluationLevelSchema,
   description: z.string().optional(),
   config: EvaluatorConfigSchema,
+  tags: TagsSchema.optional(),
 });
 
 export type Evaluator = z.infer<typeof EvaluatorSchema>;
@@ -150,6 +160,7 @@ export const AgentCoreProjectSpecSchema = z
   .object({
     name: ProjectNameSchema,
     version: z.number().int(),
+    tags: TagsSchema.optional(),
 
     agents: z
       .array(AgentEnvSpecSchema)
@@ -201,6 +212,39 @@ export const AgentCoreProjectSpecSchema = z
         )
       ),
 
+    // MCP / Gateway resources (previously in mcp.json)
+    agentCoreGateways: z
+      .array(AgentCoreGatewaySchema)
+      .default([])
+      .superRefine(
+        uniqueBy(
+          gateway => gateway.name,
+          name => `Duplicate gateway name: ${name}`
+        )
+      ),
+
+    mcpRuntimeTools: z
+      .array(AgentCoreMcpRuntimeToolSchema)
+      .optional()
+      .superRefine((tools, ctx) => {
+        if (!tools) return;
+        uniqueBy(
+          (tool: { name: string }) => tool.name,
+          (name: string) => `Duplicate MCP runtime tool name: ${name}`
+        )(tools, ctx);
+      }),
+
+    unassignedTargets: z
+      .array(AgentCoreGatewayTargetSchema)
+      .optional()
+      .superRefine((targets, ctx) => {
+        if (!targets) return;
+        uniqueBy(
+          (target: { name: string }) => target.name,
+          (name: string) => `Duplicate unassigned target name: ${name}`
+        )(targets, ctx);
+      }),
+
     policyEngines: z
       .array(PolicyEngineSchema)
       .default([])
@@ -211,6 +255,7 @@ export const AgentCoreProjectSpecSchema = z
         )
       ),
   })
+  .strict()
   .superRefine((spec, ctx) => {
     const agentNames = new Set(spec.agents.map(a => a.name));
     const evaluatorNames = new Set(spec.evaluators.map(e => e.name));
