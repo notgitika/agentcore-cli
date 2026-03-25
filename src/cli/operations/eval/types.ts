@@ -73,6 +73,8 @@ export interface RunEvalOptions {
   customServiceName?: string;
   /** Custom CloudWatch log group name for external agents */
   customLogGroupName?: string;
+  /** Path to a local trace file or directory of trace files (skips CloudWatch) */
+  inputPath?: string;
   days: number;
   output?: string;
   json?: boolean;

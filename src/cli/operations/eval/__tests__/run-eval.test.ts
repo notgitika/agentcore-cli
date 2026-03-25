@@ -12,6 +12,10 @@ const mockGenerateFilename = vi.fn();
 const mockSend = vi.fn();
 const mockGetCredentialProvider = vi.fn().mockReturnValue({});
 const mockWriteFileSync = vi.fn();
+const mockExistsSync = vi.fn();
+const mockReadFileSync = vi.fn();
+const mockReaddirSync = vi.fn();
+const mockStatSync = vi.fn();
 
 vi.mock('../../resolve-agent', () => ({
   loadDeployedProjectConfig: () => mockLoadDeployedProjectConfig(),
@@ -40,6 +44,10 @@ vi.mock('fs', async importOriginal => {
   return {
     ...original,
     writeFileSync: (...args: unknown[]) => mockWriteFileSync(...args),
+    existsSync: (...args: unknown[]) => mockExistsSync(...args),
+    readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
+    readdirSync: (...args: unknown[]) => mockReaddirSync(...args),
+    statSync: (...args: unknown[]) => mockStatSync(...args),
   };
 });
 
@@ -1161,6 +1169,178 @@ describe('handleRunEval', () => {
       customServiceName: 'my-external-agent',
       customLogGroupName: '/custom/log-group',
       region: 'us-west-2',
+      days: 7,
+    });
+
+    expect(result.success).toBe(true);
+    expect(mockSaveEvalRun).not.toHaveBeenCalled();
+    expect(mockWriteFileSync).toHaveBeenCalledWith(
+      expect.stringContaining('eval_2025-01-15_10-00-00.json'),
+      expect.any(String)
+    );
+  });
+
+  // ─── Input-path mode (local traces) ─────────────────────────────────────
+
+  function makeTracesGetEntry(sessionId: string, traceId: string, spanBody: Record<string, unknown> = {}) {
+    return {
+      '@timestamp': '2025-01-15 10:00:00.000',
+      '@message': {
+        scope: { name: 'strands.telemetry.tracer' },
+        body: spanBody,
+        traceId,
+        attributes: { 'session.id': sessionId },
+      },
+    };
+  }
+
+  function makeRawSpanEntry(sessionId: string, traceId: string) {
+    return {
+      scope: { name: 'strands.telemetry.tracer' },
+      traceId,
+      attributes: { 'session.id': sessionId },
+      body: {},
+    };
+  }
+
+  it('loads spans from a local trace file and evaluates', async () => {
+    const traceData = [makeTracesGetEntry('session-1', 'trace-1')];
+    mockExistsSync.mockReturnValue(true);
+    mockStatSync.mockReturnValue({ isDirectory: () => false });
+    mockReadFileSync.mockReturnValue(JSON.stringify(traceData));
+
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 4.0, context: { spanContext: { sessionId: 'session-1' } } }],
+    });
+
+    const result = await handleRunEval({
+      evaluator: ['Builtin.GoalSuccessRate'],
+      inputPath: '/tmp/trace.json',
+      region: 'us-east-1',
+      days: 7,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.run!.agent).toBe('local');
+    expect(result.run!.sessionCount).toBe(1);
+    expect(mockLoadDeployedProjectConfig).not.toHaveBeenCalled();
+    expect(mockSend).not.toHaveBeenCalled(); // No CloudWatch calls
+  });
+
+  it('loads spans from a directory of trace files', async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockStatSync.mockReturnValue({ isDirectory: () => true });
+    mockReaddirSync.mockReturnValue(['trace1.json', 'trace2.json', 'readme.txt']);
+    mockReadFileSync.mockImplementation((filePath: string) => {
+      if (filePath.includes('trace1')) {
+        return JSON.stringify([makeTracesGetEntry('session-1', 'trace-1')]);
+      }
+      return JSON.stringify([makeTracesGetEntry('session-2', 'trace-2')]);
+    });
+
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 3.0, context: { spanContext: { sessionId: 'session-1' } } }],
+    });
+
+    const result = await handleRunEval({
+      evaluator: ['Builtin.GoalSuccessRate'],
+      inputPath: '/tmp/traces/',
+      region: 'us-east-1',
+      days: 7,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.run!.sessionCount).toBe(2);
+  });
+
+  it('supports raw span format (without @message wrapper)', async () => {
+    const traceData = [makeRawSpanEntry('session-1', 'trace-1')];
+    mockExistsSync.mockReturnValue(true);
+    mockStatSync.mockReturnValue({ isDirectory: () => false });
+    mockReadFileSync.mockReturnValue(JSON.stringify(traceData));
+
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 5.0, context: { spanContext: { sessionId: 'session-1' } } }],
+    });
+
+    const result = await handleRunEval({
+      evaluator: ['Builtin.Helpfulness'],
+      inputPath: '/tmp/raw-spans.json',
+      region: 'us-east-1',
+      days: 7,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.run!.sessionCount).toBe(1);
+  });
+
+  it('returns error when input path does not exist', async () => {
+    mockExistsSync.mockReturnValue(false);
+
+    const result = await handleRunEval({
+      evaluator: ['Builtin.GoalSuccessRate'],
+      inputPath: '/tmp/nonexistent.json',
+      region: 'us-east-1',
+      days: 7,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Path not found');
+  });
+
+  it('returns error when directory has no JSON files', async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockStatSync.mockReturnValue({ isDirectory: () => true });
+    mockReaddirSync.mockReturnValue(['readme.txt', 'notes.md']);
+
+    const result = await handleRunEval({
+      evaluator: ['Builtin.GoalSuccessRate'],
+      inputPath: '/tmp/empty-dir/',
+      region: 'us-east-1',
+      days: 7,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('No .json files found');
+  });
+
+  it('returns error when --region is missing in input-path mode', async () => {
+    const result = await handleRunEval({
+      evaluator: ['Builtin.GoalSuccessRate'],
+      inputPath: '/tmp/trace.json',
+      days: 7,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('--region is required');
+  });
+
+  it('rejects custom evaluator names in input-path mode', async () => {
+    const result = await handleRunEval({
+      evaluator: ['MyCustomEval'],
+      inputPath: '/tmp/trace.json',
+      region: 'us-east-1',
+      days: 7,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('cannot be resolved in input-path mode');
+  });
+
+  it('saves to cwd in input-path mode when no --output is specified', async () => {
+    const traceData = [makeTracesGetEntry('session-1', 'trace-1')];
+    mockExistsSync.mockReturnValue(true);
+    mockStatSync.mockReturnValue({ isDirectory: () => false });
+    mockReadFileSync.mockReturnValue(JSON.stringify(traceData));
+
+    mockEvaluate.mockResolvedValue({
+      evaluationResults: [{ value: 4.0, context: { spanContext: { sessionId: 'session-1' } } }],
+    });
+
+    const result = await handleRunEval({
+      evaluator: ['Builtin.GoalSuccessRate'],
+      inputPath: '/tmp/trace.json',
+      region: 'us-east-1',
       days: 7,
     });
 

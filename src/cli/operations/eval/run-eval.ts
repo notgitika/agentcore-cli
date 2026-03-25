@@ -10,7 +10,7 @@ import type { EvaluationReferenceInput } from '@aws-sdk/client-bedrock-agentcore
 import { CloudWatchLogsClient, GetQueryResultsCommand, StartQueryCommand } from '@aws-sdk/client-cloudwatch-logs';
 import type { ResultField } from '@aws-sdk/client-cloudwatch-logs';
 import type { DocumentType } from '@smithy/types';
-import { writeFileSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 const SPANS_LOG_GROUP = 'aws/spans';
@@ -226,6 +226,160 @@ function resolveFromCustom(options: RunEvalOptions): ResolveResult {
       customServiceName,
     },
   };
+}
+
+/**
+ * Input-path mode: resolve context for local trace files.
+ * Evaluators must come from Builtin.* names or --evaluator-arn. Requires --region.
+ */
+function resolveFromInput(options: RunEvalOptions): ResolveResult {
+  if (!options.region) {
+    return { success: false, error: '--region is required when using --input-path' };
+  }
+
+  const evaluatorIds: string[] = [];
+  const evaluatorLabels: string[] = [];
+
+  for (const evalName of options.evaluator) {
+    if (evalName.startsWith('Builtin.')) {
+      evaluatorIds.push(evalName);
+      evaluatorLabels.push(evalName);
+    } else {
+      return {
+        success: false,
+        error: `Custom evaluator "${evalName}" cannot be resolved in input-path mode. Use --evaluator-arn with an evaluator ARN or ID, or use Builtin.* evaluators.`,
+      };
+    }
+  }
+
+  if (options.evaluatorArn) {
+    const resolved = resolveEvaluatorArns(options.evaluatorArn);
+    evaluatorIds.push(...resolved);
+    evaluatorLabels.push(...options.evaluatorArn);
+  }
+
+  if (evaluatorIds.length === 0) {
+    return { success: false, error: 'No evaluators specified. Use -e/--evaluator with Builtin.* or --evaluator-arn.' };
+  }
+
+  return {
+    success: true,
+    ctx: {
+      agentLabel: 'local',
+      region: options.region,
+      runtimeLogGroup: '',
+      evaluatorIds,
+      evaluatorLabels,
+    },
+  };
+}
+
+/**
+ * Load span documents from a local file or directory of JSON files.
+ *
+ * Supports two formats:
+ * 1. `traces get` output: array of objects with `@message` field (parsed or string)
+ * 2. Raw span array: array of OTel span documents directly
+ *
+ * Returns spans grouped by session ID.
+ */
+function loadSpansFromPath(
+  inputPath: string
+): { success: true; sessions: SessionSpans[] } | { success: false; error: string } {
+  if (!existsSync(inputPath)) {
+    return { success: false, error: `Path not found: ${inputPath}` };
+  }
+
+  const filePaths: string[] = [];
+  const stat = statSync(inputPath);
+
+  if (stat.isDirectory()) {
+    const entries = readdirSync(inputPath).filter(f => f.endsWith('.json'));
+    if (entries.length === 0) {
+      return { success: false, error: `No .json files found in directory: ${inputPath}` };
+    }
+    filePaths.push(...entries.map(f => join(inputPath, f)));
+  } else {
+    filePaths.push(inputPath);
+  }
+
+  const sessionMap = new Map<string, DocumentType[]>();
+
+  for (const filePath of filePaths) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(filePath, 'utf-8'));
+    } catch {
+      return { success: false, error: `Failed to parse JSON from: ${filePath}` };
+    }
+
+    if (!Array.isArray(parsed)) {
+      return { success: false, error: `Expected a JSON array in: ${filePath}` };
+    }
+
+    for (const entry of parsed) {
+      const doc = extractSpanDoc(entry as Record<string, unknown>);
+      if (!doc) continue;
+
+      const sessionId = extractSessionId(doc) ?? 'unknown';
+      if (!sessionMap.has(sessionId)) {
+        sessionMap.set(sessionId, []);
+      }
+      sessionMap.get(sessionId)!.push(doc as DocumentType);
+    }
+  }
+
+  const sessions: SessionSpans[] = [];
+  for (const [sessionId, spans] of sessionMap) {
+    if (spans.length > 0) {
+      sessions.push({ sessionId, spans });
+    }
+  }
+
+  return { success: true, sessions };
+}
+
+/**
+ * Extract a span document from an entry. Handles both:
+ * - `traces get` format: `{ "@message": { ... }, "@timestamp": ... }`
+ * - Raw span format: `{ traceId: ..., scope: ..., ... }`
+ */
+function extractSpanDoc(entry: Record<string, unknown>): Record<string, unknown> | undefined {
+  // traces get format: @message contains the actual span
+  if ('@message' in entry) {
+    const msg = entry['@message'];
+    if (typeof msg === 'string') {
+      try {
+        return JSON.parse(msg) as Record<string, unknown>;
+      } catch {
+        return undefined;
+      }
+    }
+    if (msg && typeof msg === 'object') {
+      return msg as Record<string, unknown>;
+    }
+    return undefined;
+  }
+
+  // Raw span document (has traceId or scope)
+  if ('traceId' in entry || 'scope' in entry || 'body' in entry) {
+    return entry;
+  }
+
+  return undefined;
+}
+
+/** Extract session ID from a span document's attributes. */
+function extractSessionId(doc: Record<string, unknown>): string | undefined {
+  const attrs = doc.attributes as Record<string, unknown> | undefined;
+  if (attrs?.['session.id']) return attrs['session.id'] as string;
+
+  // Some spans nest under resource.attributes
+  const resource = doc.resource as Record<string, unknown> | undefined;
+  const resourceAttrs = resource?.attributes as Record<string, unknown> | undefined;
+  if (resourceAttrs?.['session.id']) return resourceAttrs['session.id'] as string;
+
+  return undefined;
 }
 
 type EvaluatorLevel = 'SESSION' | 'TRACE' | 'TOOL_CALL';
@@ -636,7 +790,9 @@ export interface RunEvalResult {
 export async function handleRunEval(options: RunEvalOptions): Promise<RunEvalResult> {
   let resolution: ResolveResult;
 
-  if (options.customServiceName) {
+  if (options.inputPath) {
+    resolution = resolveFromInput(options);
+  } else if (options.customServiceName) {
     resolution = resolveFromCustom(options);
   } else if (options.agentArn) {
     resolution = resolveFromArn(options);
@@ -651,28 +807,38 @@ export async function handleRunEval(options: RunEvalOptions): Promise<RunEvalRes
 
   const { ctx } = resolution;
 
-  // Fetch spans grouped by session
-  let sessions = await fetchSessionSpans({
-    runtimeId: ctx.runtimeId,
-    runtimeLogGroup: ctx.runtimeLogGroup,
-    region: ctx.region,
-    lookbackDays: options.days,
-    sessionId: options.sessionId,
-    traceId: options.traceId,
-    customServiceName: ctx.customServiceName,
-  });
+  // Load spans — from local files or CloudWatch
+  let sessions: SessionSpans[];
 
-  // Filter to selected session IDs if provided (from TUI multi-select)
-  if (options.sessionIds && options.sessionIds.length > 0) {
-    const selected = new Set(options.sessionIds);
-    sessions = sessions.filter(s => selected.has(s.sessionId));
+  if (options.inputPath) {
+    const loadResult = loadSpansFromPath(options.inputPath);
+    if (!loadResult.success) {
+      return { success: false, error: loadResult.error };
+    }
+    sessions = loadResult.sessions;
+  } else {
+    sessions = await fetchSessionSpans({
+      runtimeId: ctx.runtimeId,
+      runtimeLogGroup: ctx.runtimeLogGroup,
+      region: ctx.region,
+      lookbackDays: options.days,
+      sessionId: options.sessionId,
+      traceId: options.traceId,
+      customServiceName: ctx.customServiceName,
+    });
+
+    // Filter to selected session IDs if provided (from TUI multi-select)
+    if (options.sessionIds && options.sessionIds.length > 0) {
+      const selected = new Set(options.sessionIds);
+      sessions = sessions.filter(s => selected.has(s.sessionId));
+    }
   }
 
   if (sessions.length === 0) {
-    return {
-      success: false,
-      error: `No session spans found for agent "${ctx.agentLabel}" in the last ${options.days} day(s). Has the agent been invoked?`,
-    };
+    const errorDetail = options.inputPath
+      ? `No span documents found in: ${options.inputPath}`
+      : `No session spans found for agent "${ctx.agentLabel}" in the last ${options.days} day(s). Has the agent been invoked?`;
+    return { success: false, error: errorDetail };
   }
 
   // Resolve evaluator levels to determine how to send spans
@@ -829,7 +995,7 @@ export async function handleRunEval(options: RunEvalOptions): Promise<RunEvalRes
   if (options.output) {
     writeFileSync(options.output, JSON.stringify(run, null, 2));
     filePath = options.output;
-  } else if (options.agentArn || options.customServiceName) {
+  } else if (options.agentArn || options.customServiceName || options.inputPath) {
     // ARN/custom mode may not have a project directory — save to cwd
     const fallbackPath = join(process.cwd(), `${generateFilename(timestamp)}.json`);
     writeFileSync(fallbackPath, JSON.stringify(run, null, 2));

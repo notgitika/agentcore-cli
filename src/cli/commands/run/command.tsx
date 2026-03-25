@@ -77,6 +77,7 @@ export const registerRun = (program: Command) => {
       'Custom service name for external agents — filters by service.name instead of cloud.resource_id'
     )
     .option('--custom-log-group-name <name>', 'Custom CloudWatch log group name for external agents')
+    .option('--input-path <path>', 'Path to a local trace file or directory — skips CloudWatch discovery')
     .option('--output <path>', 'Custom output file path for results')
     .option('--json', 'Output as JSON')
     .action(
@@ -95,12 +96,14 @@ export const registerRun = (program: Command) => {
         days: string;
         customServiceName?: string;
         customLogGroupName?: string;
+        inputPath?: string;
         output?: string;
         json?: boolean;
       }) => {
         const isArnMode = !!(cliOptions.runtimeArn && cliOptions.evaluatorArn);
         const isCustomMode = !!cliOptions.customServiceName;
-        if (!isArnMode && !isCustomMode) {
+        const isInputMode = !!cliOptions.inputPath;
+        if (!isArnMode && !isCustomMode && !isInputMode) {
           requireProject();
         }
 
@@ -130,6 +133,7 @@ export const registerRun = (program: Command) => {
           expectedResponse: cliOptions.expectedResponse,
           customServiceName: cliOptions.customServiceName,
           customLogGroupName: cliOptions.customLogGroupName,
+          inputPath: cliOptions.inputPath,
           days: parseInt(cliOptions.days, 10),
           output: cliOptions.output,
           json: cliOptions.json,
