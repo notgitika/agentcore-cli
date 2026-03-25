@@ -66,17 +66,25 @@ agentcore deploy -v --json            # Verbose JSON output
 
 ### status
 
-Check deployment status.
+Check deployment status and resource details.
 
 ```bash
 agentcore status
 agentcore status --agent MyAgent
+agentcore status --type evaluator
+agentcore status --state deployed
+agentcore status --agent-runtime-id abc123
+agentcore status --json
 ```
 
-| Flag                      | Description         |
-| ------------------------- | ------------------- |
-| `--agent <name>`          | Specific agent      |
-| `--agent-runtime-id <id>` | Specific runtime ID |
+| Flag                      | Description                                                                                    |
+| ------------------------- | ---------------------------------------------------------------------------------------------- |
+| `--agent-runtime-id <id>` | Look up a specific agent runtime by ID                                                         |
+| `--target <name>`         | Select deployment target                                                                       |
+| `--type <type>`           | Filter by resource type: `agent`, `memory`, `credential`, `gateway`, `policy-engine`, `policy` |
+| `--state <state>`         | Filter by deployment state: `deployed`, `local-only`, `pending-removal`                        |
+| `--agent <name>`          | Filter to a specific agent                                                                     |
+| `--json`                  | JSON output                                                                                    |
 
 ### validate
 
@@ -153,19 +161,267 @@ agentcore add memory \
 
 ### add identity
 
-Add a credential provider (API key). Credentials are top-level resources in the flat resource model.
+Add a credential to the project. Supports API key and OAuth credential types.
 
 ```bash
+# API key credential
 agentcore add identity \
   --name OpenAI \
   --api-key sk-...
+
+# OAuth credential
+agentcore add identity \
+  --name MyOAuthProvider \
+  --type oauth \
+  --discovery-url https://idp.example.com/.well-known/openid-configuration \
+  --client-id my-client-id \
+  --client-secret my-client-secret \
+  --scopes read,write
 ```
 
-| Flag              | Description     |
-| ----------------- | --------------- |
-| `--name <name>`   | Credential name |
-| `--api-key <key>` | API key value   |
-| `--json`          | JSON output     |
+| Flag                       | Description                      |
+| -------------------------- | -------------------------------- |
+| `--name <name>`            | Credential name                  |
+| `--type <type>`            | `api-key` (default) or `oauth`   |
+| `--api-key <key>`          | API key value (api-key type)     |
+| `--discovery-url <url>`    | OAuth discovery URL (oauth type) |
+| `--client-id <id>`         | OAuth client ID (oauth type)     |
+| `--client-secret <secret>` | OAuth client secret (oauth type) |
+| `--scopes <scopes>`        | OAuth scopes, comma-separated    |
+| `--json`                   | JSON output                      |
+
+### add gateway
+
+Add a gateway to the project. Gateways act as MCP-compatible proxies that route agent requests to backend tools.
+
+```bash
+# No authorization (development/testing)
+agentcore add gateway --name MyGateway
+
+# CUSTOM_JWT authorization (production)
+agentcore add gateway \
+  --name MyGateway \
+  --authorizer-type CUSTOM_JWT \
+  --discovery-url https://idp.example.com/.well-known/openid-configuration \
+  --allowed-audience my-api \
+  --allowed-clients my-client-id \
+  --agent-client-id agent-client-id \
+  --agent-client-secret agent-client-secret
+```
+
+| Flag                             | Description                                                  |
+| -------------------------------- | ------------------------------------------------------------ |
+| `--name <name>`                  | Gateway name                                                 |
+| `--description <desc>`           | Gateway description                                          |
+| `--authorizer-type <type>`       | `NONE` (default) or `CUSTOM_JWT`                             |
+| `--discovery-url <url>`          | OIDC discovery URL (required for CUSTOM_JWT)                 |
+| `--allowed-audience <values>`    | Comma-separated allowed audiences (required for CUSTOM_JWT)  |
+| `--allowed-clients <values>`     | Comma-separated allowed client IDs (required for CUSTOM_JWT) |
+| `--allowed-scopes <scopes>`      | Comma-separated allowed scopes (optional for CUSTOM_JWT)     |
+| `--agent-client-id <id>`         | Agent OAuth client ID for Bearer token auth (CUSTOM_JWT)     |
+| `--agent-client-secret <secret>` | Agent OAuth client secret (CUSTOM_JWT)                       |
+| `--agents <agents>`              | Comma-separated agent names                                  |
+| `--no-semantic-search`           | Disable semantic search for tool discovery                   |
+| `--exception-level <level>`      | Exception verbosity level (default: `NONE`)                  |
+| `--policy-engine <name>`         | Policy engine name for Cedar-based authorization             |
+| `--policy-engine-mode <mode>`    | Policy engine mode: `LOG_ONLY` or `ENFORCE`                  |
+| `--json`                         | JSON output                                                  |
+
+### add gateway-target
+
+Add a gateway target to the project. Targets are backend tools exposed through a gateway. Supports five target types:
+`mcp-server`, `api-gateway`, `open-api-schema`, `smithy-model`, and `lambda-function-arn`.
+
+```bash
+# MCP Server endpoint
+agentcore add gateway-target \
+  --name WeatherTools \
+  --type mcp-server \
+  --endpoint https://mcp.example.com/mcp \
+  --gateway MyGateway
+
+# MCP Server with OAuth outbound auth
+agentcore add gateway-target \
+  --name SecureTools \
+  --type mcp-server \
+  --endpoint https://api.example.com/mcp \
+  --gateway MyGateway \
+  --outbound-auth oauth \
+  --oauth-client-id my-client \
+  --oauth-client-secret my-secret \
+  --oauth-discovery-url https://auth.example.com/.well-known/openid-configuration
+
+# API Gateway REST API
+agentcore add gateway-target \
+  --name PetStore \
+  --type api-gateway \
+  --rest-api-id abc123 \
+  --stage prod \
+  --tool-filter-path '/pets/*' \
+  --tool-filter-methods GET,POST \
+  --gateway MyGateway
+
+# OpenAPI Schema (auto-derive tools from spec)
+agentcore add gateway-target \
+  --name PetStoreAPI \
+  --type open-api-schema \
+  --schema specs/petstore.json \
+  --gateway MyGateway \
+  --outbound-auth oauth \
+  --credential-name MyOAuth
+
+# Smithy Model (auto-derive tools from model)
+agentcore add gateway-target \
+  --name MyService \
+  --type smithy-model \
+  --schema models/service.json \
+  --gateway MyGateway
+
+# Lambda Function ARN
+agentcore add gateway-target \
+  --name MyLambdaTools \
+  --type lambda-function-arn \
+  --lambda-arn arn:aws:lambda:us-east-1:123456789012:function:my-func \
+  --tool-schema-file tools.json \
+  --gateway MyGateway
+```
+
+| Flag                              | Description                                                                                                   |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `--name <name>`                   | Target name                                                                                                   |
+| `--description <desc>`            | Target description                                                                                            |
+| `--type <type>`                   | Target type (required): `mcp-server`, `api-gateway`, `open-api-schema`, `smithy-model`, `lambda-function-arn` |
+| `--endpoint <url>`                | MCP server endpoint URL (mcp-server)                                                                          |
+| `--language <lang>`               | Implementation language: Python, TypeScript, Other (mcp-server)                                               |
+| `--host <host>`                   | Compute host: Lambda or AgentCoreRuntime (mcp-server)                                                         |
+| `--gateway <name>`                | Gateway to attach target to                                                                                   |
+| `--outbound-auth <type>`          | `oauth`, `api-key`, or `none` (varies by target type)                                                         |
+| `--credential-name <name>`        | Existing credential name for outbound auth                                                                    |
+| `--oauth-client-id <id>`          | OAuth client ID (creates credential inline)                                                                   |
+| `--oauth-client-secret <secret>`  | OAuth client secret (creates credential inline)                                                               |
+| `--oauth-discovery-url <url>`     | OAuth discovery URL (creates credential inline)                                                               |
+| `--oauth-scopes <scopes>`         | OAuth scopes, comma-separated                                                                                 |
+| `--rest-api-id <id>`              | API Gateway REST API ID (api-gateway)                                                                         |
+| `--stage <stage>`                 | API Gateway stage name (api-gateway)                                                                          |
+| `--tool-filter-path <path>`       | Filter API paths, supports wildcards (api-gateway)                                                            |
+| `--tool-filter-methods <methods>` | Comma-separated HTTP methods to expose (api-gateway)                                                          |
+| `--schema <path>`                 | Path to schema file, relative to project root (open-api-schema, smithy-model)                                 |
+| `--schema-s3-account <account>`   | AWS account for S3-hosted schema (open-api-schema, smithy-model)                                              |
+| `--lambda-arn <arn>`              | Lambda function ARN (lambda-function-arn)                                                                     |
+| `--tool-schema-file <path>`       | Tool schema file, relative to project root or absolute path (lambda-function-arn)                             |
+| `--json`                          | JSON output                                                                                                   |
+
+> **Note**: `smithy-model` and `lambda-function-arn` use IAM role auth and do not support `--outbound-auth`.
+> `open-api-schema` requires `--outbound-auth` (`oauth` or `api-key`). `api-gateway` supports `api-key` or `none`.
+> `mcp-server` supports `oauth` or `none`.
+
+### add evaluator
+
+Add a custom LLM-as-a-Judge evaluator.
+
+```bash
+agentcore add evaluator \
+  --name ResponseQuality \
+  --level SESSION \
+  --model us.anthropic.claude-sonnet-4-5-20250929-v1:0 \
+  --instructions "Evaluate the response quality. Context: {context}" \
+  --rating-scale 1-5-quality
+```
+
+| Flag                      | Description                                                                |
+| ------------------------- | -------------------------------------------------------------------------- |
+| `--name <name>`           | Evaluator name                                                             |
+| `--level <level>`         | `SESSION`, `TRACE`, or `TOOL_CALL`                                         |
+| `--model <model>`         | Bedrock model ID for the LLM judge                                         |
+| `--instructions <text>`   | Evaluation prompt with placeholders (e.g. `{context}`)                     |
+| `--rating-scale <preset>` | `1-5-quality`, `1-3-simple`, `pass-fail`, `good-neutral-bad`, or custom    |
+| `--config <path>`         | Config JSON file (overrides `--model`, `--instructions`, `--rating-scale`) |
+| `--json`                  | JSON output                                                                |
+
+### add online-eval
+
+Add an online eval config for continuous agent monitoring.
+
+```bash
+agentcore add online-eval \
+  --name QualityMonitor \
+  --agent MyAgent \
+  --evaluator ResponseQuality Builtin.Faithfulness \
+  --sampling-rate 10
+```
+
+| Flag                         | Description                                   |
+| ---------------------------- | --------------------------------------------- |
+| `--name <name>`              | Config name                                   |
+| `-a, --agent <name>`         | Agent to monitor                              |
+| `-e, --evaluator <names...>` | Evaluator name(s), `Builtin.*` IDs, or ARNs   |
+| `--evaluator-arn <arns...>`  | Evaluator ARN(s)                              |
+| `--sampling-rate <rate>`     | Percentage of requests to evaluate (0.01–100) |
+| `--enable-on-create`         | Enable immediately after deploy               |
+| `--json`                     | JSON output                                   |
+
+### add policy-engine
+
+Add a policy engine to the project. Policy engines use Cedar for fine-grained authorization on gateways.
+
+```bash
+# Standalone policy engine
+agentcore add policy-engine --name MyPolicyEngine
+
+# With KMS encryption and attached to gateways
+agentcore add policy-engine \
+  --name MyPolicyEngine \
+  --description "Authorization policies" \
+  --encryption-key-arn arn:aws:kms:us-east-1:123456789012:key/abc \
+  --attach-to-gateways MyGateway \
+  --attach-mode ENFORCE
+```
+
+| Flag                           | Description                                                     |
+| ------------------------------ | --------------------------------------------------------------- |
+| `--name <name>`                | Policy engine name                                              |
+| `--description <desc>`         | Policy engine description                                       |
+| `--encryption-key-arn <arn>`   | KMS encryption key ARN                                          |
+| `--attach-to-gateways <names>` | Comma-separated gateway names to attach this engine to          |
+| `--attach-mode <mode>`         | Enforcement mode for attached gateways: `LOG_ONLY` or `ENFORCE` |
+| `--json`                       | JSON output                                                     |
+
+### add policy
+
+Add a Cedar policy to a policy engine.
+
+```bash
+# From a Cedar policy file
+agentcore add policy \
+  --name AllowReadOnly \
+  --engine MyPolicyEngine \
+  --source policies/read-only.cedar
+
+# Inline Cedar statement
+agentcore add policy \
+  --name AllowReadOnly \
+  --engine MyPolicyEngine \
+  --statement 'permit(principal, action == Action::"ReadOnly", resource);'
+
+# Generate from natural language
+agentcore add policy \
+  --name AllowReadOnly \
+  --engine MyPolicyEngine \
+  --generate "Only allow read-only access to the PetStore tools" \
+  --gateway MyGateway
+```
+
+| Flag                       | Description                                                        |
+| -------------------------- | ------------------------------------------------------------------ |
+| `--name <name>`            | Policy name                                                        |
+| `--engine <engine>`        | Policy engine name                                                 |
+| `--description <desc>`     | Policy description                                                 |
+| `--source <path>`          | Path to a Cedar policy file                                        |
+| `--statement <cedar>`      | Cedar policy statement                                             |
+| `-g, --generate <prompt>`  | Generate Cedar policy from natural language description            |
+| `--gateway <name>`         | Deployed gateway name for policy generation                        |
+| `--validation-mode <mode>` | Validation mode: `FAIL_ON_ANY_FINDINGS` or `IGNORE_ALL_FINDINGS`   |
+| `--json`                   | JSON output                                                        |
 
 ### remove
 
@@ -175,18 +431,25 @@ Remove resources from project.
 agentcore remove agent --name MyAgent --force
 agentcore remove memory --name SharedMemory
 agentcore remove identity --name OpenAI
+agentcore remove evaluator --name ResponseQuality
+agentcore remove online-eval --name QualityMonitor
+agentcore remove gateway --name MyGateway
+agentcore remove gateway-target --name WeatherTools
+agentcore remove policy-engine --name MyPolicyEngine
+agentcore remove policy --name AllowReadOnly --engine MyPolicyEngine
 
 # Reset everything
 agentcore remove all --force
 agentcore remove all --dry-run  # Preview
 ```
 
-| Flag            | Description               |
-| --------------- | ------------------------- |
-| `--name <name>` | Resource name             |
-| `--force`       | Skip confirmation         |
-| `--dry-run`     | Preview (remove all only) |
-| `--json`        | JSON output               |
+| Flag              | Description                                       |
+| ----------------- | ------------------------------------------------- |
+| `--name <name>`   | Resource name                                     |
+| `--engine <name>` | Policy engine name (required for `remove policy`) |
+| `--force`         | Skip confirmation                                 |
+| `--dry-run`       | Preview (remove all only)                         |
+| `--json`          | JSON output                                       |
 
 ---
 
