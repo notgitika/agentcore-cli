@@ -45,6 +45,7 @@ export const registerRun = (program: Command) => {
     .option('--region <region>', 'AWS region (required with --agent-arn, auto-detected otherwise)')
     .option('-s, --session-id <id>', 'Evaluate a specific session only')
     .option('-t, --trace-id <id>', 'Evaluate a specific trace only')
+    .option('--endpoint <name>', 'Runtime endpoint name (e.g. PROMPT_V1). Defaults to AGENTCORE_RUNTIME_ENDPOINT env var, then DEFAULT')
     .option('--days <days>', 'Lookback window in days', '7')
     .option('--output <path>', 'Custom output file path for results')
     .option('--json', 'Output as JSON')
@@ -57,6 +58,7 @@ export const registerRun = (program: Command) => {
         region?: string;
         sessionId?: string;
         traceId?: string;
+        endpoint?: string;
         days: string;
         output?: string;
         json?: boolean;
@@ -84,6 +86,7 @@ export const registerRun = (program: Command) => {
           region: cliOptions.region,
           sessionId: cliOptions.sessionId,
           traceId: cliOptions.traceId,
+          endpoint: cliOptions.endpoint,
           days: parseInt(cliOptions.days, 10),
           output: cliOptions.output,
           json: cliOptions.json,

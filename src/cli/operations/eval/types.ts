@@ -56,6 +56,8 @@ export interface RunEvalOptions {
   sessionIds?: string[];
   /** Filter to a specific trace */
   traceId?: string;
+  /** Runtime endpoint name (e.g. PROMPT_V1). Defaults to AGENTCORE_RUNTIME_ENDPOINT env var, then DEFAULT. */
+  endpoint?: string;
   days: number;
   output?: string;
   json?: boolean;

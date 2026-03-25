@@ -93,7 +93,8 @@ function resolveFromArn(options: RunEvalOptions): ResolveResult {
     return { success: false, error: 'No evaluators specified. Use -e/--evaluator with Builtin.* or --evaluator-arn.' };
   }
 
-  const runtimeLogGroup = `/aws/bedrock-agentcore/runtimes/${runtimeId}-${DEFAULT_ENDPOINT_NAME}`;
+  const endpointName = options.endpoint ?? process.env.AGENTCORE_RUNTIME_ENDPOINT ?? DEFAULT_ENDPOINT_NAME;
+  const runtimeLogGroup = `/aws/bedrock-agentcore/runtimes/${runtimeId}-${endpointName}`;
 
   return {
     success: true,
@@ -118,7 +119,8 @@ function resolveFromProject(context: DeployedProjectConfig, options: RunEvalOpti
   }
 
   const { agent } = agentResult;
-  const runtimeLogGroup = `/aws/bedrock-agentcore/runtimes/${agent.runtimeId}-${DEFAULT_ENDPOINT_NAME}`;
+  const endpointName = options.endpoint ?? process.env.AGENTCORE_RUNTIME_ENDPOINT ?? DEFAULT_ENDPOINT_NAME;
+  const runtimeLogGroup = `/aws/bedrock-agentcore/runtimes/${agent.runtimeId}-${endpointName}`;
 
   // Resolve evaluator names to IDs
   const evaluatorIds: string[] = [];
