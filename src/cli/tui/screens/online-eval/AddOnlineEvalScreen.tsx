@@ -1,4 +1,4 @@
-import { OnlineEvalConfigNameSchema } from '../../../../schema';
+import { LogGroupNameSchema, OnlineEvalConfigNameSchema, ServiceNameSchema } from '../../../../schema';
 import type { SelectableItem } from '../../components';
 import {
   ConfirmReview,
@@ -16,7 +16,7 @@ import type { AddOnlineEvalConfig, EvaluatorItem } from './types';
 import { DEFAULT_SAMPLING_RATE, ONLINE_EVAL_STEP_LABELS } from './types';
 import { useAddOnlineEvalWizard } from './useAddOnlineEvalWizard';
 import { Box, Text } from 'ink';
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 
 interface AddOnlineEvalScreenProps {
   onComplete: (config: AddOnlineEvalConfig) => void;
@@ -35,13 +35,13 @@ export function AddOnlineEvalScreen({
 }: AddOnlineEvalScreenProps) {
   const wizard = useAddOnlineEvalWizard(agentNames.length);
 
-  // Auto-set agent when there's only one
+  // Auto-set agent when there's only one and using project-agent source
   const effectiveConfig = useMemo(() => {
-    if (agentNames.length === 1 && !wizard.config.agent) {
+    if (wizard.logSource === 'project-agent' && agentNames.length === 1 && !wizard.config.agent) {
       return { ...wizard.config, agent: agentNames[0]! };
     }
     return wizard.config;
-  }, [wizard.config, agentNames]);
+  }, [wizard.config, wizard.logSource, agentNames]);
 
   const evaluatorItems: SelectableItem[] = useMemo(() => {
     return rawEvaluatorItems.map(e => ({
@@ -55,8 +55,23 @@ export function AddOnlineEvalScreen({
     return agentNames.map(name => ({ id: name, title: name }));
   }, [agentNames]);
 
+  const logSourceItems: SelectableItem[] = useMemo(
+    () => [
+      { id: 'project-agent', title: 'Project Agent', description: 'Monitor an agent deployed in this project' },
+      {
+        id: 'external-agent',
+        title: 'External Agent',
+        description: 'Monitor an agent outside AgentCore Runtime via custom log source',
+      },
+    ],
+    []
+  );
+
   const isNameStep = wizard.step === 'name';
+  const isLogSourceStep = wizard.step === 'logSource';
   const isAgentStep = wizard.step === 'agent';
+  const isCustomServiceNameStep = wizard.step === 'customServiceName';
+  const isCustomLogGroupNameStep = wizard.step === 'customLogGroupName';
   const isEvaluatorsStep = wizard.step === 'evaluators';
   const isSamplingRateStep = wizard.step === 'samplingRate';
   const isEnableOnCreateStep = wizard.step === 'enableOnCreate';
@@ -69,6 +84,27 @@ export function AddOnlineEvalScreen({
     ],
     []
   );
+
+  const [noAgentsError, setNoAgentsError] = useState(false);
+
+  const handleLogSourceSelect = useCallback(
+    (item: SelectableItem) => {
+      if (item.id === 'project-agent' && agentNames.length === 0) {
+        setNoAgentsError(true);
+        return;
+      }
+      setNoAgentsError(false);
+      wizard.setLogSource(item.id as 'project-agent' | 'external-agent');
+    },
+    [agentNames.length, wizard]
+  );
+
+  const logSourceNav = useListNavigation({
+    items: logSourceItems,
+    onSelect: handleLogSourceSelect,
+    onExit: () => wizard.goBack(),
+    isActive: isLogSourceStep,
+  });
 
   const agentNav = useListNavigation({
     items: agentItems,
@@ -102,7 +138,7 @@ export function AddOnlineEvalScreen({
 
   const helpText = isEvaluatorsStep
     ? 'Space toggle · Enter confirm · Esc back'
-    : isAgentStep || isEnableOnCreateStep
+    : isAgentStep || isEnableOnCreateStep || isLogSourceStep
       ? HELP_TEXT.NAVIGATE_SELECT
       : isConfirmStep
         ? HELP_TEXT.CONFIRM_CANCEL
@@ -111,6 +147,26 @@ export function AddOnlineEvalScreen({
   const headerContent = (
     <StepIndicator steps={wizard.steps} currentStep={wizard.step} labels={ONLINE_EVAL_STEP_LABELS} />
   );
+
+  // Build confirm review fields based on log source
+  const confirmFields = useMemo(() => {
+    const fields = [{ label: 'Name', value: effectiveConfig.name }];
+    if (effectiveConfig.agent) {
+      fields.push({ label: 'Agent', value: effectiveConfig.agent });
+    }
+    if (effectiveConfig.customServiceName) {
+      fields.push({ label: 'Service Name', value: effectiveConfig.customServiceName });
+    }
+    if (effectiveConfig.customLogGroupName) {
+      fields.push({ label: 'Log Group', value: effectiveConfig.customLogGroupName });
+    }
+    fields.push(
+      { label: 'Evaluators', value: effectiveConfig.evaluators.join(', ') },
+      { label: 'Sampling Rate', value: `${effectiveConfig.samplingRate}%` },
+      { label: 'Enable on Deploy', value: effectiveConfig.enableOnCreate ? 'Yes' : 'No' }
+    );
+    return fields;
+  }, [effectiveConfig]);
 
   return (
     <Screen title="Add Online Eval Config" onExit={onExit} helpText={helpText} headerContent={headerContent}>
@@ -127,6 +183,22 @@ export function AddOnlineEvalScreen({
           />
         )}
 
+        {isLogSourceStep && (
+          <Box flexDirection="column">
+            <WizardSelect
+              title="Select log source"
+              description="Choose where the agent you want to evaluate is running"
+              items={logSourceItems}
+              selectedIndex={logSourceNav.selectedIndex}
+            />
+            {noAgentsError && (
+              <Text color="red">
+                No agents found in project. Add an agent first with `agentcore add agent`, or select External Agent.
+              </Text>
+            )}
+          </Box>
+        )}
+
         {isAgentStep && (
           <WizardSelect
             title="Select agent to monitor"
@@ -134,6 +206,38 @@ export function AddOnlineEvalScreen({
             items={agentItems}
             selectedIndex={agentNav.selectedIndex}
           />
+        )}
+
+        {isCustomServiceNameStep && (
+          <Box flexDirection="column">
+            <Text dimColor>
+              The service name configured in OTEL_RESOURCE_ATTRIBUTES for your external agent. This is the primary
+              identifier used to match log entries.
+            </Text>
+            <TextInput
+              key="customServiceName"
+              prompt="Service name"
+              onSubmit={wizard.setCustomServiceName}
+              onCancel={() => wizard.goBack()}
+              schema={ServiceNameSchema}
+            />
+          </Box>
+        )}
+
+        {isCustomLogGroupNameStep && (
+          <Box flexDirection="column">
+            <Text dimColor>
+              The CloudWatch log group where your external agent sends logs. Typically follows the pattern:
+              /aws/bedrock-agentcore/runtimes/{'<agent-id>'}
+            </Text>
+            <TextInput
+              key="customLogGroupName"
+              prompt="Log group name"
+              onSubmit={wizard.setCustomLogGroupName}
+              onCancel={() => wizard.goBack()}
+              schema={LogGroupNameSchema}
+            />
+          </Box>
         )}
 
         {isEvaluatorsStep && (
@@ -181,17 +285,7 @@ export function AddOnlineEvalScreen({
           />
         )}
 
-        {isConfirmStep && (
-          <ConfirmReview
-            fields={[
-              { label: 'Name', value: effectiveConfig.name },
-              { label: 'Agent', value: effectiveConfig.agent },
-              { label: 'Evaluators', value: effectiveConfig.evaluators.join(', ') },
-              { label: 'Sampling Rate', value: `${effectiveConfig.samplingRate}%` },
-              { label: 'Enable on Deploy', value: effectiveConfig.enableOnCreate ? 'Yes' : 'No' },
-            ]}
-          />
-        )}
+        {isConfirmStep && <ConfirmReview fields={confirmFields} />}
       </Panel>
     </Screen>
   );

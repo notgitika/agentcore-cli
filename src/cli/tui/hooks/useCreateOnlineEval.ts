@@ -3,10 +3,12 @@ import { useCallback, useEffect, useState } from 'react';
 
 interface CreateOnlineEvalConfig {
   name: string;
-  agent: string;
+  agent?: string;
   evaluators: string[];
   samplingRate: number;
   enableOnCreate: boolean;
+  customLogGroupName?: string;
+  customServiceName?: string;
 }
 
 export function useCreateOnlineEval() {
@@ -19,10 +21,12 @@ export function useCreateOnlineEval() {
     try {
       const addResult = await onlineEvalConfigPrimitive.add({
         name: config.name,
-        agent: config.agent,
+        ...(config.agent && { agent: config.agent }),
         evaluators: config.evaluators,
         samplingRate: config.samplingRate,
         enableOnCreate: config.enableOnCreate,
+        ...(config.customLogGroupName && { customLogGroupName: config.customLogGroupName }),
+        ...(config.customServiceName && { customServiceName: config.customServiceName }),
       });
       if (!addResult.success) {
         throw new Error(addResult.error ?? 'Failed to create online eval config');

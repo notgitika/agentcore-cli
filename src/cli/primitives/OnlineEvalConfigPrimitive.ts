@@ -9,10 +9,12 @@ import type { Command } from '@commander-js/extra-typings';
 
 export interface AddOnlineEvalConfigOptions {
   name: string;
-  agent: string;
+  agent?: string;
   evaluators: string[];
   samplingRate: number;
   enableOnCreate?: boolean;
+  customLogGroupName?: string;
+  customServiceName?: string;
 }
 
 export type RemovableOnlineEvalConfig = RemovableResource;
@@ -109,6 +111,11 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
       .option('--evaluator-arn <arns...>', 'Evaluator ARN(s) [non-interactive]')
       .option('--sampling-rate <rate>', 'Sampling percentage (0.01-100) [non-interactive]')
       .option('--enable-on-create', 'Enable evaluation immediately after deploy [non-interactive]')
+      .option(
+        '--custom-log-group-name <name>',
+        'Custom CloudWatch log group name for external agents [non-interactive]'
+      )
+      .option('--custom-service-name <name>', 'Custom service name for external agents [non-interactive]')
       .option('--json', 'Output as JSON [non-interactive]')
       .action(
         async (cliOptions: {
@@ -118,6 +125,8 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
           evaluatorArn?: string[];
           samplingRate?: string;
           enableOnCreate?: boolean;
+          customLogGroupName?: string;
+          customServiceName?: string;
           json?: boolean;
         }) => {
           try {
@@ -130,9 +139,23 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
               // Merge --evaluator and --evaluator-arn into a single list
               const allEvaluators = [...(cliOptions.evaluator ?? []), ...(cliOptions.evaluatorArn ?? [])];
 
-              if (!cliOptions.name || !cliOptions.runtime || allEvaluators.length === 0 || !cliOptions.samplingRate) {
+              const hasCustomSource =
+                cliOptions.customLogGroupName !== undefined && cliOptions.customServiceName !== undefined;
+              const hasRuntime = cliOptions.runtime !== undefined;
+
+              if (!cliOptions.name || allEvaluators.length === 0 || !cliOptions.samplingRate) {
                 const error =
-                  '--name, --runtime, --evaluator (and/or --evaluator-arn), and --sampling-rate are all required in non-interactive mode';
+                  '--name, --evaluator (and/or --evaluator-arn), and --sampling-rate are all required in non-interactive mode';
+                if (cliOptions.json) {
+                  console.log(JSON.stringify({ success: false, error }));
+                } else {
+                  console.error(error);
+                }
+                process.exit(1);
+              }
+
+              if (!hasRuntime && !hasCustomSource) {
+                const error = 'Either --runtime or both --custom-log-group-name and --custom-service-name are required';
                 if (cliOptions.json) {
                   console.log(JSON.stringify({ success: false, error }));
                 } else {
@@ -155,10 +178,12 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
 
               const result = await this.add({
                 name: cliOptions.name,
-                agent: cliOptions.runtime,
+                ...(cliOptions.runtime && { agent: cliOptions.runtime }),
                 evaluators: allEvaluators,
                 samplingRate,
                 enableOnCreate: cliOptions.enableOnCreate,
+                ...(cliOptions.customLogGroupName && { customLogGroupName: cliOptions.customLogGroupName }),
+                ...(cliOptions.customServiceName && { customServiceName: cliOptions.customServiceName }),
               });
 
               if (cliOptions.json) {
@@ -224,10 +249,12 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
 
     const config: OnlineEvalConfig = {
       name: options.name,
-      agent: options.agent,
+      ...(options.agent && { agent: options.agent }),
       evaluators: options.evaluators,
       samplingRate: options.samplingRate,
       ...(options.enableOnCreate !== undefined && { enableOnCreate: options.enableOnCreate }),
+      ...(options.customLogGroupName && { customLogGroupName: options.customLogGroupName }),
+      ...(options.customServiceName && { customServiceName: options.customServiceName }),
     };
 
     project.onlineEvalConfigs.push(config);

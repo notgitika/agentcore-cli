@@ -2,20 +2,36 @@
 // Online Eval Config Flow Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type AddOnlineEvalStep = 'name' | 'agent' | 'evaluators' | 'samplingRate' | 'enableOnCreate' | 'confirm';
+export type LogSourceType = 'project-agent' | 'external-agent';
+
+export type AddOnlineEvalStep =
+  | 'name'
+  | 'logSource'
+  | 'agent'
+  | 'customServiceName'
+  | 'customLogGroupName'
+  | 'evaluators'
+  | 'samplingRate'
+  | 'enableOnCreate'
+  | 'confirm';
 
 export interface AddOnlineEvalConfig {
   name: string;
-  agent: string;
+  agent?: string;
   evaluators: string[];
   samplingRate: number;
   enableOnCreate: boolean;
   description?: string;
+  customLogGroupName?: string;
+  customServiceName?: string;
 }
 
 export const ONLINE_EVAL_STEP_LABELS: Record<AddOnlineEvalStep, string> = {
   name: 'Name',
+  logSource: 'Source',
   agent: 'Agent',
+  customServiceName: 'Service',
+  customLogGroupName: 'Log Group',
   evaluators: 'Evaluators',
   samplingRate: 'Rate',
   enableOnCreate: 'Enable',

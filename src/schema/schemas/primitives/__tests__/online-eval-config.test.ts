@@ -1,4 +1,9 @@
-import { OnlineEvalConfigNameSchema, OnlineEvalConfigSchema } from '../online-eval-config';
+import {
+  LogGroupNameSchema,
+  OnlineEvalConfigNameSchema,
+  OnlineEvalConfigSchema,
+  ServiceNameSchema,
+} from '../online-eval-config';
 import { describe, expect, it } from 'vitest';
 
 describe('OnlineEvalConfigNameSchema', () => {
@@ -97,5 +102,87 @@ describe('OnlineEvalConfigSchema', () => {
 
   it('accepts config without description and enableOnCreate', () => {
     expect(OnlineEvalConfigSchema.safeParse(validConfig).success).toBe(true);
+  });
+
+  // ── Custom log source (external agent) ──────────────────────────
+
+  it('accepts config with custom log source fields and no agent', () => {
+    const config = {
+      type: 'OnlineEvaluationConfig' as const,
+      name: 'ExternalConfig',
+      evaluators: ['Builtin.GoalSuccessRate'],
+      samplingRate: 10,
+      customLogGroupName: '/aws/bedrock-agentcore/runtimes/my-external-agent',
+      customServiceName: 'my-external-service',
+    };
+    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(true);
+  });
+
+  it('accepts config with both agent and custom log source fields', () => {
+    const config = {
+      ...validConfig,
+      customLogGroupName: '/custom/log-group',
+      customServiceName: 'custom-service',
+    };
+    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(true);
+  });
+
+  it('rejects config with neither agent nor custom log source fields', () => {
+    const config = {
+      type: 'OnlineEvaluationConfig' as const,
+      name: 'NoSource',
+      evaluators: ['Builtin.GoalSuccessRate'],
+      samplingRate: 10,
+    };
+    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(false);
+  });
+
+  it('rejects config with only customLogGroupName but no customServiceName', () => {
+    const config = {
+      type: 'OnlineEvaluationConfig' as const,
+      name: 'PartialCustom',
+      evaluators: ['Builtin.GoalSuccessRate'],
+      samplingRate: 10,
+      customLogGroupName: '/some/log-group',
+    };
+    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(false);
+  });
+
+  it('rejects config with only customServiceName but no customLogGroupName', () => {
+    const config = {
+      type: 'OnlineEvaluationConfig' as const,
+      name: 'PartialCustom',
+      evaluators: ['Builtin.GoalSuccessRate'],
+      samplingRate: 10,
+      customServiceName: 'my-service',
+    };
+    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(false);
+  });
+});
+
+describe('LogGroupNameSchema', () => {
+  it('accepts valid log group names', () => {
+    expect(LogGroupNameSchema.safeParse('/aws/bedrock-agentcore/runtimes/abc123').success).toBe(true);
+    expect(LogGroupNameSchema.safeParse('aws/spans').success).toBe(true);
+    expect(LogGroupNameSchema.safeParse('/my/custom-log-group').success).toBe(true);
+  });
+
+  it('rejects empty string', () => {
+    expect(LogGroupNameSchema.safeParse('').success).toBe(false);
+  });
+
+  it('rejects names with invalid characters', () => {
+    expect(LogGroupNameSchema.safeParse('/log group with spaces').success).toBe(false);
+  });
+});
+
+describe('ServiceNameSchema', () => {
+  it('accepts valid service names', () => {
+    expect(ServiceNameSchema.safeParse('my-service').success).toBe(true);
+    expect(ServiceNameSchema.safeParse('ProjectName_AgentName.DEFAULT').success).toBe(true);
+  });
+
+  it('rejects empty string', () => {
+    expect(ServiceNameSchema.safeParse('').success).toBe(false);
   });
 });

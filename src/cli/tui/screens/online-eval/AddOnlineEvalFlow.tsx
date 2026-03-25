@@ -62,14 +62,6 @@ export function AddOnlineEvalFlow({ isInteractive = true, onExit, onBack, onDev,
 
         const agentNames = projectSpec.runtimes.map(a => a.name);
 
-        if (agentNames.length === 0) {
-          setFlow({
-            name: 'error',
-            message: 'No agents found in project. Add an agent first with `agentcore add agent`.',
-          });
-          return;
-        }
-
         setFlow({ name: 'create-wizard', evaluators: items, agentNames });
       } catch (err) {
         if (!cancelled) setFlow({ name: 'error', message: getErrorMessage(err) });

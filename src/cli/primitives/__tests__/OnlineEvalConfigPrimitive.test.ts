@@ -142,6 +142,43 @@ describe('OnlineEvalConfigPrimitive', () => {
 
       expect(result).toEqual(expect.objectContaining({ success: false, error: 'no project' }));
     });
+
+    it('adds config with custom log source fields (external agent)', async () => {
+      mockReadProjectSpec.mockResolvedValue(makeProject());
+      mockWriteProjectSpec.mockResolvedValue(undefined);
+
+      const result = await primitive.add({
+        name: 'ExternalConfig',
+        evaluators: ['Builtin.GoalSuccessRate'],
+        samplingRate: 25,
+        customLogGroupName: '/aws/bedrock-agentcore/runtimes/ext-agent',
+        customServiceName: 'ext-service',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result).toHaveProperty('configName', 'ExternalConfig');
+
+      const config = mockWriteProjectSpec.mock.calls[0]![0].onlineEvalConfigs[0];
+      expect(config.agent).toBeUndefined();
+      expect(config.customLogGroupName).toBe('/aws/bedrock-agentcore/runtimes/ext-agent');
+      expect(config.customServiceName).toBe('ext-service');
+    });
+
+    it('omits custom fields when not provided', async () => {
+      mockReadProjectSpec.mockResolvedValue(makeProject());
+      mockWriteProjectSpec.mockResolvedValue(undefined);
+
+      await primitive.add({
+        name: 'AgentConfig',
+        agent: 'MyAgent',
+        evaluators: ['Builtin.GoalSuccessRate'],
+        samplingRate: 10,
+      });
+
+      const config = mockWriteProjectSpec.mock.calls[0]![0].onlineEvalConfigs[0];
+      expect(config.customLogGroupName).toBeUndefined();
+      expect(config.customServiceName).toBeUndefined();
+    });
   });
 
   describe('remove', () => {
