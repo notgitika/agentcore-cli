@@ -137,7 +137,7 @@ describe.sequential('e2e: evaluations lifecycle', () => {
         async () => {
           const result = await run([
             'run',
-            'evals',
+            'eval',
             '--agent',
             agentName,
             '--evaluator',
@@ -146,7 +146,7 @@ describe.sequential('e2e: evaluations lifecycle', () => {
             '1',
             '--json',
           ]);
-          expect(result.exitCode, `Run evals failed (stdout: ${result.stdout}, stderr: ${result.stderr})`).toBe(0);
+          expect(result.exitCode, `Run eval failed (stdout: ${result.stdout}, stderr: ${result.stderr})`).toBe(0);
           const json = parseJsonOutput(result.stdout) as Record<string, unknown>;
           expect(json).toHaveProperty('success', true);
           expect(json).toHaveProperty('run');
