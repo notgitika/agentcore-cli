@@ -1,8 +1,10 @@
 import { getWorkingDirectory } from '../../lib';
 import { createProgram } from '../cli';
 import { LayoutProvider } from './context';
+import { CLI_ONLY_EXAMPLES } from './copy';
 import { MissingProjectMessage, WrongDirectoryMessage, getProjectRootMismatch, projectExists } from './guards';
 import { AddFlow } from './screens/add/AddFlow';
+import { CliOnlyScreen } from './screens/cli-only';
 import { CreateScreen } from './screens/create';
 import { DeployScreen } from './screens/deploy/DeployScreen';
 import { DevScreen } from './screens/dev/DevScreen';
@@ -40,7 +42,8 @@ type Route =
   | { name: 'online-evals' }
   | { name: 'validate' }
   | { name: 'package' }
-  | { name: 'update' };
+  | { name: 'update' }
+  | { name: 'cli-only'; commandId: string };
 
 // Commands that don't require being at the project root
 const PROJECT_ROOT_EXEMPT_COMMANDS = new Set(['create', 'update']);
@@ -69,6 +72,13 @@ function AppContent() {
     // Block commands that require project root when in a subdirectory
     if (wrongDirProjectRoot && !PROJECT_ROOT_EXEMPT_COMMANDS.has(id)) {
       setHelpNotice(<WrongDirectoryMessage projectRoot={wrongDirProjectRoot} />);
+      return;
+    }
+
+    // CLI-only commands → show usage info screen
+    const cliOnlyExamples = CLI_ONLY_EXAMPLES[id];
+    if (cliOnlyExamples) {
+      setRoute({ name: 'cli-only', commandId: id });
       return;
     }
 
@@ -239,7 +249,20 @@ function AppContent() {
     return <UpdateScreen isInteractive={true} onExit={() => setRoute({ name: 'help' })} />;
   }
 
-  // All visible commands are handled above; this is unreachable.
+  if (route.name === 'cli-only') {
+    const info = CLI_ONLY_EXAMPLES[route.commandId];
+    if (info) {
+      return (
+        <CliOnlyScreen
+          title={route.commandId}
+          description={info.description}
+          examples={info.examples}
+          onExit={() => setRoute({ name: 'help' })}
+        />
+      );
+    }
+  }
+
   return null;
 }
 
