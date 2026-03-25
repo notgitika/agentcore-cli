@@ -2,7 +2,6 @@ import { getCommandsForUI } from '../commands.js';
 import type { Command } from '@commander-js/extra-typings';
 import { describe, expect, it } from 'vitest';
 
-/** Minimal mock matching Commander's Command interface shape */
 function makeCmd(name: string, desc: string, subs: string[] = []) {
   return {
     name: () => name,
@@ -28,14 +27,44 @@ describe('getCommandsForUI', () => {
     makeCmd('help', 'Show help'),
     makeCmd('update', 'Check for updates'),
     makeCmd('package', 'Package artifacts'),
+    makeCmd('logs', 'Stream logs'),
+    makeCmd('traces', 'View traces'),
+    makeCmd('pause', 'Pause online eval'),
+    makeCmd('resume', 'Resume online eval'),
   ]);
 
-  it('filters out help, update, and package commands', () => {
+  it('filters out help command (meta)', () => {
     const cmds = getCommandsForUI(program);
     const names = cmds.map(c => c.id);
     expect(names).not.toContain('help');
-    expect(names).not.toContain('update');
-    expect(names).not.toContain('package');
+  });
+
+  it('includes update and package as interactive commands', () => {
+    const cmds = getCommandsForUI(program);
+    const update = cmds.find(c => c.id === 'update');
+    const pkg = cmds.find(c => c.id === 'package');
+    expect(update).toBeDefined();
+    expect(update!.cliOnly).toBe(false);
+    expect(pkg).toBeDefined();
+    expect(pkg!.cliOnly).toBe(false);
+  });
+
+  it('marks logs, traces, pause, resume as cliOnly', () => {
+    const cmds = getCommandsForUI(program);
+    for (const name of ['logs', 'traces', 'pause', 'resume']) {
+      const cmd = cmds.find(c => c.id === name);
+      expect(cmd, `${name} should be in results`).toBeDefined();
+      expect(cmd!.cliOnly, `${name} should be cliOnly`).toBe(true);
+    }
+  });
+
+  it('marks interactive commands as not cliOnly', () => {
+    const cmds = getCommandsForUI(program);
+    for (const name of ['create', 'add', 'deploy', 'status']) {
+      const cmd = cmds.find(c => c.id === name);
+      expect(cmd, `${name} should be in results`).toBeDefined();
+      expect(cmd!.cliOnly, `${name} should not be cliOnly`).toBe(false);
+    }
   });
 
   it('includes visible commands', () => {
@@ -70,7 +99,7 @@ describe('getCommandsForUI', () => {
     expect(addCmd!.subcommands).not.toContain('gateway-target');
   });
 
-  it('returns command metadata shape', () => {
+  it('returns command metadata shape with cliOnly field', () => {
     const cmds = getCommandsForUI(program);
     const deploy = cmds.find(c => c.id === 'deploy');
     expect(deploy).toEqual({
@@ -79,6 +108,7 @@ describe('getCommandsForUI', () => {
       description: 'Deploy to AWS',
       subcommands: [],
       disabled: false,
+      cliOnly: false,
     });
   });
 });

@@ -6,12 +6,18 @@ export interface CommandMeta {
   description: string;
   subcommands: string[];
   disabled?: boolean;
+  cliOnly: boolean;
 }
 
 /**
- * Commands hidden from TUI help but still available via CLI.
+ * Commands hidden from TUI entirely (meta commands).
  */
-const HIDDEN_FROM_TUI = ['help', 'update', 'package', 'logs', 'traces', 'pause', 'resume'] as const;
+const HIDDEN_FROM_TUI = ['help'] as const;
+
+/**
+ * Commands that are CLI-only (shown but marked as requiring CLI invocation).
+ */
+const CLI_ONLY_COMMANDS = ['logs', 'traces', 'pause', 'resume'] as const;
 
 /**
  * Commands hidden from TUI when inside an existing project.
@@ -47,5 +53,6 @@ export function getCommandsForUI(program: Command, options: GetCommandsOptions =
         .filter(sub => !HIDDEN_SUBCOMMANDS.includes(sub.name() as (typeof HIDDEN_SUBCOMMANDS)[number]))
         .map(sub => sub.name()),
       disabled: false,
+      cliOnly: CLI_ONLY_COMMANDS.includes(cmd.name() as (typeof CLI_ONLY_COMMANDS)[number]),
     }));
 }
