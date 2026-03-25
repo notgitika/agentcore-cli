@@ -98,7 +98,7 @@ agentcore invoke
 | -------------------- | --------------------------------------------- |
 | `add evaluator`      | Add a custom LLM-as-a-Judge evaluator         |
 | `add online-eval`    | Add continuous evaluation for live traffic    |
-| `run evals`          | Run on-demand evaluation against agent traces |
+| `run eval`           | Run on-demand evaluation against agent traces |
 | `evals history`      | View past eval run results                    |
 | `pause online-eval`  | Pause a deployed online eval config           |
 | `resume online-eval` | Resume a paused online eval config            |

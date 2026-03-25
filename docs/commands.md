@@ -586,16 +586,16 @@ agentcore traces get abc123 --agent MyAgent --output ./trace.json
 
 See [Evaluations](evals.md) for the full guide on evaluators, scoring, and online monitoring.
 
-### run evals
+### run eval
 
 Run on-demand evaluation against historical agent traces.
 
 ```bash
 # Project mode
-agentcore run evals --agent MyAgent --evaluator ResponseQuality --days 7
+agentcore run eval --agent MyAgent --evaluator ResponseQuality --days 7
 
 # Standalone mode (no project required)
-agentcore run evals \
+agentcore run eval \
   --agent-arn arn:aws:...:runtime/abc123 \
   --evaluator-arn arn:aws:...:evaluator/eval123 \
   --region us-east-1
