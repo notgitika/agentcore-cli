@@ -14,7 +14,7 @@ import { Match, Template } from 'aws-cdk-lib/assertions';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, it } from 'vitest';
 
 // ─── CFN Resource Types ──────────────────────────────────────────────────────
 
