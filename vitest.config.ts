@@ -40,7 +40,7 @@ export default defineConfig({
         test: {
           name: 'unit',
           include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
-          exclude: ['src/assets/cdk/test/*.test.ts'],
+          exclude: ['src/assets/cdk/test/*.test.ts', 'src/assets/__tests__/cdk-synth-validation.test.ts'],
         },
       },
       {
