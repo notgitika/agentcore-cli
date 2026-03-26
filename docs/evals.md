@@ -149,25 +149,25 @@ Run evaluators against historical agent traces.
 
 ```bash
 # Project mode — evaluate a project agent
-agentcore run evals \
+agentcore run eval \
   --agent MyAgent \
   --evaluator ResponseQuality \
   --days 7
 
 # Standalone mode — evaluate any agent by ARN
-agentcore run evals \
+agentcore run eval \
   --agent-arn arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/abc123 \
   --evaluator-arn arn:aws:bedrock-agentcore:us-east-1:123456789012:evaluator/eval123 \
   --region us-east-1
 
 # Multiple evaluators
-agentcore run evals \
+agentcore run eval \
   --agent MyAgent \
   --evaluator ResponseQuality Builtin.Faithfulness \
   --days 14
 
 # Target specific session or trace
-agentcore run evals \
+agentcore run eval \
   --agent MyAgent \
   --evaluator ResponseQuality \
   --session-id abc123 \
@@ -359,7 +359,7 @@ AgentCore provides pre-built evaluators that can be used without creating custom
 by their `Builtin.*` ID in `--evaluator` flags or in online eval config `evaluators` arrays.
 
 ```bash
-agentcore run evals --agent MyAgent --evaluator Builtin.Faithfulness
+agentcore run eval --agent MyAgent --evaluator Builtin.Faithfulness
 ```
 
 ---
@@ -369,8 +369,8 @@ agentcore run evals --agent MyAgent --evaluator Builtin.Faithfulness
 ### CI/CD Quality Gate
 
 ```bash
-# Run evals and fail pipeline if score < threshold
-result=$(agentcore run evals --agent MyAgent --evaluator ResponseQuality --days 1 --json)
+# Run eval and fail pipeline if score < threshold
+result=$(agentcore run eval --agent MyAgent --evaluator ResponseQuality --days 1 --json)
 score=$(echo "$result" | jq '.run.results[0].aggregateScore')
 if (( $(echo "$score < 0.7" | bc -l) )); then
   echo "Quality gate failed: score $score < 0.7"
@@ -389,7 +389,7 @@ agentcore add evaluator \
   --instructions "Evaluate the agent response quality. Context: {context}"
 
 # 2. Run on-demand eval to verify
-agentcore run evals --agent MyAgent --evaluator ResponseQuality --days 7
+agentcore run eval --agent MyAgent --evaluator ResponseQuality --days 7
 
 # 3. Set up continuous monitoring
 agentcore add online-eval \
@@ -407,7 +407,7 @@ agentcore deploy
 Evaluate agents and use evaluators outside of a project directory using ARNs:
 
 ```bash
-agentcore run evals \
+agentcore run eval \
   --agent-arn arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/my-agent \
   --evaluator-arn arn:aws:bedrock-agentcore:us-east-1:123456789012:evaluator/my-eval \
   --region us-east-1 \

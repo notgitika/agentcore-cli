@@ -39,7 +39,7 @@ export const registerEval = (program: Command) => {
 
         const runs = result.runs ?? [];
         if (runs.length === 0) {
-          console.log('No eval runs found. Run `agentcore run evals` to create one.');
+          console.log('No eval runs found. Run `agentcore run eval` to create one.');
           return;
         }
 

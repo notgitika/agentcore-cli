@@ -30,7 +30,7 @@ Note: CDK L3 constructs are in a separate package `@aws/agentcore-cdk`.
 - `status` - Check deployment status
 - `dev` - Local development server (CodeZip: uvicorn with hot-reload; Container: Docker build + run with volume mount)
 - `invoke` - Invoke agents (local or deployed)
-- `run evals` - Run on-demand evaluation against agent sessions
+- `run eval` - Run on-demand evaluation against agent sessions
 - `evals history` - View past eval run results
 - `pause online-eval` - Pause (disable) a deployed online eval config
 - `resume online-eval` - Resume (enable) a paused online eval config

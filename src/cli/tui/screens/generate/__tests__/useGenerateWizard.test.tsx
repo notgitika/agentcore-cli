@@ -43,6 +43,7 @@ describe('useGenerateWizard — advanced config gate', () => {
       const frame = lastFrame()!;
       expect(frame).toContain('steps:');
       // Default modelProvider is Bedrock which filters out apiKey
+      // authorizerType is only shown when advanced is selected
       expect(frame).toMatch(/modelProvider,advanced,confirm/);
       expect(frame).not.toContain('apiKey');
     });
@@ -120,7 +121,15 @@ describe('useGenerateWizard — advanced config gate', () => {
 
       const steps = ref.current!.wizard.steps;
       const advIdx = steps.indexOf('advanced');
-      expect(steps.slice(advIdx)).toEqual(['advanced', 'networkMode', 'requestHeaderAllowlist', 'confirm']);
+      expect(steps.slice(advIdx)).toEqual([
+        'advanced',
+        'networkMode',
+        'requestHeaderAllowlist',
+        'authorizerType',
+        'idleTimeout',
+        'maxLifetime',
+        'confirm',
+      ]);
     });
 
     it('setAdvanced(true) then VPC injects subnets and securityGroups', () => {
@@ -138,6 +147,9 @@ describe('useGenerateWizard — advanced config gate', () => {
         'subnets',
         'securityGroups',
         'requestHeaderAllowlist',
+        'authorizerType',
+        'idleTimeout',
+        'maxLifetime',
         'confirm',
       ]);
     });

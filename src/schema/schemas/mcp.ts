@@ -1,6 +1,7 @@
 import { NetworkModeSchema, NodeRuntimeSchema, PythonRuntimeSchema } from '../constants';
 import type { DirectoryPath, FilePath } from '../types';
 import { EnvVarNameSchema, GatewayNameSchema } from './agent-env';
+import { GatewayAuthorizerConfigSchema, GatewayAuthorizerTypeSchema } from './auth';
 import { ToolDefinitionSchema } from './mcp-defs';
 import { TagsSchema } from './primitives/tags';
 import { z } from 'zod';
@@ -22,111 +23,8 @@ export type GatewayTargetType = z.infer<typeof GatewayTargetTypeSchema>;
 // ============================================================================
 // Gateway Authorization Schemas
 // ============================================================================
-
-export const GatewayAuthorizerTypeSchema = z.enum(['NONE', 'AWS_IAM', 'CUSTOM_JWT']);
-export type GatewayAuthorizerType = z.infer<typeof GatewayAuthorizerTypeSchema>;
-
-/** OIDC well-known configuration endpoint suffix (per OpenID Connect Discovery 1.0 spec) */
-const OIDC_WELL_KNOWN_SUFFIX = '/.well-known/openid-configuration';
-
-/**
- * OIDC Discovery URL schema.
- * Must be a valid URL ending with the standard OIDC well-known endpoint.
- * @see https://openid.net/specs/openid-connect-discovery-1_0.html
- */
-const OidcDiscoveryUrlSchema = z
-  .string()
-  .url('Must be a valid URL')
-  .refine(url => url.startsWith('https://'), {
-    message: 'OIDC discovery URL must use HTTPS',
-  })
-  .refine(url => url.endsWith(OIDC_WELL_KNOWN_SUFFIX), {
-    message: `OIDC discovery URL must end with '${OIDC_WELL_KNOWN_SUFFIX}'`,
-  });
-
-// ── Custom Claims Schemas (matches CFN CustomClaimValidationType) ──
-
-export const ClaimMatchOperatorSchema = z.enum(['EQUALS', 'CONTAINS', 'CONTAINS_ANY']);
-export type ClaimMatchOperator = z.infer<typeof ClaimMatchOperatorSchema>;
-
-export const ClaimMatchValueSchema = z
-  .object({
-    matchValueString: z.string().min(1).optional(),
-    matchValueStringList: z.array(z.string().min(1)).min(1).max(255).optional(),
-  })
-  .refine(data => data.matchValueString !== undefined || data.matchValueStringList !== undefined, {
-    message: 'Either matchValueString or matchValueStringList must be provided',
-  })
-  .refine(data => !(data.matchValueString !== undefined && data.matchValueStringList !== undefined), {
-    message: 'Only one of matchValueString or matchValueStringList may be provided',
-  });
-export type ClaimMatchValue = z.infer<typeof ClaimMatchValueSchema>;
-
-export const InboundTokenClaimValueTypeSchema = z.enum(['STRING', 'STRING_ARRAY']);
-export type InboundTokenClaimValueType = z.infer<typeof InboundTokenClaimValueTypeSchema>;
-
-export const CustomClaimValidationSchema = z
-  .object({
-    inboundTokenClaimName: z
-      .string()
-      .min(1)
-      .regex(/^[A-Za-z0-9_.\-:]+$/, 'Claim name must match [A-Za-z0-9_.-:]+'),
-    inboundTokenClaimValueType: InboundTokenClaimValueTypeSchema,
-    authorizingClaimMatchValue: z.object({
-      claimMatchOperator: ClaimMatchOperatorSchema,
-      claimMatchValue: ClaimMatchValueSchema,
-    }),
-  })
-  .strict();
-export type CustomClaimValidation = z.infer<typeof CustomClaimValidationSchema>;
-
-// ── Custom JWT Authorizer Configuration ──
-
-/**
- * Custom JWT authorizer configuration.
- * Used when authorizerType is 'CUSTOM_JWT'.
- *
- * At least one of allowedAudience, allowedClients, allowedScopes, or customClaims
- * must be provided. Only discoveryUrl is unconditionally required.
- */
-export const CustomJwtAuthorizerConfigSchema = z
-  .object({
-    /** OIDC discovery URL (e.g., https://cognito-idp.{region}.amazonaws.com/{userPoolId}/.well-known/openid-configuration) */
-    discoveryUrl: OidcDiscoveryUrlSchema,
-    /** List of allowed audiences (typically client IDs) */
-    allowedAudience: z.array(z.string().min(1)).optional(),
-    /** List of allowed client IDs */
-    allowedClients: z.array(z.string().min(1)).optional(),
-    /** List of allowed scopes */
-    allowedScopes: z.array(z.string().min(1)).optional(),
-    /** Custom claim validations */
-    customClaims: z.array(CustomClaimValidationSchema).min(1).optional(),
-  })
-  .strict()
-  .superRefine((data, ctx) => {
-    const hasAudience = data.allowedAudience && data.allowedAudience.length > 0;
-    const hasClients = data.allowedClients && data.allowedClients.length > 0;
-    const hasScopes = data.allowedScopes && data.allowedScopes.length > 0;
-    const hasClaims = data.customClaims && data.customClaims.length > 0;
-
-    if (!hasAudience && !hasClients && !hasScopes && !hasClaims) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'At least one of allowedAudience, allowedClients, allowedScopes, or customClaims must be provided',
-      });
-    }
-  });
-
-export type CustomJwtAuthorizerConfig = z.infer<typeof CustomJwtAuthorizerConfigSchema>;
-
-/**
- * Gateway authorizer configuration container.
- */
-export const GatewayAuthorizerConfigSchema = z.object({
-  customJwtAuthorizer: CustomJwtAuthorizerConfigSchema.optional(),
-});
-
-export type GatewayAuthorizerConfig = z.infer<typeof GatewayAuthorizerConfigSchema>;
+// Auth schemas (GatewayAuthorizerTypeSchema, CustomJwtAuthorizerConfigSchema, etc.)
+// are defined in ./auth.ts and exported via the barrel (index.ts).
 
 export const OutboundAuthTypeSchema = z.enum(['OAUTH', 'API_KEY', 'NONE']);
 export type OutboundAuthType = z.infer<typeof OutboundAuthTypeSchema>;

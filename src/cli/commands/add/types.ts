@@ -1,4 +1,11 @@
-import type { GatewayAuthorizerType, ModelProvider, ProtocolMode, SDKFramework, TargetLanguage } from '../../../schema';
+import type {
+  GatewayAuthorizerType,
+  ModelProvider,
+  ProtocolMode,
+  RuntimeAuthorizerType,
+  SDKFramework,
+  TargetLanguage,
+} from '../../../schema';
 import type { MemoryOption } from '../../tui/screens/generate/types';
 import type { VpcOptions } from '../shared/vpc-utils';
 
@@ -18,6 +25,16 @@ export interface AddAgentOptions extends VpcOptions {
   agentId?: string;
   agentAliasId?: string;
   region?: string;
+  authorizerType?: RuntimeAuthorizerType;
+  discoveryUrl?: string;
+  allowedAudience?: string;
+  allowedClients?: string;
+  allowedScopes?: string;
+  customClaims?: string;
+  clientId?: string;
+  clientSecret?: string;
+  idleTimeout?: number | string;
+  maxLifetime?: number | string;
   json?: boolean;
 }
 

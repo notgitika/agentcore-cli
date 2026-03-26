@@ -9,6 +9,7 @@ import {
 import {
   BedrockAgentCoreControlClient,
   DeleteApiKeyCredentialProviderCommand,
+  GetAgentRuntimeCommand,
 } from '@aws-sdk/client-bedrock-agentcore-control';
 import { execSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -25,6 +26,12 @@ interface E2EConfig {
   modelProvider: string;
   requiredEnvVar?: string;
   build?: string;
+  memory?: string;
+  /** Lifecycle configuration to pass via --idle-timeout / --max-lifetime flags. */
+  lifecycleConfig?: {
+    idleTimeout?: number;
+    maxLifetime?: number;
+  };
 }
 
 export function createE2ESuite(cfg: E2EConfig) {
@@ -54,12 +61,19 @@ export function createE2ESuite(cfg: E2EConfig) {
         '--model-provider',
         cfg.modelProvider,
         '--memory',
-        'none',
+        cfg.memory ?? 'none',
         '--json',
       ];
 
       if (cfg.build) {
         createArgs.push('--build', cfg.build);
+      }
+
+      if (cfg.lifecycleConfig?.idleTimeout !== undefined) {
+        createArgs.push('--idle-timeout', String(cfg.lifecycleConfig.idleTimeout));
+      }
+      if (cfg.lifecycleConfig?.maxLifetime !== undefined) {
+        createArgs.push('--max-lifetime', String(cfg.lifecycleConfig.maxLifetime));
       }
 
       // Pass API key so the credential is registered in the project and .env.local
@@ -261,6 +275,30 @@ export function createE2ESuite(cfg: E2EConfig) {
       },
       120000
     );
+
+    // ── Lifecycle configuration verification ─────────────────────────
+    if (cfg.lifecycleConfig) {
+      it.skipIf(!canRun)(
+        'runtime has lifecycle configuration set via AWS API',
+        async () => {
+          expect(runtimeId, 'Runtime ID should have been extracted from status').toBeTruthy();
+
+          // Query the runtime via AWS API to verify lifecycle config
+          const region = process.env.AWS_REGION ?? 'us-east-1';
+          const client = new BedrockAgentCoreControlClient({ region });
+          const response = await client.send(new GetAgentRuntimeCommand({ agentRuntimeId: runtimeId }));
+
+          expect(response.lifecycleConfiguration).toBeDefined();
+          if (cfg.lifecycleConfig!.idleTimeout !== undefined) {
+            expect(response.lifecycleConfiguration!.idleRuntimeSessionTimeout).toBe(cfg.lifecycleConfig!.idleTimeout);
+          }
+          if (cfg.lifecycleConfig!.maxLifetime !== undefined) {
+            expect(response.lifecycleConfiguration!.maxLifetime).toBe(cfg.lifecycleConfig!.maxLifetime);
+          }
+        },
+        180000
+      );
+    }
   });
 }
 

@@ -6,7 +6,33 @@ import {
   InvokeAgentRuntimeCommand,
   StopRuntimeSessionCommand,
 } from '@aws-sdk/client-bedrock-agentcore';
+import type { HttpRequest } from '@smithy/protocol-http';
 import type { DocumentType } from '@smithy/types';
+
+/**
+ * Create a BedrockAgentCoreClient with optional custom header injection middleware.
+ */
+function createAgentCoreClient(region: string, headers?: Record<string, string>): BedrockAgentCoreClient {
+  const client = new BedrockAgentCoreClient({
+    region,
+    credentials: getCredentialProvider(),
+  });
+
+  if (headers && Object.keys(headers).length > 0) {
+    client.middlewareStack.add(
+      next => async args => {
+        const request = args.request as HttpRequest;
+        for (const [name, value] of Object.entries(headers)) {
+          request.headers[name] = value;
+        }
+        return next(args);
+      },
+      { step: 'build', name: 'addCustomHeaders' }
+    );
+  }
+
+  return client;
+}
 
 /** Logger interface for SSE events */
 export interface SSELogger {
@@ -25,6 +51,10 @@ export interface InvokeAgentRuntimeOptions {
   userId?: string;
   /** Optional logger for SSE event debugging */
   logger?: SSELogger;
+  /** Custom headers to forward to the agent runtime */
+  headers?: Record<string, string>;
+  /** Bearer token for CUSTOM_JWT auth. When provided, uses raw HTTP with Authorization header instead of SigV4. */
+  bearerToken?: string;
 }
 
 export interface InvokeAgentRuntimeResult {
@@ -104,15 +134,161 @@ export function extractResult(text: string): string {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Bearer token (CUSTOM_JWT) thin HTTP client
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the invoke URL for a runtime ARN.
+ * Format: https://bedrock-agentcore.{REGION}.amazonaws.com/runtimes/{ESCAPED_ARN}/invocations?qualifier=DEFAULT
+ */
+function buildInvokeUrl(region: string, runtimeArn: string): string {
+  const escapedArn = encodeURIComponent(runtimeArn);
+  return `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${escapedArn}/invocations?qualifier=DEFAULT`;
+}
+
+/**
+ * Invoke an AgentCore Runtime using bearer token auth (raw HTTP, no SigV4).
+ * Used when the runtime has CUSTOM_JWT authorizer configured.
+ */
+async function invokeWithBearerTokenStreaming(options: InvokeAgentRuntimeOptions): Promise<StreamingInvokeResult> {
+  const url = buildInvokeUrl(options.region, options.runtimeArn);
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${options.bearerToken}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json, text/event-stream',
+  };
+  if (options.sessionId) {
+    headers['X-Amzn-Bedrock-AgentCore-Runtime-Session-Id'] = options.sessionId;
+  }
+  headers['X-Amzn-Bedrock-AgentCore-Runtime-User-Id'] = options.userId ?? DEFAULT_RUNTIME_USER_ID;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ prompt: options.payload }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Invoke failed (${res.status}): ${body || res.statusText}`);
+  }
+
+  const sessionId = res.headers.get('X-Amzn-Bedrock-AgentCore-Runtime-Session-Id') ?? undefined;
+  const bodyReader = res.body?.getReader();
+  if (!bodyReader) {
+    throw new Error('No response body from AgentCore Runtime');
+  }
+
+  // Assign to const after null check so TypeScript narrows the type inside the generator
+  const reader = bodyReader;
+  const decoder = new TextDecoder();
+  const { logger } = options;
+
+  async function* streamGenerator(): AsyncGenerator<string, void, unknown> {
+    let buffer = '';
+    let fullResponse = '';
+    let yieldedContent = false;
+
+    try {
+      while (true) {
+        const result = await reader.read();
+        if (result.done) break;
+
+        const decoded = decoder.decode(result.value as Uint8Array | undefined, { stream: true });
+        buffer += decoded;
+        fullResponse += decoded;
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          if (logger && line.trim()) {
+            logger.logSSEEvent(line);
+          }
+          const { content, error } = parseSSELine(line);
+          if (error) {
+            yield `Error: ${error}`;
+            return;
+          }
+          if (content) {
+            yield content;
+            yieldedContent = true;
+          }
+        }
+      }
+
+      if (buffer) {
+        if (logger && buffer.trim()) {
+          logger.logSSEEvent(buffer);
+        }
+        const { content, error } = parseSSELine(buffer);
+        if (error) {
+          yield `Error: ${error}`;
+        } else if (content) {
+          yield content;
+          yieldedContent = true;
+        }
+      }
+
+      if (!yieldedContent && fullResponse.trim()) {
+        yield extractResult(fullResponse.trim());
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  return { stream: streamGenerator(), sessionId };
+}
+
+/**
+ * Invoke an AgentCore Runtime using bearer token auth (non-streaming).
+ */
+async function invokeWithBearerToken(options: InvokeAgentRuntimeOptions): Promise<InvokeAgentRuntimeResult> {
+  const url = buildInvokeUrl(options.region, options.runtimeArn);
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${options.bearerToken}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+  if (options.sessionId) {
+    headers['X-Amzn-Bedrock-AgentCore-Runtime-Session-Id'] = options.sessionId;
+  }
+  headers['X-Amzn-Bedrock-AgentCore-Runtime-User-Id'] = options.userId ?? DEFAULT_RUNTIME_USER_ID;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ prompt: options.payload }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Invoke failed (${res.status}): ${body || res.statusText}`);
+  }
+
+  const sessionId = res.headers.get('X-Amzn-Bedrock-AgentCore-Runtime-Session-Id') ?? undefined;
+  const text = await res.text();
+  const content = text.includes('data: ') ? parseSSE(text) : extractResult(text);
+
+  return { content, sessionId };
+}
+
+// ---------------------------------------------------------------------------
+// SDK-based invoke (SigV4)
+// ---------------------------------------------------------------------------
+
 /**
  * Invoke an AgentCore Runtime and stream the response chunks.
  * Returns an object with the stream generator and session ID.
  */
 export async function invokeAgentRuntimeStreaming(options: InvokeAgentRuntimeOptions): Promise<StreamingInvokeResult> {
-  const client = new BedrockAgentCoreClient({
-    region: options.region,
-    credentials: getCredentialProvider(),
-  });
+  if (options.bearerToken) {
+    return invokeWithBearerTokenStreaming(options);
+  }
+
+  const client = createAgentCoreClient(options.region, options.headers);
 
   const command = new InvokeAgentRuntimeCommand({
     agentRuntimeArn: options.runtimeArn,
@@ -205,10 +381,11 @@ export async function invokeAgentRuntimeStreaming(options: InvokeAgentRuntimeOpt
  * Invoke an AgentCore Runtime and return the response.
  */
 export async function invokeAgentRuntime(options: InvokeAgentRuntimeOptions): Promise<InvokeAgentRuntimeResult> {
-  const client = new BedrockAgentCoreClient({
-    region: options.region,
-    credentials: getCredentialProvider(),
-  });
+  if (options.bearerToken) {
+    return invokeWithBearerToken(options);
+  }
+
+  const client = createAgentCoreClient(options.region, options.headers);
 
   const command = new InvokeAgentRuntimeCommand({
     agentRuntimeArn: options.runtimeArn,
@@ -349,6 +526,8 @@ export interface McpInvokeOptions {
   userId?: string;
   mcpSessionId?: string;
   logger?: SSELogger;
+  /** Custom headers to forward to the agent runtime */
+  headers?: Record<string, string>;
 }
 
 export interface McpToolDef {
@@ -372,10 +551,7 @@ interface McpRpcResult {
 
 /** Send a JSON-RPC payload through InvokeAgentRuntime and return the parsed response. */
 async function mcpRpcCall(options: McpInvokeOptions, body: Record<string, unknown>): Promise<McpRpcResult> {
-  const client = new BedrockAgentCoreClient({
-    region: options.region,
-    credentials: getCredentialProvider(),
-  });
+  const client = createAgentCoreClient(options.region, options.headers);
 
   options.logger?.logSSEEvent(`MCP request: ${JSON.stringify(body)}`);
 
@@ -420,10 +596,7 @@ async function mcpRpcCallStrict(options: McpInvokeOptions, body: Record<string, 
 
 /** Send a JSON-RPC notification (no id, no response expected). */
 async function mcpRpcNotify(options: McpInvokeOptions, body: Record<string, unknown>): Promise<void> {
-  const client = new BedrockAgentCoreClient({
-    region: options.region,
-    credentials: getCredentialProvider(),
-  });
+  const client = createAgentCoreClient(options.region, options.headers);
 
   const command = new InvokeAgentRuntimeCommand({
     agentRuntimeArn: options.runtimeArn,
@@ -592,6 +765,8 @@ export interface A2AInvokeOptions {
   runtimeArn: string;
   userId?: string;
   logger?: SSELogger;
+  /** Custom headers to forward to the agent runtime */
+  headers?: Record<string, string>;
 }
 
 let a2aRequestId = 1;
@@ -601,10 +776,7 @@ let a2aRequestId = 1;
  * Streams text parts from the response artifacts.
  */
 export async function invokeA2ARuntime(options: A2AInvokeOptions, message: string): Promise<StreamingInvokeResult> {
-  const client = new BedrockAgentCoreClient({
-    region: options.region,
-    credentials: getCredentialProvider(),
-  });
+  const client = createAgentCoreClient(options.region, options.headers);
 
   const body = {
     jsonrpc: '2.0',

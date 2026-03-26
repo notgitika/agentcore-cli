@@ -9,6 +9,7 @@ import { CreateScreen } from './screens/create';
 import { DeployScreen } from './screens/deploy/DeployScreen';
 import { DevScreen } from './screens/dev/DevScreen';
 import { EvalHubScreen, EvalScreen } from './screens/eval';
+import { FetchAccessScreen } from './screens/fetch-access';
 import { HelpScreen, HomeScreen } from './screens/home';
 import { InvokeScreen } from './screens/invoke';
 import { OnlineEvalDashboard } from './screens/online-eval';
@@ -40,6 +41,7 @@ type Route =
   | { name: 'evals' }
   | { name: 'eval-runs' }
   | { name: 'online-evals' }
+  | { name: 'fetch-access' }
   | { name: 'validate' }
   | { name: 'package' }
   | { name: 'update' }
@@ -104,6 +106,8 @@ function AppContent() {
       setRoute({ name: 'run' });
     } else if (id === 'evals') {
       setRoute({ name: 'evals' });
+    } else if (id === 'fetch') {
+      setRoute({ name: 'fetch-access' });
     } else if (id === 'validate') {
       setRoute({ name: 'validate' });
     } else if (id === 'package') {
@@ -235,6 +239,10 @@ function AppContent() {
 
   if (route.name === 'online-evals') {
     return <OnlineEvalDashboard isInteractive={true} onExit={() => setRoute({ name: 'evals' })} />;
+  }
+
+  if (route.name === 'fetch-access') {
+    return <FetchAccessScreen isInteractive={true} onExit={() => setRoute({ name: 'help' })} />;
   }
 
   if (route.name === 'validate') {

@@ -3,10 +3,12 @@ import type {
   ModelProvider,
   NetworkMode,
   ProtocolMode,
+  RuntimeAuthorizerType,
   SDKFramework,
   TargetLanguage,
 } from '../../../../schema';
 import { DEFAULT_MODEL_IDS, PROTOCOL_FRAMEWORK_MATRIX, getSupportedModelProviders } from '../../../../schema';
+import type { JwtConfigOptions } from '../../../primitives/auth-utils';
 
 export type GenerateStep =
   | 'projectName'
@@ -22,6 +24,10 @@ export type GenerateStep =
   | 'subnets'
   | 'securityGroups'
   | 'requestHeaderAllowlist'
+  | 'authorizerType'
+  | 'jwtConfig'
+  | 'idleTimeout'
+  | 'maxLifetime'
   | 'confirm';
 
 export type MemoryOption = 'none' | 'shortTerm' | 'longAndShortTerm';
@@ -44,6 +50,14 @@ export interface GenerateConfig {
   securityGroups?: string[];
   /** Allowed request headers for the runtime */
   requestHeaderAllowlist?: string[];
+  /** Authorizer type for inbound requests */
+  authorizerType?: RuntimeAuthorizerType;
+  /** JWT config for CUSTOM_JWT authorizer */
+  jwtConfig?: JwtConfigOptions;
+  /** Idle session timeout in seconds (LIFECYCLE_TIMEOUT_MIN-LIFECYCLE_TIMEOUT_MAX) */
+  idleRuntimeSessionTimeout?: number;
+  /** Max instance lifetime in seconds (LIFECYCLE_TIMEOUT_MIN-LIFECYCLE_TIMEOUT_MAX) */
+  maxLifetime?: number;
 }
 
 /** Base steps - apiKey, memory, subnets, securityGroups are conditionally added based on selections */
@@ -73,6 +87,10 @@ export const STEP_LABELS: Record<GenerateStep, string> = {
   subnets: 'Subnets',
   securityGroups: 'Security Groups',
   requestHeaderAllowlist: 'Headers',
+  authorizerType: 'Auth',
+  jwtConfig: 'JWT Config',
+  idleTimeout: 'Idle Timeout',
+  maxLifetime: 'Max Lifetime',
   confirm: 'Confirm',
 };
 

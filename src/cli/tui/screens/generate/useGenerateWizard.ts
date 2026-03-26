@@ -1,5 +1,6 @@
-import type { NetworkMode } from '../../../../schema';
+import type { NetworkMode, RuntimeAuthorizerType } from '../../../../schema';
 import { ProjectNameSchema } from '../../../../schema';
+import type { JwtConfigOptions } from '../../../primitives/auth-utils';
 import type { BuildType, GenerateConfig, GenerateStep, MemoryOption, ProtocolMode } from './types';
 import { BASE_GENERATE_STEPS, getModelProviderOptionsForSdk } from './types';
 import { useCallback, useMemo, useState } from 'react';
@@ -64,8 +65,16 @@ export function useGenerateWizard(options?: UseGenerateWizardOptions) {
         ...filtered.slice(0, afterAdvanced),
         ...networkSteps,
         'requestHeaderAllowlist',
+        'authorizerType',
+        'idleTimeout',
+        'maxLifetime',
         ...filtered.slice(afterAdvanced),
       ];
+    }
+    // Add jwtConfig step after authorizerType when CUSTOM_JWT is selected
+    if (config.authorizerType === 'CUSTOM_JWT') {
+      const authIndex = filtered.indexOf('authorizerType');
+      filtered = [...filtered.slice(0, authIndex + 1), 'jwtConfig', ...filtered.slice(authIndex + 1)];
     }
     return filtered;
   }, [
@@ -73,6 +82,7 @@ export function useGenerateWizard(options?: UseGenerateWizardOptions) {
     config.sdk,
     config.protocol,
     config.networkMode,
+    config.authorizerType,
     hasInitialName,
     sdkSelected,
     advancedSelected,
@@ -177,6 +187,8 @@ export function useGenerateWizard(options?: UseGenerateWizardOptions) {
         subnets: undefined,
         securityGroups: undefined,
         requestHeaderAllowlist: undefined,
+        idleRuntimeSessionTimeout: undefined,
+        maxLifetime: undefined,
       }));
       setStep('confirm');
     }
@@ -203,10 +215,43 @@ export function useGenerateWizard(options?: UseGenerateWizardOptions) {
 
   const setRequestHeaderAllowlist = useCallback((requestHeaderAllowlist: string[]) => {
     setConfig(c => ({ ...c, requestHeaderAllowlist }));
-    setStep('confirm');
+    setStep('authorizerType');
   }, []);
 
   const skipRequestHeaderAllowlist = useCallback(() => {
+    setStep('authorizerType');
+  }, []);
+
+  const setAuthorizerType = useCallback((authorizerType: RuntimeAuthorizerType) => {
+    setConfig(c => ({ ...c, authorizerType }));
+    if (authorizerType === 'CUSTOM_JWT') {
+      setStep('jwtConfig');
+    } else {
+      setConfig(c => ({ ...c, authorizerType, jwtConfig: undefined }));
+      setStep('idleTimeout');
+    }
+  }, []);
+
+  const setJwtConfig = useCallback((jwtConfig: JwtConfigOptions) => {
+    setConfig(c => ({ ...c, jwtConfig }));
+    setStep('idleTimeout');
+  }, []);
+
+  const setIdleTimeout = useCallback((value: number | undefined) => {
+    setConfig(c => ({ ...c, idleRuntimeSessionTimeout: value }));
+    setStep('maxLifetime');
+  }, []);
+
+  const skipIdleTimeout = useCallback(() => {
+    setStep('maxLifetime');
+  }, []);
+
+  const setMaxLifetime = useCallback((value: number | undefined) => {
+    setConfig(c => ({ ...c, maxLifetime: value }));
+    setStep('confirm');
+  }, []);
+
+  const skipMaxLifetime = useCallback(() => {
     setStep('confirm');
   }, []);
 
@@ -258,6 +303,12 @@ export function useGenerateWizard(options?: UseGenerateWizardOptions) {
     setSecurityGroups,
     setRequestHeaderAllowlist,
     skipRequestHeaderAllowlist,
+    setAuthorizerType,
+    setJwtConfig,
+    setIdleTimeout,
+    skipIdleTimeout,
+    setMaxLifetime,
+    skipMaxLifetime,
     goBack,
     reset,
     initWithName,

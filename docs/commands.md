@@ -225,12 +225,12 @@ agentcore add memory \
   --expiry 30
 ```
 
-| Flag                   | Description                                                     |
-| ---------------------- | --------------------------------------------------------------- |
-| `--name <name>`        | Memory name                                                     |
-| `--strategies <types>` | Comma-separated: `SEMANTIC`, `SUMMARIZATION`, `USER_PREFERENCE` |
-| `--expiry <days>`      | Event expiry duration in days (default: 30, min: 7, max: 365)   |
-| `--json`               | JSON output                                                     |
+| Flag                   | Description                                                                 |
+| ---------------------- | --------------------------------------------------------------------------- |
+| `--name <name>`        | Memory name                                                                 |
+| `--strategies <types>` | Comma-separated: `SEMANTIC`, `SUMMARIZATION`, `USER_PREFERENCE`, `EPISODIC` |
+| `--expiry <days>`      | Event expiry duration in days (default: 30, min: 7, max: 365)               |
+| `--json`               | JSON output                                                                 |
 
 ### add gateway
 
@@ -586,16 +586,16 @@ agentcore traces get abc123 --agent MyAgent --output ./trace.json
 
 See [Evaluations](evals.md) for the full guide on evaluators, scoring, and online monitoring.
 
-### run evals
+### run eval
 
 Run on-demand evaluation against historical agent traces.
 
 ```bash
 # Project mode
-agentcore run evals --agent MyAgent --evaluator ResponseQuality --days 7
+agentcore run eval --agent MyAgent --evaluator ResponseQuality --days 7
 
 # Standalone mode (no project required)
-agentcore run evals \
+agentcore run eval \
   --agent-arn arn:aws:...:runtime/abc123 \
   --evaluator-arn arn:aws:...:evaluator/eval123 \
   --region us-east-1
