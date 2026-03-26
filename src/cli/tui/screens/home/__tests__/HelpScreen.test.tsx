@@ -36,15 +36,15 @@ describe('HelpScreen', () => {
     expect(frame).not.toContain('CLI only');
   });
 
-  it('shows Ctrl+L show all hint by default', () => {
+  it('shows / show all hint by default', () => {
     const { lastFrame } = render(<HelpScreen commands={allCommands} onSelect={vi.fn()} onBack={vi.fn()} />);
-    expect(lastFrame()!).toContain('Ctrl+L show all');
+    expect(lastFrame()!).toContain('/ show all');
   });
 
-  it('shows CLI-only commands after Ctrl+L toggle', async () => {
+  it('shows CLI-only commands after / toggle', async () => {
     const { lastFrame, stdin } = render(<HelpScreen commands={allCommands} onSelect={vi.fn()} onBack={vi.fn()} />);
     await delay();
-    stdin.write('\x0C'); // Ctrl+L
+    stdin.write('/');
     await delay();
     const frame = lastFrame()!;
     expect(frame).toContain('logs');
@@ -52,20 +52,20 @@ describe('HelpScreen', () => {
     expect(frame).toContain('CLI only');
   });
 
-  it('shows Ctrl+L hide cli hint when toggled on', async () => {
+  it('shows / hide cli hint when toggled on', async () => {
     const { lastFrame, stdin } = render(<HelpScreen commands={allCommands} onSelect={vi.fn()} onBack={vi.fn()} />);
     await delay();
-    stdin.write('\x0C'); // Ctrl+L
+    stdin.write('/');
     await delay();
-    expect(lastFrame()!).toContain('Ctrl+L hide cli');
+    expect(lastFrame()!).toContain('/ hide cli');
   });
 
-  it('hides CLI-only commands after double Ctrl+L toggle', async () => {
+  it('hides CLI-only commands after double / toggle', async () => {
     const { lastFrame, stdin } = render(<HelpScreen commands={allCommands} onSelect={vi.fn()} onBack={vi.fn()} />);
     await delay();
-    stdin.write('\x0C'); // Ctrl+L — show
+    stdin.write('/'); // show
     await delay();
-    stdin.write('\x0C'); // Ctrl+L — hide
+    stdin.write('/'); // hide
     await delay();
     const frame = lastFrame()!;
     expect(frame).not.toContain('Stream logs');

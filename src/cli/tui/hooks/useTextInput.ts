@@ -31,6 +31,8 @@ export interface UseTextInputOptions {
   onDownArrow?: () => void;
   /** Whether input is active (default: true) */
   isActive?: boolean;
+  /** Characters to ignore (not added to input) */
+  excludeChars?: string[];
 }
 
 export interface UseTextInputResult {
@@ -63,6 +65,7 @@ export function useTextInput({
   onUpArrow,
   onDownArrow,
   isActive = true,
+  excludeChars,
 }: UseTextInputOptions = {}): UseTextInputResult {
   const [state, setState] = useState({ text: initialValue, cursor: initialValue.length });
 
@@ -196,6 +199,8 @@ export function useTextInput({
 
       // Regular character input
       if (input && !key.ctrl && !key.meta) {
+        // Skip excluded characters
+        if (excludeChars?.includes(input)) return;
         // Filter out control characters (DEL, backspace, carriage return)
         // eslint-disable-next-line no-control-regex
         const filtered = input.replace(/[\x7f\x08\r]/g, '');

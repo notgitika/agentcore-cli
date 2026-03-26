@@ -10,8 +10,8 @@
 export const HINTS = {
   HOME: 'Type to search, Tab commands, Esc quit',
   COMMANDS: 'Type to filter, ↑↓ navigate, Enter select, Esc back',
-  COMMANDS_SHOW_ALL: 'Type to filter · ↑↓ Enter select · Ctrl+L show all · Esc back',
-  COMMANDS_HIDE_CLI: 'Type to filter · ↑↓ Enter select · Ctrl+L hide cli · Esc back',
+  COMMANDS_SHOW_ALL: 'Type to filter · ↑↓ Enter select · / show all · Esc back',
+  COMMANDS_HIDE_CLI: 'Type to filter · ↑↓ Enter select · / hide cli · Esc back',
 } as const;
 
 /**

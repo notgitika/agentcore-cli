@@ -180,6 +180,7 @@ export function HelpScreen(props: {
   } = useTextInput({
     initialValue: initialQuery ?? '',
     isActive: true,
+    excludeChars: ['/'],
   });
 
   function filterCommand(cmd: CommandMeta): DisplayItem[] {
@@ -221,7 +222,7 @@ export function HelpScreen(props: {
       onNoticeDismiss();
     }
 
-    if (key.ctrl && input === 'l') {
+    if (input === '/') {
       setShowCliOnly(prev => !prev);
       return;
     }
