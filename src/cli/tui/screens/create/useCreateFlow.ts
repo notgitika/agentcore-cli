@@ -72,6 +72,7 @@ function createDefaultProjectSpec(projectName: string): AgentCoreProjectSpec {
   return {
     name: projectName,
     version: 1,
+    managedBy: 'CDK' as const,
     tags: {
       'agentcore:created-by': 'agentcore-cli',
       'agentcore:project-name': projectName,
