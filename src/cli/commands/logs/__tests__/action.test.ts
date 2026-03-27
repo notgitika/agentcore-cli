@@ -97,7 +97,7 @@ describe('resolveAgentContext', () => {
       project: {
         name: 'TestProject',
         version: 1,
-      managedBy: 'CDK' as const,
+        managedBy: 'CDK' as const,
         agents: [
           {
             type: 'AgentCoreRuntime' as const,
@@ -140,7 +140,7 @@ describe('resolveAgentContext', () => {
       project: {
         name: 'TestProject',
         version: 1,
-      managedBy: 'CDK' as const,
+        managedBy: 'CDK' as const,
         agents: [
           {
             type: 'AgentCoreRuntime' as const,
@@ -210,7 +210,7 @@ describe('resolveAgentContext', () => {
       project: {
         name: 'TestProject',
         version: 1,
-      managedBy: 'CDK' as const,
+        managedBy: 'CDK' as const,
         agents: [],
         memories: [],
         credentials: [],
