@@ -10,7 +10,12 @@ import { isReservedProjectName } from '../constants';
 import { AgentEnvSpecSchema } from './agent-env';
 import { AgentCoreGatewaySchema, AgentCoreGatewayTargetSchema, AgentCoreMcpRuntimeToolSchema } from './mcp';
 import { EvaluationLevelSchema, EvaluatorConfigSchema, EvaluatorNameSchema } from './primitives/evaluator';
-import { DEFAULT_STRATEGY_NAMESPACES, MemoryStrategySchema, MemoryStrategyTypeSchema } from './primitives/memory';
+import {
+  DEFAULT_EPISODIC_REFLECTION_NAMESPACES,
+  DEFAULT_STRATEGY_NAMESPACES,
+  MemoryStrategySchema,
+  MemoryStrategyTypeSchema,
+} from './primitives/memory';
 import { OnlineEvalConfigSchema } from './primitives/online-eval-config';
 import { PolicyEngineSchema } from './primitives/policy';
 import { TagsSchema } from './primitives/tags';
@@ -18,7 +23,12 @@ import { uniqueBy } from './zod-util';
 import { z } from 'zod';
 
 // Re-export for convenience
-export { DEFAULT_STRATEGY_NAMESPACES, MemoryStrategySchema, MemoryStrategyTypeSchema };
+export {
+  DEFAULT_EPISODIC_REFLECTION_NAMESPACES,
+  DEFAULT_STRATEGY_NAMESPACES,
+  MemoryStrategySchema,
+  MemoryStrategyTypeSchema,
+};
 export { EvaluationLevelSchema };
 export type { MemoryStrategy, MemoryStrategyType } from './primitives/memory';
 export type { OnlineEvalConfig } from './primitives/online-eval-config';
@@ -120,8 +130,8 @@ export type ApiKeyCredential = z.infer<typeof ApiKeyCredentialSchema>;
 export const OAuthCredentialSchema = z.object({
   type: z.literal('OAuthCredentialProvider'),
   name: CredentialNameSchema,
-  /** OIDC discovery URL for the OAuth provider */
-  discoveryUrl: z.string().url(),
+  /** OIDC discovery URL for the OAuth provider (optional for imported providers that already exist in Identity service) */
+  discoveryUrl: z.string().url().optional(),
   /** Scopes this credential provider supports */
   scopes: z.array(z.string()).optional(),
   /** Credential provider vendor type */
@@ -166,7 +176,7 @@ const ARN_PREFIX = 'arn:';
 export const AgentCoreProjectSpecSchema = z
   .object({
     name: ProjectNameSchema,
-    version: z.number().int(),
+    version: z.number().int().min(1),
     managedBy: ManagedBySchema,
     tags: TagsSchema.optional(),
 

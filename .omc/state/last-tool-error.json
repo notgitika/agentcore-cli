@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"git fetch upstream main && git merge upstream/main --no-commit --no-ff 2>&1\",\"description\":\"Check merge conflict with upstream main\"}",
+  "error": "Exit code 1\nFrom github.com:aws/agentcore-cli\n * branch            main       -> FETCH_HEAD\n   3b6212a..cb26199  main       -> upstream/main\nAuto-merging README.md\nAuto-merging docs/commands.md\nAuto-merging src/assets/__tests__/__snapshots__/assets.snapshot.test.ts.snap\nAuto-merging src/cli/commands/create/action.ts\nAuto-merging src/cli/tui/screens/create/useCreateFlow.ts\nAuto-merging src/schema/llm-compacted/agentcore.ts\nAuto-merging src/schema/schemas/__tests__/agentcore-project.test.ts\nAuto-m...",
+  "timestamp": "2026-03-27T14:27:45.152Z",
+  "retry_count": 1
+}

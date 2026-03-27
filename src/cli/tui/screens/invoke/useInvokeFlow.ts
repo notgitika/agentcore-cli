@@ -5,6 +5,7 @@ import type {
   ModelProvider,
   NetworkMode,
   ProtocolMode,
+  RuntimeAuthorizerType,
   AgentCoreProjectSpec as _AgentCoreProjectSpec,
 } from '../../../../schema';
 import {
@@ -18,6 +19,7 @@ import {
 import { getErrorMessage } from '../../../errors';
 import { InvokeLogger } from '../../../logging';
 import { formatMcpToolList } from '../../../operations/dev/utils';
+import { canFetchRuntimeToken, fetchRuntimeToken } from '../../../operations/fetch-access';
 import { generateSessionId } from '../../../operations/session';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -28,6 +30,7 @@ export interface InvokeConfig {
     modelProvider?: ModelProvider;
     networkMode?: NetworkMode;
     protocol?: ProtocolMode;
+    authorizerType?: RuntimeAuthorizerType;
   }[];
   target: AwsDeploymentTarget;
   targetName: string;
@@ -37,7 +40,12 @@ export interface InvokeConfig {
 export interface InvokeFlowOptions {
   initialSessionId?: string;
   initialUserId?: string;
+  /** Custom headers to forward to the agent runtime on every invocation */
+  headers?: Record<string, string>;
+  initialBearerToken?: string;
 }
+
+export type TokenFetchState = 'idle' | 'fetching' | 'fetched' | 'error';
 
 export interface InvokeFlowState {
   phase: 'loading' | 'ready' | 'invoking' | 'error';
@@ -48,17 +56,23 @@ export interface InvokeFlowState {
   logFilePath: string | null;
   sessionId: string | null;
   userId: string;
+  bearerToken: string;
+  tokenFetchState: TokenFetchState;
+  tokenFetchError: string | null;
+  tokenExpiresIn: number | undefined;
   mcpTools: McpToolDef[];
   mcpToolsFetched: boolean;
   selectAgent: (index: number) => void;
   setUserId: (id: string) => void;
+  setBearerToken: (token: string) => void;
+  fetchBearerToken: () => Promise<void>;
   invoke: (prompt: string) => Promise<void>;
   newSession: () => void;
   fetchMcpTools: () => Promise<void>;
 }
 
 export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState {
-  const { initialSessionId, initialUserId } = options;
+  const { initialSessionId, initialUserId, headers, initialBearerToken } = options;
   const [phase, setPhase] = useState<'loading' | 'ready' | 'invoking' | 'error'>('loading');
   const [config, setConfig] = useState<InvokeConfig | null>(null);
   const [selectedAgent, setSelectedAgent] = useState(0);
@@ -67,6 +81,10 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
   const [logFilePath, setLogFilePath] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string>(initialUserId ?? DEFAULT_RUNTIME_USER_ID);
+  const [bearerToken, setBearerToken] = useState<string>(initialBearerToken ?? '');
+  const [tokenFetchState, setTokenFetchState] = useState<TokenFetchState>('idle');
+  const [tokenFetchError, setTokenFetchError] = useState<string | null>(null);
+  const [tokenExpiresIn, setTokenExpiresIn] = useState<number | undefined>(undefined);
 
   // MCP state
   const [mcpTools, setMcpTools] = useState<McpToolDef[]>([]);
@@ -113,6 +131,7 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
             modelProvider: agent.modelProvider,
             networkMode: agent.networkMode,
             protocol: agent.protocol,
+            authorizerType: agent.authorizerType,
           });
         }
 
@@ -150,8 +169,9 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
       runtimeArn: agent.state.runtimeArn,
       userId,
       mcpSessionId: mcpSessionIdRef.current,
+      headers,
     };
-  }, [config, selectedAgent, userId]);
+  }, [config, selectedAgent, userId, headers]);
 
   const fetchMcpTools = useCallback(async () => {
     const opts = getMcpInvokeOptions();
@@ -174,6 +194,31 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
       setMcpToolsFetched(true);
     }
   }, [getMcpInvokeOptions]);
+
+  const fetchBearerToken = useCallback(async () => {
+    if (!config) return;
+    const agent = config.agents[selectedAgent];
+    if (agent?.authorizerType !== 'CUSTOM_JWT') return;
+
+    // Check if credentials are set up before attempting fetch
+    const canFetch = await canFetchRuntimeToken(agent.name);
+    if (!canFetch) {
+      // No credential configured — silently skip, user can press T to enter manually
+      return;
+    }
+
+    setTokenFetchState('fetching');
+    setTokenFetchError(null);
+    try {
+      const result = await fetchRuntimeToken(agent.name, { deployTarget: config.targetName });
+      setBearerToken(result.token);
+      setTokenExpiresIn(result.expiresIn);
+      setTokenFetchState('fetched');
+    } catch (err) {
+      setTokenFetchError(getErrorMessage(err));
+      setTokenFetchState('error');
+    }
+  }, [config, selectedAgent]);
 
   // Track current streaming content to avoid stale closure issues
   const streamingContentRef = useRef('');
@@ -271,7 +316,7 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
       try {
         const result = isA2A
           ? await invokeA2ARuntime(
-              { region: config.target.region, runtimeArn: agent.state.runtimeArn, userId, logger },
+              { region: config.target.region, runtimeArn: agent.state.runtimeArn, userId, logger, headers },
               prompt
             )
           : await invokeAgentRuntimeStreaming({
@@ -281,6 +326,8 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
               sessionId: sessionId ?? undefined,
               userId,
               logger,
+              headers,
+              bearerToken: bearerToken || undefined,
             });
 
         if (result.sessionId) {
@@ -319,7 +366,7 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
         setPhase('ready');
       }
     },
-    [config, selectedAgent, phase, sessionId, userId, fetchMcpTools, getMcpInvokeOptions]
+    [config, selectedAgent, phase, sessionId, userId, headers, bearerToken, fetchMcpTools, getMcpInvokeOptions]
   );
 
   const newSession = useCallback(() => {
@@ -342,10 +389,16 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
     logFilePath,
     sessionId,
     userId,
+    bearerToken,
+    tokenFetchState,
+    tokenFetchError,
+    tokenExpiresIn,
     mcpTools,
     mcpToolsFetched,
     selectAgent: setSelectedAgent,
     setUserId,
+    setBearerToken,
+    fetchBearerToken,
     invoke,
     newSession,
     fetchMcpTools,

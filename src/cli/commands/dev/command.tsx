@@ -20,6 +20,7 @@ import { FatalError } from '../../tui/components';
 import { LayoutProvider } from '../../tui/context';
 import { COMMAND_DESCRIPTIONS } from '../../tui/copy';
 import { requireProject } from '../../tui/guards';
+import { parseHeaderFlags } from '../shared/header-utils';
 import type { Command } from '@commander-js/extra-typings';
 import { Text, render } from 'ink';
 import React from 'react';
@@ -29,16 +30,21 @@ const ENTER_ALT_SCREEN = '\x1B[?1049h\x1B[H';
 const EXIT_ALT_SCREEN = '\x1B[?1049l';
 const SHOW_CURSOR = '\x1B[?25h';
 
-async function invokeDevServer(port: number, prompt: string, stream: boolean): Promise<void> {
+async function invokeDevServer(
+  port: number,
+  prompt: string,
+  stream: boolean,
+  headers?: Record<string, string>
+): Promise<void> {
   try {
     if (stream) {
       // Stream response to stdout
-      for await (const chunk of invokeAgentStreaming(port, prompt)) {
+      for await (const chunk of invokeAgentStreaming({ port, message: prompt, headers })) {
         process.stdout.write(chunk);
       }
       process.stdout.write('\n');
     } else {
-      const response = await invokeAgent(port, prompt);
+      const response = await invokeAgent({ port, message: prompt, headers });
       console.log(response);
     }
   } catch (err) {
@@ -52,9 +58,9 @@ async function invokeDevServer(port: number, prompt: string, stream: boolean): P
   }
 }
 
-async function invokeA2ADevServer(port: number, prompt: string): Promise<void> {
+async function invokeA2ADevServer(port: number, prompt: string, headers?: Record<string, string>): Promise<void> {
   try {
-    for await (const chunk of invokeForProtocol('A2A', { port, message: prompt })) {
+    for await (const chunk of invokeForProtocol('A2A', { port, message: prompt, headers })) {
       process.stdout.write(chunk);
     }
     process.stdout.write('\n');
@@ -69,10 +75,16 @@ async function invokeA2ADevServer(port: number, prompt: string): Promise<void> {
   }
 }
 
-async function handleMcpInvoke(port: number, invokeValue: string, toolName?: string, input?: string): Promise<void> {
+async function handleMcpInvoke(
+  port: number,
+  invokeValue: string,
+  toolName?: string,
+  input?: string,
+  headers?: Record<string, string>
+): Promise<void> {
   try {
     if (invokeValue === 'list-tools') {
-      const { tools } = await listMcpTools(port);
+      const { tools } = await listMcpTools(port, undefined, headers);
       if (tools.length === 0) {
         console.log('No tools available.');
         return;
@@ -89,7 +101,7 @@ async function handleMcpInvoke(port: number, invokeValue: string, toolName?: str
         process.exit(1);
       }
       // Initialize session first, then call tool with the session ID
-      const { sessionId } = await listMcpTools(port);
+      const { sessionId } = await listMcpTools(port, undefined, headers);
       let args: Record<string, unknown> = {};
       if (input) {
         try {
@@ -100,7 +112,7 @@ async function handleMcpInvoke(port: number, invokeValue: string, toolName?: str
           process.exit(1);
         }
       }
-      const result = await callMcpTool(port, toolName, args, sessionId);
+      const result = await callMcpTool(port, toolName, args, sessionId, undefined, headers);
       console.log(result);
     } else {
       console.error(`Error: Unknown MCP invoke command "${invokeValue}"`);
@@ -132,9 +144,21 @@ export const registerDev = (program: Command) => {
     .option('-l, --logs', 'Run dev server with logs to stdout [non-interactive]')
     .option('--tool <name>', 'MCP tool name (used with --invoke call-tool)')
     .option('--input <json>', 'MCP tool arguments as JSON (used with --invoke call-tool)')
+    .option(
+      '-H, --header <header>',
+      'Custom header to forward to the agent (format: "Name: Value", repeatable)',
+      (val: string, prev: string[]) => [...prev, val],
+      [] as string[]
+    )
     .action(async opts => {
       try {
         const port = parseInt(opts.port, 10);
+
+        // Parse custom headers
+        let headers: Record<string, string> | undefined;
+        if (opts.header && opts.header.length > 0) {
+          headers = parseHeaderFlags(opts.header);
+        }
 
         // If --invoke provided, call the dev server and exit
         if (opts.invoke) {
@@ -166,11 +190,11 @@ export const registerDev = (program: Command) => {
 
           // Protocol-aware dispatch
           if (protocol === 'MCP') {
-            await handleMcpInvoke(invokePort, opts.invoke, opts.tool, opts.input);
+            await handleMcpInvoke(invokePort, opts.invoke, opts.tool, opts.input, headers);
           } else if (protocol === 'A2A') {
-            await invokeA2ADevServer(invokePort, opts.invoke);
+            await invokeA2ADevServer(invokePort, opts.invoke, headers);
           } else {
-            await invokeDevServer(invokePort, opts.invoke, opts.stream ?? false);
+            await invokeDevServer(invokePort, opts.invoke, opts.stream ?? false, headers);
           }
           return;
         }
@@ -308,6 +332,7 @@ export const registerDev = (program: Command) => {
               workingDir={workingDir}
               port={port}
               agentName={opts.agent}
+              headers={headers}
             />
           </LayoutProvider>
         );

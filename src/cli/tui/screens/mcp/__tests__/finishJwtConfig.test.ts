@@ -58,9 +58,9 @@ describe('finishJwtConfig data mapping', () => {
         },
       ],
     };
-    // Schema accepts this structurally (both fields are optional at schema level)
-    // but the TUI should map STRING_ARRAY to matchValueStringList, not matchValueString
+    // 'admin,dev' contains a comma which violates the API-documented
+    // pattern [A-Za-z0-9_.-]+ — schema now correctly rejects this
     const result = CustomJwtAuthorizerConfigSchema.safeParse(config);
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
   });
 });

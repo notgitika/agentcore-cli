@@ -41,7 +41,13 @@ export interface ConversationMessage {
 
 const MAX_LOG_ENTRIES = 50;
 
-export function useDevServer(options: { workingDir: string; port: number; agentName?: string; onReady?: () => void }) {
+export function useDevServer(options: {
+  workingDir: string;
+  port: number;
+  agentName?: string;
+  onReady?: () => void;
+  headers?: Record<string, string>;
+}) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [status, setStatus] = useState<ServerStatus>('starting');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -245,7 +251,7 @@ export function useDevServer(options: { workingDir: string; port: number; agentN
 
   const fetchMcpTools = useCallback(async () => {
     try {
-      const result = await listMcpTools(actualPortRef.current, loggerRef.current ?? undefined);
+      const result = await listMcpTools(actualPortRef.current, loggerRef.current ?? undefined, options.headers);
       setMcpTools(result.tools);
       mcpToolsRef.current = result.tools;
       mcpSessionIdRef.current = result.sessionId;
@@ -255,7 +261,7 @@ export function useDevServer(options: { workingDir: string; port: number; agentN
       setMcpTools([]);
       mcpToolsRef.current = [];
     }
-  }, []);
+  }, [options.headers]);
 
   const invoke = async (message: string) => {
     // MCP: parse tool calls from chat input
@@ -288,7 +294,8 @@ export function useDevServer(options: { workingDir: string; port: number; agentN
           toolName,
           args,
           mcpSessionIdRef.current,
-          loggerRef.current ?? undefined
+          loggerRef.current ?? undefined,
+          options.headers
         );
         setConversation(prev => [...prev, { role: 'assistant', content: `Result: ${result}` }]);
 
@@ -323,8 +330,14 @@ export function useDevServer(options: { workingDir: string; port: number; agentN
               message,
               logger: loggerRef.current ?? undefined,
               onStatus: setA2aStatus,
+              headers: options.headers,
             })
-          : invokeAgentStreaming({ port: actualPort, message, logger: loggerRef.current ?? undefined });
+          : invokeAgentStreaming({
+              port: actualPort,
+              message,
+              logger: loggerRef.current ?? undefined,
+              headers: options.headers,
+            });
 
       for await (const chunk of streamFn) {
         responseContent += chunk;

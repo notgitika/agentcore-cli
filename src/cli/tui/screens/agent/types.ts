@@ -4,10 +4,12 @@ import type {
   NetworkMode,
   ProtocolMode,
   PythonRuntime,
+  RuntimeAuthorizerType,
   SDKFramework,
   TargetLanguage,
 } from '../../../../schema';
 import { DEFAULT_MODEL_IDS, getSupportedModelProviders } from '../../../../schema';
+import type { JwtConfigOptions } from '../../../primitives/auth-utils';
 import type { MemoryOption } from '../generate/types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -48,6 +50,10 @@ export type AddAgentStep =
   | 'subnets'
   | 'securityGroups'
   | 'requestHeaderAllowlist'
+  | 'authorizerType'
+  | 'jwtConfig'
+  | 'idleTimeout'
+  | 'maxLifetime'
   | 'memory'
   | 'region'
   | 'bedrockAgent'
@@ -77,6 +83,14 @@ export interface AddAgentConfig {
   securityGroups?: string[];
   /** Allowed request headers for the runtime */
   requestHeaderAllowlist?: string[];
+  /** Authorizer type for inbound requests */
+  authorizerType?: RuntimeAuthorizerType;
+  /** JWT config for CUSTOM_JWT authorizer */
+  jwtConfig?: JwtConfigOptions;
+  /** Idle session timeout in seconds (LIFECYCLE_TIMEOUT_MIN-LIFECYCLE_TIMEOUT_MAX) */
+  idleRuntimeSessionTimeout?: number;
+  /** Max instance lifetime in seconds (LIFECYCLE_TIMEOUT_MIN-LIFECYCLE_TIMEOUT_MAX) */
+  maxLifetime?: number;
   /** Python version (only for Python agents) */
   pythonVersion: PythonRuntime;
   /** Memory option (create path only) */
@@ -104,12 +118,21 @@ export const ADD_AGENT_STEP_LABELS: Record<AddAgentStep, string> = {
   subnets: 'Subnets',
   securityGroups: 'Security Groups',
   requestHeaderAllowlist: 'Headers',
+  authorizerType: 'Auth',
+  jwtConfig: 'JWT Config',
+  idleTimeout: 'Idle Timeout',
+  maxLifetime: 'Max Lifetime',
   memory: 'Memory',
   region: 'Region',
   bedrockAgent: 'Agent',
   bedrockAlias: 'Alias',
   confirm: 'Confirm',
 };
+
+export const RUNTIME_AUTHORIZER_TYPE_OPTIONS = [
+  { id: 'AWS_IAM', title: 'AWS IAM (default)', description: 'Standard AWS IAM authentication' },
+  { id: 'CUSTOM_JWT', title: 'Custom JWT', description: 'OIDC-based token validation for inbound requests' },
+] as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UI Option Constants

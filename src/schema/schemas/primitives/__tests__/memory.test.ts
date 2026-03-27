@@ -14,6 +14,10 @@ describe('MemoryStrategyTypeSchema', () => {
     it('accepts USER_PREFERENCE', () => {
       expect(MemoryStrategyTypeSchema.safeParse('USER_PREFERENCE').success).toBe(true);
     });
+
+    it('accepts EPISODIC', () => {
+      expect(MemoryStrategyTypeSchema.safeParse('EPISODIC').success).toBe(true);
+    });
   });
 
   describe('invalid strategy types', () => {
@@ -31,8 +35,8 @@ describe('MemoryStrategyTypeSchema', () => {
   });
 
   describe('schema options', () => {
-    it('only contains three valid strategies', () => {
-      expect(MemoryStrategyTypeSchema.options).toEqual(['SEMANTIC', 'SUMMARIZATION', 'USER_PREFERENCE']);
+    it('contains four valid strategies including EPISODIC', () => {
+      expect(MemoryStrategyTypeSchema.options).toEqual(['SEMANTIC', 'SUMMARIZATION', 'USER_PREFERENCE', 'EPISODIC']);
       expect(MemoryStrategyTypeSchema.options).not.toContain('CUSTOM');
     });
   });
@@ -68,6 +72,64 @@ describe('MemoryStrategySchema', () => {
     const result = MemoryStrategySchema.safeParse({ name: 'myStrategy' });
     expect(result.success).toBe(false);
   });
+
+  it('accepts EPISODIC strategy with reflectionNamespaces', () => {
+    const result = MemoryStrategySchema.safeParse({
+      type: 'EPISODIC',
+      namespaces: ['/episodes/{actorId}/{sessionId}'],
+      reflectionNamespaces: ['/episodes/{actorId}'],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects EPISODIC strategy without reflectionNamespaces', () => {
+    const result = MemoryStrategySchema.safeParse({
+      type: 'EPISODIC',
+      namespaces: ['/episodes/{actorId}/{sessionId}'],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects EPISODIC strategy with empty reflectionNamespaces', () => {
+    const result = MemoryStrategySchema.safeParse({
+      type: 'EPISODIC',
+      namespaces: ['/episodes/{actorId}/{sessionId}'],
+      reflectionNamespaces: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('allows non-EPISODIC strategies without reflectionNamespaces', () => {
+    const result = MemoryStrategySchema.safeParse({ type: 'SEMANTIC' });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects EPISODIC when reflectionNamespaces is not a prefix of namespaces', () => {
+    const result = MemoryStrategySchema.safeParse({
+      type: 'EPISODIC',
+      namespaces: ['/episodes/{actorId}/{sessionId}'],
+      reflectionNamespaces: ['/reflections/{actorId}'],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts EPISODIC when reflectionNamespaces is a prefix of namespaces', () => {
+    const result = MemoryStrategySchema.safeParse({
+      type: 'EPISODIC',
+      namespaces: ['/episodes/{actorId}/{sessionId}'],
+      reflectionNamespaces: ['/episodes/{actorId}'],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts EPISODIC when reflectionNamespaces equals namespaces', () => {
+    const result = MemoryStrategySchema.safeParse({
+      type: 'EPISODIC',
+      namespaces: ['/episodes/{actorId}/{sessionId}'],
+      reflectionNamespaces: ['/episodes/{actorId}/{sessionId}'],
+    });
+    expect(result.success).toBe(true);
+  });
 });
 
 describe('DEFAULT_STRATEGY_NAMESPACES', () => {
@@ -81,6 +143,10 @@ describe('DEFAULT_STRATEGY_NAMESPACES', () => {
 
   it('has default namespaces for SUMMARIZATION', () => {
     expect(DEFAULT_STRATEGY_NAMESPACES.SUMMARIZATION).toEqual(['/summaries/{actorId}/{sessionId}']);
+  });
+
+  it('has default namespaces for EPISODIC', () => {
+    expect(DEFAULT_STRATEGY_NAMESPACES.EPISODIC).toEqual(['/episodes/{actorId}/{sessionId}']);
   });
 
   it('does not have default namespaces for CUSTOM (removed)', () => {

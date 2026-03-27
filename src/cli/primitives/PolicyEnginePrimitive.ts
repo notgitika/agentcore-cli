@@ -143,7 +143,7 @@ export class PolicyEnginePrimitive extends BasePrimitive<AddPolicyEngineOptions,
   }
 
   /**
-   * Attach a policy engine to the specified gateways in mcp.json.
+   * Attach a policy engine to the specified gateways in agentcore.json.
    */
   async attachToGateways(engineName: string, gatewayNames: string[], mode: 'LOG_ONLY' | 'ENFORCE'): Promise<void> {
     if (gatewayNames.length === 0) return;
