@@ -61,4 +61,4 @@ bun.lock
 
 .agentreview
 ProtocolTesting/
-.worktrees
+.omc/
