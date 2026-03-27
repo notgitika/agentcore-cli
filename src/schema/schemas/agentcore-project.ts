@@ -31,6 +31,13 @@ export { PolicyEngineNameSchema, PolicyNameSchema, PolicySchema, ValidationModeS
 export { TagsSchema };
 export type { Tags } from './primitives/tags';
 
+// ============================================================================
+// ManagedBy Schema
+// ============================================================================
+
+export const ManagedBySchema = z.enum(['CDK']).default('CDK');
+export type ManagedBy = z.infer<typeof ManagedBySchema>;
+
 // Re-export MCP types (now part of unified schema)
 export type { AgentCoreGateway, AgentCoreGatewayTarget, AgentCoreMcpRuntimeTool } from './mcp';
 export { AgentCoreGatewaySchema, AgentCoreGatewayTargetSchema, AgentCoreMcpRuntimeToolSchema } from './mcp';
@@ -160,6 +167,7 @@ export const AgentCoreProjectSpecSchema = z
   .object({
     name: ProjectNameSchema,
     version: z.number().int(),
+    managedBy: ManagedBySchema,
     tags: TagsSchema.optional(),
 
     agents: z
