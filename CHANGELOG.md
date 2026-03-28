@@ -2,6 +2,87 @@
 
 All notable changes to this project will be documented in this file.
 
+## @aws/agentcore v0.4.0
+
+The AgentCore CLI is now generally available.
+
+`npm i @aws/agentcore`
+
+### What's included
+
+- Agent lifecycle: `create`, `dev`, `deploy`, `invoke`, `status`, `logs`, `traces`
+- Frameworks: Strands Agents, LangChain/LangGraph, Google ADK, OpenAI Agents, bring your own
+- Gateway: Managed MCP servers with API Gateway, Lambda, and OpenAPI targets. OAuth, API key, and Custom JWT auth.
+- Policy: Cedar-based access control for gateway tools
+- Memory: Semantic, summarization, user preference, and episodic strategies
+- Evaluations: LLM-as-a-Judge evaluators, on-demand and continuous online evaluation
+- Local development: Hot-reload dev server supporting HTTP, MCP, and A2A protocols
+- Infrastructure: CDK-managed deployments with VPC support, container builds, resource tagging, and `--dry-run` previews
+- Migration: `agentcore import` migrates existing Starter Toolkit projects with zero downtime. See the [Migration Guide](https://github.com/awslabs/amazon-bedrock-agentcore-samples/blob/main/MIGRATION.md).
+
+### Breaking changes from preview
+
+This release includes breaking changes that affect existing projects created during preview. See [aws/agentcore-cli#719](https://github.com/aws/agentcore-cli/issues/719) for a step-by-step guide on making the schema compatible.
+
+### Summary of what changed:
+
+- `agents` renamed to `runtimes` in `agentcore.json` and all CLI flags (`--agent` → `--runtime`, `-a` → `-r`)
+- `mcp.json` merged into `agentcore.json`
+- type field removed from agent, memory, and evaluator schemas. Credential type renamed to authorizerType
+- `agentcore add identity` → `agentcore add credential`
+- `agentcore run evals` → `agentcore run eval`
+- `--force` → `--yes` for the remove command, `--plan` → `--dry-run`
+- `agentcore dev --invoke "prompt"` → `agentcore dev "prompt"`
+- Default Python runtime upgraded to 3.13
+
+### Documentation
+
+- [Commands reference](https://github.com/aws/agentcore-cli/blob/main/docs/commands.md)
+- [Frameworks](https://github.com/aws/agentcore-cli/blob/main/docs/frameworks.md)
+- [Configuration](https://github.com/aws/agentcore-cli/blob/main/docs/configuration.md)
+- [Local development](https://github.com/aws/agentcore-cli/blob/main/docs/local-development.md)
+- [Memory](https://github.com/aws/agentcore-cli/blob/main/docs/memory.md)
+- [Gateway](https://github.com/aws/agentcore-cli/blob/main/docs/gateway.md)
+- [Evaluations](https://github.com/aws/agentcore-cli/blob/main/docs/evals.md)
+- [IAM permissions](https://github.com/aws/agentcore-cli/blob/main/docs/PERMISSIONS.md)
+- [Migration from Starter Toolkit](https://github.com/awslabs/amazon-bedrock-agentcore-samples/blob/main/MIGRATION.md)
+
+## [0.4.0] - 2026-03-28
+
+### Added
+- feat: upgrade default Python runtime to PYTHON_3_13 (#658) (dfdc2cb)
+- feat: show all CLI commands in TUI with / toggle (#635) (df80f90)
+- feat: add semanticOverride support for SEMANTIC memory strategies (#678) (#696) (5e0f584)
+- feat: inject $schema URL into generated agentcore.json (#692) (915125d)
+- feat: add managedBy enum field to AgentCoreProjectSpec schema (#700) (c123d2f)
+- feat: add JSON schema generation from Zod (#661) (2d02eeb)
+
+### Fixed
+- fix: standardize remove flags to -y/--yes and fix UX copy (#720) (1a3bddc)
+- fix: remove dead --agents flag from agentcore add gateway (#711) (c1c41ca)
+- fix: deprecate crewAI support (#704) (ac32563)
+- fix: align name constraints with API docs (#701) (956c248)
+- fix: support non-default runtime endpoint in on-demand evals (#634) (ec38020)
+- fix: improve CLI UX — memory docs, standardize flags, fix deploy alias (#703) (9c7f143)
+- fix: prevent region override for post-deploy commands (#595) (6b1cf79)
+
+### Documentation
+- docs: add IAM permissions guide and policy files (#689) (7a70cf4)
+
+### Other Changes
+- ci: format schemas after generation in release workflow (#721) (02de9f1)
+- refactor: rename agents to runtimes (schema, CLI flags, MCP bindings) (#706) (d41e14b)
+- feat(dev): positional prompt arg for invoking dev server (#707) (8898535)
+- ci: regenerate JSON schema during release (#710) (e75e8a0)
+- revert: remove CUSTOM strategy and semanticOverride support (#713) (6ff721e)
+- refactor(schema): remove type fields from resource schemas and rename credential discriminator (#709) (48dadfd)
+- feat(memory): add CUSTOM strategy type to agentcore-cli (#677) (#694) (beac707)
+- ci: use AUTHORIZED_USERS for pr-tarball authorization (#642) (f5e1579)
+- refactor(cli)!: unify naming without backward-compat aliases (#705) (5e55ea5)
+- fix(cli): correct inaccurate --help text across all commands (#695) (9783cf7)
+- fix(e2e): clean up stale credential providers before test runs (#698) (2f1d59f)
+- chore(deps): bump handlebars from 4.7.8 to 4.7.9 (#691) (cb26199)
+
 ## [0.3.0-preview.9.0] - 2026-03-26
 
 ### Added
