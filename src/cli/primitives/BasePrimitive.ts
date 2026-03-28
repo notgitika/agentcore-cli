@@ -96,7 +96,7 @@ export abstract class BasePrimitive<
 
   /**
    * Register the standard remove subcommand for this primitive.
-   * Handles CLI mode (--name/--force/--json) and TUI fallback identically.
+   * Handles CLI mode (--name/--yes/--json) and TUI fallback identically.
    */
   protected registerRemoveSubcommand(removeCmd: Command): void {
     removeCmd

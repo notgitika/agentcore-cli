@@ -75,6 +75,7 @@ export interface AddAgentOptions extends VpcOptions {
 export class AgentPrimitive extends BasePrimitive<AddAgentOptions, RemovableResource> {
   readonly kind = 'agent';
   readonly label = 'Agent';
+  override readonly article = 'an';
   readonly primitiveSchema = AgentEnvSpecSchema;
 
   /** Local instance to avoid circular dependency with registry. */

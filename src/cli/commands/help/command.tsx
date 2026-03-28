@@ -27,11 +27,11 @@ NON-INTERACTIVE MODE (CLI)
     agentcore create --name MyProject --defaults --json
     agentcore deploy --target prod --yes
     agentcore invoke "Hello" --stream
-    agentcore remove agent --name OldAgent --force
+    agentcore remove agent --name OldAgent --yes
 
 FLAGS THAT TRIGGER CLI MODE
   Most flags trigger non-interactive mode, including:
-    --name, --json, --yes, --force, --target, --stream, etc.
+    --name, --json, --yes, --target, --stream, etc.
   
   Some flags work in both modes:
     --session-id (invoke), --port (dev), --runtime (dev)

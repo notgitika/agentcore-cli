@@ -375,16 +375,16 @@ export class PolicyPrimitive extends BasePrimitive<AddPolicyOptions, RemovablePo
       .description('Remove a policy from a policy engine')
       .option('--name <name>', 'Name of policy to remove [non-interactive]')
       .option('--engine <engine>', 'Policy engine name [non-interactive]')
-      .option('--force', 'Skip confirmation prompt [non-interactive]')
+      .option('-y, --yes', 'Skip confirmation prompt [non-interactive]')
       .option('--json', 'Output as JSON [non-interactive]')
-      .action(async (cliOptions: { name?: string; engine?: string; force?: boolean; json?: boolean }) => {
+      .action(async (cliOptions: { name?: string; engine?: string; yes?: boolean; json?: boolean }) => {
         try {
           if (!findConfigRoot()) {
             console.error('No agentcore project found. Run `agentcore create` first.');
             process.exit(1);
           }
 
-          if (cliOptions.name || cliOptions.force || cliOptions.json) {
+          if (cliOptions.name || cliOptions.yes || cliOptions.json) {
             if (!cliOptions.name) {
               if (cliOptions.json) {
                 console.log(JSON.stringify({ success: false, error: '--name is required' }));
@@ -424,7 +424,7 @@ export class PolicyPrimitive extends BasePrimitive<AddPolicyOptions, RemovablePo
             const { clear, unmount } = render(
               React.createElement(RemoveFlow, {
                 isInteractive: false,
-                force: cliOptions.force,
+                force: cliOptions.yes,
                 initialResourceType: this.kind,
                 initialResourceName: cliOptions.name,
                 onExit: () => {

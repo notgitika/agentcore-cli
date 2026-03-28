@@ -480,16 +480,16 @@ export class GatewayTargetPrimitive extends BasePrimitive<AddGatewayTargetOption
       .command('gateway-target')
       .description('Remove a gateway target from the project')
       .option('--name <name>', 'Name of resource to remove [non-interactive]')
-      .option('--force', 'Skip confirmation prompt [non-interactive]')
+      .option('-y, --yes', 'Skip confirmation prompt [non-interactive]')
       .option('--json', 'Output as JSON [non-interactive]')
-      .action(async (cliOptions: { name?: string; force?: boolean; json?: boolean }) => {
+      .action(async (cliOptions: { name?: string; yes?: boolean; json?: boolean }) => {
         try {
           if (!findConfigRoot()) {
             console.error('No agentcore project found. Run `agentcore create` first.');
             process.exit(1);
           }
 
-          if (cliOptions.name || cliOptions.force || cliOptions.json) {
+          if (cliOptions.name || cliOptions.yes || cliOptions.json) {
             if (!cliOptions.name) {
               console.log(JSON.stringify({ success: false, error: '--name is required' }));
               process.exit(1);
@@ -516,7 +516,7 @@ export class GatewayTargetPrimitive extends BasePrimitive<AddGatewayTargetOption
             const { clear, unmount } = render(
               React.createElement(RemoveFlow, {
                 isInteractive: false,
-                force: cliOptions.force,
+                force: cliOptions.yes,
                 initialResourceType: this.kind,
                 initialResourceName: cliOptions.name,
                 onExit: () => {

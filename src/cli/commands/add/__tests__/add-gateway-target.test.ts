@@ -201,7 +201,7 @@ describe('add gateway-target command', () => {
       expect(addResult.exitCode, `add stdout: ${addResult.stdout}, stderr: ${addResult.stderr}`).toBe(0);
 
       const removeResult = await runCLI(
-        ['remove', 'gateway-target', '--name', targetName, '--force', '--json'],
+        ['remove', 'gateway-target', '--name', targetName, '--yes', '--json'],
         projectDir
       );
       expect(removeResult.exitCode, `remove stdout: ${removeResult.stdout}, stderr: ${removeResult.stderr}`).toBe(0);
