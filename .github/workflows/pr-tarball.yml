@@ -67,7 +67,7 @@ jobs:
             "${TARBALL_NAME}" \
             --title "PR #${PR_NUMBER} Tarball" \
             --notes "Auto-generated tarball for PR #${PR_NUMBER}." \
-            --prerelease \
+            --draft \
             --target "${{ github.event.pull_request.head.sha }}"
 
           DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${TARBALL_NAME}"
