@@ -3,14 +3,22 @@ import { DEFAULT_MODEL_IDS, LIFECYCLE_TIMEOUT_MAX, LIFECYCLE_TIMEOUT_MIN, Projec
 import { parseAndNormalizeHeaders, validateHeaderAllowlist } from '../../../commands/shared/header-utils';
 import { validateSecurityGroupIds, validateSubnetIds } from '../../../commands/shared/vpc-utils';
 import { computeDefaultCredentialEnvVarName } from '../../../primitives/credential-utils';
-import { ApiKeySecretInput, Panel, SelectList, StepIndicator, TextInput } from '../../components';
+import {
+  ApiKeySecretInput,
+  Panel,
+  PathInput,
+  SelectList,
+  StepIndicator,
+  TextInput,
+  WizardMultiSelect,
+} from '../../components';
 import type { SelectableItem } from '../../components';
 import { JwtConfigInput, useJwtConfigFlow } from '../../components/jwt-config';
-import { useListNavigation } from '../../hooks';
+import { useListNavigation, useMultiSelectNavigation } from '../../hooks';
 import { RUNTIME_AUTHORIZER_TYPE_OPTIONS } from '../agent/types';
-import type { BuildType, GenerateConfig, GenerateStep, MemoryOption, ProtocolMode } from './types';
+import type { AdvancedSettingId, BuildType, GenerateConfig, GenerateStep, MemoryOption, ProtocolMode } from './types';
 import {
-  ADVANCED_OPTIONS,
+  ADVANCED_SETTING_OPTIONS,
   BUILD_TYPE_OPTIONS,
   LANGUAGE_OPTIONS,
   MEMORY_OPTIONS,
@@ -22,6 +30,7 @@ import {
 } from './types';
 import type { useGenerateWizard } from './useGenerateWizard';
 import { Box, Text, useInput } from 'ink';
+import { basename } from 'path';
 
 // Helper to get provider display name and env var name from ModelProvider
 function getProviderInfo(provider: ModelProvider): { name: string; envVarName: string } {
@@ -83,8 +92,6 @@ export function GenerateWizardUI({
         }));
       case 'memory':
         return MEMORY_OPTIONS.map(o => ({ id: o.id, title: o.title, description: o.description }));
-      case 'advanced':
-        return ADVANCED_OPTIONS.map(o => ({ id: o.id, title: o.title, description: o.description }));
       case 'networkMode':
         return NETWORK_MODE_OPTIONS.map(o => ({ id: o.id, title: o.title, description: o.description }));
       case 'authorizerType':
@@ -96,7 +103,9 @@ export function GenerateWizardUI({
 
   const items = getItems();
   const isSelectStep = items.length > 0;
+  const isAdvancedStep = wizard.step === 'advanced';
   const isTextStep = wizard.step === 'projectName';
+  const isDockerfileStep = wizard.step === 'dockerfile';
   const isApiKeyStep = wizard.step === 'apiKey';
   const isSubnetsStep = wizard.step === 'subnets';
   const isSecurityGroupsStep = wizard.step === 'securityGroups';
@@ -105,6 +114,11 @@ export function GenerateWizardUI({
   const isIdleTimeoutStep = wizard.step === 'idleTimeout';
   const isMaxLifetimeStep = wizard.step === 'maxLifetime';
   const isConfirmStep = wizard.step === 'confirm';
+
+  // Advanced multi-select items — filter out dockerfile when not a Container build
+  const advancedItems: SelectableItem[] = ADVANCED_SETTING_OPTIONS.filter(
+    o => o.id !== 'dockerfile' || wizard.config.buildType === 'Container'
+  ).map(o => ({ id: o.id, title: o.title, description: o.description }));
 
   const handleSelect = (item: SelectableItem) => {
     switch (wizard.step) {
@@ -126,9 +140,6 @@ export function GenerateWizardUI({
       case 'memory':
         wizard.setMemory(item.id as MemoryOption);
         break;
-      case 'advanced':
-        wizard.setAdvanced(item.id === 'yes');
-        break;
       case 'networkMode':
         wizard.setNetworkMode(item.id as NetworkMode);
         break;
@@ -142,9 +153,18 @@ export function GenerateWizardUI({
     items,
     onSelect: handleSelect,
     onExit: onBack,
-    isActive: isActive && isSelectStep,
+    isActive: isActive && isSelectStep && !isAdvancedStep,
     isDisabled: item => item.disabled ?? false,
     resetKey: wizard.step,
+  });
+
+  const advancedNav = useMultiSelectNavigation({
+    items: advancedItems,
+    getId: item => item.id,
+    onConfirm: selectedIds => wizard.setAdvanced(selectedIds as AdvancedSettingId[]),
+    onExit: onBack,
+    isActive: isActive && isAdvancedStep,
+    requireSelection: false,
   });
 
   // JWT config flow for CUSTOM_JWT authorizer
@@ -188,7 +208,30 @@ export function GenerateWizardUI({
         </Box>
       )}
 
-      {isSelectStep && <SelectList items={items} selectedIndex={selectedIndex} />}
+      {isSelectStep && !isAdvancedStep && <SelectList items={items} selectedIndex={selectedIndex} />}
+
+      {isAdvancedStep && (
+        <WizardMultiSelect
+          title="Customize advanced settings"
+          description="Select settings to configure. Unselected items use defaults."
+          items={advancedItems}
+          cursorIndex={advancedNav.cursorIndex}
+          selectedIds={advancedNav.selectedIds}
+        />
+      )}
+
+      {isDockerfileStep && (
+        <PathInput
+          placeholder="Select a Dockerfile to copy into your agent directory"
+          pathType="file"
+          allowEmpty
+          emptyHelpText="Press Enter to use the default Dockerfile"
+          onSubmit={value => {
+            wizard.setDockerfile(value ? basename(value) : undefined);
+          }}
+          onCancel={onBack}
+        />
+      )}
 
       {isApiKeyStep && (
         <ApiKeySecretInput
@@ -240,6 +283,7 @@ export function GenerateWizardUI({
           <TextInput
             prompt="Allowed request headers (comma-separated, or press Enter to skip)"
             initialValue={(wizard.config.requestHeaderAllowlist ?? []).join(', ')}
+            allowEmpty
             customValidation={value => {
               const result = validateHeaderAllowlist(value);
               return result.success ? true : result.error!;
@@ -291,6 +335,7 @@ export function GenerateWizardUI({
         <TextInput
           prompt={`Idle session timeout in seconds (${LIFECYCLE_TIMEOUT_MIN}-${LIFECYCLE_TIMEOUT_MAX}, or press Enter to skip)`}
           initialValue=""
+          allowEmpty
           customValidation={value => {
             if (!value) return true;
             const n = Number(value);
@@ -313,6 +358,7 @@ export function GenerateWizardUI({
         <TextInput
           prompt={`Max instance lifetime in seconds (${LIFECYCLE_TIMEOUT_MIN}-${LIFECYCLE_TIMEOUT_MAX}, or press Enter to skip)`}
           initialValue=""
+          allowEmpty
           customValidation={value => {
             if (!value) return true;
             const n = Number(value);
@@ -347,6 +393,7 @@ export function getWizardHelpText(step: GenerateStep): string {
   if (step === 'confirm') return 'Enter/Y confirm · Esc back';
   if (
     step === 'projectName' ||
+    step === 'dockerfile' ||
     step === 'subnets' ||
     step === 'securityGroups' ||
     step === 'requestHeaderAllowlist' ||
@@ -356,6 +403,7 @@ export function getWizardHelpText(step: GenerateStep): string {
     return 'Enter submit · Esc cancel';
   if (step === 'apiKey') return 'Enter submit · Tab show/hide · Esc back';
   if (step === 'jwtConfig') return 'Enter submit · Esc back';
+  if (step === 'advanced') return 'Space toggle · Enter confirm · Esc back';
   return '↑↓ navigate · Enter select · Esc back';
 }
 
@@ -405,6 +453,12 @@ function ConfirmView({ config, credentialProjectName }: { config: GenerateConfig
           <Text dimColor>Build: </Text>
           <Text>{buildTypeLabel}</Text>
         </Text>
+        {config.buildType === 'Container' && config.dockerfile && (
+          <Text>
+            <Text dimColor>Dockerfile: </Text>
+            <Text>{config.dockerfile}</Text>
+          </Text>
+        )}
         <Text>
           <Text dimColor>Protocol: </Text>
           <Text>{protocolLabel}</Text>

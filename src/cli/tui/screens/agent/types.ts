@@ -40,6 +40,7 @@ export type AddAgentStep =
   | 'agentType'
   | 'codeLocation'
   | 'buildType'
+  | 'dockerfile'
   | 'language'
   | 'protocol'
   | 'framework'
@@ -69,6 +70,8 @@ export interface AddAgentConfig {
   entrypoint: string;
   language: TargetLanguage;
   buildType: BuildType;
+  /** Path to custom Dockerfile (copied into code directory at setup) or filename already in code directory. */
+  dockerfile?: string;
   /** Protocol (HTTP, MCP, A2A). Defaults to HTTP. */
   protocol: ProtocolMode;
   framework: SDKFramework;
@@ -108,6 +111,7 @@ export const ADD_AGENT_STEP_LABELS: Record<AddAgentStep, string> = {
   agentType: 'Type',
   codeLocation: 'Code',
   buildType: 'Build',
+  dockerfile: 'Dockerfile',
   language: 'Language',
   protocol: 'Protocol',
   framework: 'Framework',

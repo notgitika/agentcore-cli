@@ -10,6 +10,7 @@ export interface DevConfig {
   isPython: boolean;
   buildType: BuildType;
   protocol: ProtocolMode;
+  dockerfile?: string;
 }
 
 interface DevSupportResult {
@@ -140,6 +141,7 @@ export function getDevConfig(
     isPython: isPythonAgent(targetAgent),
     buildType: targetAgent.build,
     protocol: targetAgent.protocol ?? 'HTTP',
+    dockerfile: targetAgent.dockerfile,
   };
 }
 

@@ -14,6 +14,7 @@ export type GenerateStep =
   | 'projectName'
   | 'language'
   | 'buildType'
+  | 'dockerfile'
   | 'protocol'
   | 'sdk'
   | 'modelProvider'
@@ -38,6 +39,8 @@ export type { BuildType, ModelProvider, ProtocolMode, SDKFramework, TargetLangua
 export interface GenerateConfig {
   projectName: string;
   buildType: BuildType;
+  /** Path to custom Dockerfile (copied into code directory at setup) or filename already in code directory. */
+  dockerfile?: string;
   protocol: ProtocolMode;
   sdk: SDKFramework;
   modelProvider: ModelProvider;
@@ -77,6 +80,7 @@ export const STEP_LABELS: Record<GenerateStep, string> = {
   projectName: 'Name',
   language: 'Target Language',
   buildType: 'Build',
+  dockerfile: 'Dockerfile',
   protocol: 'Protocol',
   sdk: 'Framework',
   modelProvider: 'Model',
@@ -149,10 +153,39 @@ export const NETWORK_MODE_OPTIONS = [
   { id: 'VPC', title: 'VPC', description: 'Attach to your VPC' },
 ] as const;
 
-export const ADVANCED_OPTIONS = [
-  { id: 'no', title: 'No, use defaults', description: 'Public network, no VPC' },
-  { id: 'yes', title: 'Yes, customize', description: undefined },
+export type AdvancedSettingId = 'dockerfile' | 'network' | 'headers' | 'auth' | 'lifecycle';
+
+export const ADVANCED_SETTING_OPTIONS = [
+  { id: 'dockerfile', title: 'Custom Dockerfile', description: 'Specify a custom Dockerfile path' },
+  { id: 'network', title: 'VPC networking', description: 'Attach to your VPC with subnets & security groups' },
+  { id: 'headers', title: 'Request header allowlist', description: 'Allow custom headers through to your agent' },
+  { id: 'auth', title: 'Custom auth (JWT)', description: 'OIDC-based token validation for inbound requests' },
+  { id: 'lifecycle', title: 'Lifecycle timeouts', description: 'Idle timeout & max instance lifetime' },
 ] as const;
+
+/** Dockerfile filename regex — must match the Zod schema in agent-env.ts */
+const DOCKERFILE_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+
+/**
+ * Validate a Dockerfile input value from the TUI.
+ * Returns `true` if valid, or an error message string if invalid.
+ * Does NOT check file existence for path inputs — callers handle that.
+ */
+export function validateDockerfileInput(value: string): true | string {
+  const trimmed = value.trim();
+  if (!trimmed) return true; // empty is valid (means "use default")
+  if (trimmed.includes('/')) {
+    // Path input — caller must check existsSync separately
+    return true;
+  }
+  if (trimmed.length > 255) {
+    return 'Dockerfile name must be 255 characters or fewer';
+  }
+  if (!DOCKERFILE_NAME_REGEX.test(trimmed)) {
+    return 'Must be a valid filename (starts with alphanumeric)';
+  }
+  return true;
+}
 
 export const MEMORY_OPTIONS = [
   { id: 'none', title: 'None', description: 'No memory' },

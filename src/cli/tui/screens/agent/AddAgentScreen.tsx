@@ -17,19 +17,22 @@ import {
   ConfirmReview,
   Cursor,
   Panel,
+  PathInput,
   Screen,
   StepIndicator,
   TextInput,
+  WizardMultiSelect,
   WizardSelect,
 } from '../../components';
 import type { SelectableItem } from '../../components';
 import { JwtConfigInput, useJwtConfigFlow } from '../../components/jwt-config';
 import { HELP_TEXT } from '../../constants';
-import { useListNavigation, useProject } from '../../hooks';
+import { useListNavigation, useMultiSelectNavigation, useProject } from '../../hooks';
 import { generateUniqueName } from '../../utils';
 import { BUILD_TYPE_OPTIONS, GenerateWizardUI, getWizardHelpText, useGenerateWizard } from '../generate';
 import type { BuildType, MemoryOption } from '../generate';
-import { ADVANCED_OPTIONS, MEMORY_OPTIONS } from '../generate/types';
+import type { AdvancedSettingId } from '../generate/types';
+import { ADVANCED_SETTING_OPTIONS, MEMORY_OPTIONS } from '../generate/types';
 import type { AddAgentConfig, AddAgentStep, AgentType } from './types';
 import {
   ADD_AGENT_STEP_LABELS,
@@ -42,6 +45,7 @@ import {
 } from './types';
 import { Box, Text, useInput } from 'ink';
 import Spinner from 'ink-spinner';
+import { basename, resolve } from 'path';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 // Helper to get provider display name and env var name from ModelProvider
@@ -70,6 +74,7 @@ type InitialStep = 'name' | 'agentType';
 type ByoStep =
   | 'codeLocation'
   | 'buildType'
+  | 'dockerfile'
   | 'modelProvider'
   | 'apiKey'
   | 'advanced'
@@ -84,12 +89,52 @@ type ByoStep =
   | 'confirm';
 
 const INITIAL_STEPS: InitialStep[] = ['name', 'agentType'];
-const ADVANCED_ITEMS: SelectableItem[] = ADVANCED_OPTIONS.map(o => ({
-  id: o.id,
-  title: o.title,
-  description: o.description,
-}));
-const BYO_STEPS: ByoStep[] = ['codeLocation', 'buildType', 'modelProvider', 'apiKey', 'advanced', 'confirm'];
+const BYO_BASE_STEPS: ByoStep[] = ['codeLocation', 'buildType', 'modelProvider', 'apiKey', 'advanced', 'confirm'];
+
+export interface ComputeByoStepsInput {
+  modelProvider: string;
+  buildType: string;
+  networkMode: string;
+  authorizerType: string;
+  advancedSettings: Set<AdvancedSettingId>;
+}
+
+/** Pure function to compute BYO wizard steps from config. Exported for testing. */
+export function computeByoSteps(input: ComputeByoStepsInput): ByoStep[] {
+  let steps = [...BYO_BASE_STEPS];
+  if (input.modelProvider === 'Bedrock') {
+    steps = steps.filter(s => s !== 'apiKey');
+  }
+  if (input.advancedSettings.size > 0) {
+    const advancedIndex = steps.indexOf('advanced');
+    const afterAdvanced = advancedIndex + 1;
+    const subSteps: ByoStep[] = [];
+    if (input.advancedSettings.has('dockerfile') && input.buildType === 'Container') {
+      subSteps.push('dockerfile');
+    }
+    if (input.advancedSettings.has('network')) {
+      subSteps.push('networkMode');
+      if (input.networkMode === 'VPC') {
+        subSteps.push('subnets', 'securityGroups');
+      }
+    }
+    if (input.advancedSettings.has('headers')) {
+      subSteps.push('requestHeaderAllowlist');
+    }
+    if (input.advancedSettings.has('auth')) {
+      subSteps.push('authorizerType');
+    }
+    if (input.advancedSettings.has('lifecycle')) {
+      subSteps.push('idleTimeout', 'maxLifetime');
+    }
+    steps = [...steps.slice(0, afterAdvanced), ...subSteps, ...steps.slice(afterAdvanced)];
+  }
+  if (input.authorizerType === 'CUSTOM_JWT' && steps.includes('authorizerType')) {
+    const authIndex = steps.indexOf('authorizerType');
+    steps = [...steps.slice(0, authIndex + 1), 'jwtConfig', ...steps.slice(authIndex + 1)];
+  }
+  return steps;
+}
 
 type ImportStep =
   | 'region'
@@ -126,6 +171,7 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
     codeLocation: '',
     entrypoint: DEFAULT_ENTRYPOINT,
     buildType: 'CodeZip' as BuildType,
+    dockerfile: '' as string,
     modelProvider: 'Bedrock' as ModelProvider,
     apiKey: undefined as string | undefined,
     networkMode: 'PUBLIC' as NetworkMode,
@@ -135,7 +181,7 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
     idleTimeout: '' as string,
     maxLifetime: '' as string,
   });
-  const [byoAdvancedSelected, setByoAdvancedSelected] = useState(false);
+  const [byoAdvancedSettings, setByoAdvancedSettings] = useState<Set<AdvancedSettingId>>(new Set());
   const [byoAuthorizerType, setByoAuthorizerType] = useState<RuntimeAuthorizerType>('AWS_IAM');
   const [byoJwtConfig, setByoJwtConfig] = useState<JwtConfigOptions | undefined>(undefined);
 
@@ -237,6 +283,10 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
       entrypoint: 'main.py',
       language: generateWizard.config.language,
       buildType: generateWizard.config.buildType,
+      ...(generateWizard.config.buildType === 'Container' &&
+        generateWizard.config.dockerfile && {
+          dockerfile: generateWizard.config.dockerfile,
+        }),
       protocol: generateWizard.config.protocol,
       framework: generateWizard.config.sdk,
       modelProvider: generateWizard.config.modelProvider,
@@ -275,36 +325,49 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
   // BYO Path
   // ─────────────────────────────────────────────────────────────────────────────
 
-  // BYO steps filtering (remove apiKey for Bedrock, subnets/securityGroups for non-VPC, jwtConfig for non-CUSTOM_JWT)
-  const byoSteps = useMemo(() => {
-    let steps = [...BYO_STEPS];
-    if (byoConfig.modelProvider === 'Bedrock') {
-      steps = steps.filter(s => s !== 'apiKey');
-    }
-    if (byoAdvancedSelected) {
-      const advancedIndex = steps.indexOf('advanced');
-      const afterAdvanced = advancedIndex + 1;
-      const networkSteps: ByoStep[] =
-        byoConfig.networkMode === 'VPC' ? ['networkMode', 'subnets', 'securityGroups'] : ['networkMode'];
-      steps = [
-        ...steps.slice(0, afterAdvanced),
-        ...networkSteps,
-        'requestHeaderAllowlist',
-        'authorizerType',
-        'idleTimeout',
-        'maxLifetime',
-        ...steps.slice(afterAdvanced),
-      ];
-    }
-    // Add jwtConfig step after authorizerType when CUSTOM_JWT is selected
-    if (byoAuthorizerType === 'CUSTOM_JWT') {
-      const authIndex = steps.indexOf('authorizerType');
-      steps = [...steps.slice(0, authIndex + 1), 'jwtConfig', ...steps.slice(authIndex + 1)];
-    }
-    return steps;
-  }, [byoConfig.modelProvider, byoConfig.networkMode, byoAdvancedSelected, byoAuthorizerType]);
+  // BYO steps filtering (apiKey for Bedrock, advanced sub-steps based on multi-select, jwtConfig for CUSTOM_JWT)
+  const byoAdvancedActive = byoAdvancedSettings.size > 0;
+  const byoSteps = useMemo(
+    () =>
+      computeByoSteps({
+        modelProvider: byoConfig.modelProvider,
+        buildType: byoConfig.buildType,
+        networkMode: byoConfig.networkMode,
+        authorizerType: byoAuthorizerType,
+        advancedSettings: byoAdvancedSettings,
+      }),
+    [
+      byoConfig.buildType,
+      byoConfig.modelProvider,
+      byoConfig.networkMode,
+      byoAdvancedActive,
+      byoAdvancedSettings,
+      byoAuthorizerType,
+    ]
+  );
 
   const byoCurrentIndex = byoSteps.indexOf(byoStep);
+
+  /** Navigate to the next step after the given step in the BYO steps array */
+  const goToNextByoStep = useCallback(
+    (afterStep: ByoStep) => {
+      const idx = byoSteps.indexOf(afterStep);
+      const next = idx >= 0 ? byoSteps[idx + 1] : undefined;
+      setByoStep(next ?? 'confirm');
+    },
+    [byoSteps]
+  );
+
+  // Advanced multi-select items — filter out dockerfile when not a Container build
+  const byoAdvancedItems: SelectableItem[] = useMemo(
+    () =>
+      ADVANCED_SETTING_OPTIONS.filter(o => o.id !== 'dockerfile' || byoConfig.buildType === 'Container').map(o => ({
+        id: o.id,
+        title: o.title,
+        description: o.description,
+      })),
+    [byoConfig.buildType]
+  );
 
   // BYO build type options
   const buildTypeItems: SelectableItem[] = useMemo(
@@ -350,6 +413,7 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
       entrypoint: byoConfig.entrypoint,
       language: 'Python', // Default - not used for BYO agents
       buildType: byoConfig.buildType,
+      ...(byoConfig.buildType === 'Container' && byoConfig.dockerfile && { dockerfile: byoConfig.dockerfile }),
       protocol: 'HTTP', // Default for BYO agents
       framework: 'Strands', // Default - not used for BYO agents
       modelProvider: byoConfig.modelProvider,
@@ -371,7 +435,8 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
   const buildTypeNav = useListNavigation({
     items: buildTypeItems,
     onSelect: item => {
-      setByoConfig(c => ({ ...c, buildType: item.id as BuildType }));
+      const build = item.id as BuildType;
+      setByoConfig(c => ({ ...c, buildType: build, dockerfile: '' }));
       setByoStep('modelProvider');
     },
     onExit: handleByoBack,
@@ -404,27 +469,49 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
     []
   );
 
-  const advancedNav = useListNavigation({
-    items: ADVANCED_ITEMS,
-    onSelect: item => {
-      if (item.id === 'yes') {
-        setByoAdvancedSelected(true);
-        setByoStep('networkMode');
-      } else {
-        setByoAdvancedSelected(false);
+  const advancedNav = useMultiSelectNavigation({
+    items: byoAdvancedItems,
+    getId: item => item.id,
+    onConfirm: selectedIds => {
+      const selected = new Set(selectedIds as AdvancedSettingId[]);
+      setByoAdvancedSettings(selected);
+      if (selected.size === 0) {
+        // No advanced settings — reset defaults and go to confirm
         setByoConfig(c => ({
           ...c,
+          dockerfile: '',
           networkMode: 'PUBLIC' as NetworkMode,
           subnets: '',
           securityGroups: '',
+          requestHeaderAllowlist: '',
           idleTimeout: '',
           maxLifetime: '',
         }));
+        setByoAuthorizerType('AWS_IAM');
+        setByoJwtConfig(undefined);
         setByoStep('confirm');
+      } else {
+        // Navigate to first advanced sub-step (steps memo hasn't updated yet)
+        setTimeout(() => {
+          if (selected.has('dockerfile') && byoConfig.buildType === 'Container') {
+            setByoStep('dockerfile');
+          } else if (selected.has('network')) {
+            setByoStep('networkMode');
+          } else if (selected.has('headers')) {
+            setByoStep('requestHeaderAllowlist');
+          } else if (selected.has('auth')) {
+            setByoStep('authorizerType');
+          } else if (selected.has('lifecycle')) {
+            setByoStep('idleTimeout');
+          } else {
+            setByoStep('confirm');
+          }
+        }, 0);
       }
     },
     onExit: handleByoBack,
     isActive: isByoPath && byoStep === 'advanced',
+    requireSelection: false,
   });
 
   const networkModeNav = useListNavigation({
@@ -435,7 +522,8 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
       if (mode === 'VPC') {
         setByoStep('subnets');
       } else {
-        setByoStep('requestHeaderAllowlist');
+        // Skip subnets/securityGroups — go to next step after networkMode
+        setTimeout(() => goToNextByoStep('networkMode'), 0);
       }
     },
     onExit: handleByoBack,
@@ -457,7 +545,7 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
         setByoStep('jwtConfig');
       } else {
         setByoJwtConfig(undefined);
-        setByoStep('confirm');
+        setTimeout(() => goToNextByoStep('authorizerType'), 0);
       }
     },
     onExit: handleByoBack,
@@ -468,7 +556,7 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
   const byoJwtFlow = useJwtConfigFlow({
     onComplete: jwtConfig => {
       setByoJwtConfig(jwtConfig);
-      setByoStep('confirm');
+      setTimeout(() => goToNextByoStep('jwtConfig'), 0);
     },
     onBack: () => {
       setByoStep('authorizerType');
@@ -716,6 +804,7 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
     }
     if (
       byoStep === 'codeLocation' ||
+      byoStep === 'dockerfile' ||
       byoStep === 'apiKey' ||
       byoStep === 'subnets' ||
       byoStep === 'securityGroups' ||
@@ -724,6 +813,9 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
       byoStep === 'maxLifetime'
     ) {
       return HELP_TEXT.TEXT_INPUT;
+    }
+    if (byoStep === 'advanced') {
+      return 'Space toggle · Enter confirm · Esc back';
     }
     if (byoStep === 'confirm') {
       return HELP_TEXT.CONFIRM_CANCEL;
@@ -974,6 +1066,21 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
           <WizardSelect title="Select build type" items={buildTypeItems} selectedIndex={buildTypeNav.selectedIndex} />
         )}
 
+        {byoStep === 'dockerfile' && (
+          <PathInput
+            placeholder="Select a Dockerfile"
+            basePath={resolve(project?.projectRoot ?? process.cwd(), byoConfig.codeLocation)}
+            pathType="file"
+            allowEmpty
+            emptyHelpText="Press Enter to use the default Dockerfile"
+            onSubmit={value => {
+              setByoConfig(c => ({ ...c, dockerfile: value ? basename(value) : '' }));
+              goToNextByoStep('dockerfile');
+            }}
+            onCancel={handleByoBack}
+          />
+        )}
+
         {byoStep === 'modelProvider' && (
           <WizardSelect
             title="Select model provider"
@@ -996,10 +1103,12 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
         )}
 
         {byoStep === 'advanced' && (
-          <WizardSelect
-            title="Configure advanced settings?"
-            items={ADVANCED_ITEMS}
-            selectedIndex={advancedNav.selectedIndex}
+          <WizardMultiSelect
+            title="Customize advanced settings"
+            description="Select settings to configure. Unselected items use defaults."
+            items={byoAdvancedItems}
+            cursorIndex={advancedNav.cursorIndex}
+            selectedIds={advancedNav.selectedIds}
           />
         )}
 
@@ -1031,7 +1140,7 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
             customValidation={validateSecurityGroupIds}
             onSubmit={value => {
               setByoConfig(c => ({ ...c, securityGroups: value }));
-              setByoStep('requestHeaderAllowlist');
+              goToNextByoStep('securityGroups');
             }}
             onCancel={handleByoBack}
           />
@@ -1042,13 +1151,14 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
             <TextInput
               prompt="Allowed request headers (comma-separated, or press Enter to skip)"
               initialValue={byoConfig.requestHeaderAllowlist}
+              allowEmpty
               customValidation={value => {
                 const result = validateHeaderAllowlist(value);
                 return result.success ? true : result.error!;
               }}
               onSubmit={value => {
                 setByoConfig(c => ({ ...c, requestHeaderAllowlist: value }));
-                setByoStep('authorizerType');
+                goToNextByoStep('requestHeaderAllowlist');
               }}
               onCancel={handleByoBack}
             />
@@ -1098,6 +1208,7 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
           <TextInput
             prompt={`Idle session timeout in seconds (${LIFECYCLE_TIMEOUT_MIN}-${LIFECYCLE_TIMEOUT_MAX}, or press Enter to skip)`}
             initialValue=""
+            allowEmpty
             customValidation={value => {
               if (!value) return true;
               const n = Number(value);
@@ -1117,6 +1228,7 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
           <TextInput
             prompt={`Max instance lifetime in seconds (${LIFECYCLE_TIMEOUT_MIN}-${LIFECYCLE_TIMEOUT_MAX}, or press Enter to skip)`}
             initialValue=""
+            allowEmpty
             customValidation={value => {
               if (!value) return true;
               const n = Number(value);
@@ -1147,6 +1259,9 @@ export function AddAgentScreen({ existingAgentNames, onComplete, onExit }: AddAg
                 label: 'Build',
                 value: BUILD_TYPE_OPTIONS.find(o => o.id === byoConfig.buildType)?.title ?? byoConfig.buildType,
               },
+              ...(byoConfig.buildType === 'Container' && byoConfig.dockerfile
+                ? [{ label: 'Dockerfile', value: byoConfig.dockerfile }]
+                : []),
               {
                 label: 'Model Provider',
                 value: `${byoConfig.modelProvider} (${DEFAULT_MODEL_IDS[byoConfig.modelProvider]})`,

@@ -9,6 +9,11 @@ vi.mock('node:fs', () => ({
 
 vi.mock('../../../../lib', () => ({
   DOCKERFILE_NAME: 'Dockerfile',
+  getDockerfilePath: (codeLocation: string, dockerfile?: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const p = require('node:path') as typeof import('node:path');
+    return p.join(codeLocation, dockerfile ?? 'Dockerfile');
+  },
   resolveCodeLocation: vi.fn((codeLocation: string, configBaseDir: string) => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const p = require('node:path') as typeof import('node:path');
@@ -95,5 +100,28 @@ describe('validateContainerAgents', () => {
     ]);
 
     expect(() => validateContainerAgents(spec, CONFIG_ROOT)).toThrow(/agent-a.*agent-b/s);
+  });
+
+  it('checks for custom dockerfile name when specified', () => {
+    mockedExistsSync.mockReturnValue(true);
+
+    const spec = makeSpec([
+      { name: 'gpu-agent', build: 'Container', codeLocation: dir('agents/gpu'), dockerfile: 'Dockerfile.gpu' },
+    ]);
+
+    expect(() => validateContainerAgents(spec, CONFIG_ROOT)).not.toThrow();
+    // Should check for Dockerfile.gpu, not the default Dockerfile
+    const calledPath = mockedExistsSync.mock.calls[0]?.[0] as string;
+    expect(calledPath).toContain('Dockerfile.gpu');
+  });
+
+  it('throws with custom dockerfile name in error message when missing', () => {
+    mockedExistsSync.mockReturnValue(false);
+
+    const spec = makeSpec([
+      { name: 'gpu-agent', build: 'Container', codeLocation: dir('agents/gpu'), dockerfile: 'Dockerfile.gpu' },
+    ]);
+
+    expect(() => validateContainerAgents(spec, CONFIG_ROOT)).toThrow(/Dockerfile\.gpu not found/);
   });
 });

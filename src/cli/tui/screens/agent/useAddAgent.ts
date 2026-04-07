@@ -15,8 +15,8 @@ import { credentialPrimitive } from '../../../primitives/registry';
 import { createRenderer } from '../../../templates';
 import type { GenerateConfig } from '../generate/types';
 import type { AddAgentConfig } from './types';
-import { mkdirSync } from 'fs';
-import { dirname, join } from 'path';
+import { copyFileSync, existsSync, mkdirSync } from 'fs';
+import { basename, dirname, join, resolve } from 'path';
 import { useCallback, useState } from 'react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -58,6 +58,7 @@ export function mapByoConfigToAgent(config: AddAgentConfig): AgentEnvSpec {
   return {
     name: config.name,
     build: config.buildType,
+    ...(config.dockerfile && { dockerfile: config.dockerfile }),
     entrypoint: config.entrypoint as FilePath,
     codeLocation: config.codeLocation as DirectoryPath,
     runtimeVersion: config.pythonVersion,
@@ -99,6 +100,7 @@ function mapAddAgentConfigToGenerateConfig(config: AddAgentConfig): GenerateConf
   return {
     projectName: config.name, // In create context, this is the agent name
     buildType: config.buildType,
+    ...(config.dockerfile && { dockerfile: config.dockerfile }),
     protocol: config.protocol,
     sdk: config.framework,
     modelProvider: config.modelProvider,
@@ -212,6 +214,17 @@ async function handleCreatePath(
   const renderer = createRenderer(renderConfig);
   await renderer.render({ outputDir: projectRoot });
 
+  // If dockerfile is a path (contains /), copy it into the agent directory (overwriting template default)
+  if (generateConfig.dockerfile?.includes('/')) {
+    const sourcePath = resolve(projectRoot, generateConfig.dockerfile);
+    if (!existsSync(sourcePath)) {
+      return { ok: false, error: `Dockerfile not found at ${sourcePath}` };
+    }
+    const filename = basename(sourcePath);
+    copyFileSync(sourcePath, join(agentPath, filename));
+    generateConfig.dockerfile = filename;
+  }
+
   // Write agent to project config
   if (strategy) {
     await writeAgentToProject(generateConfig, { configBaseDir, credentialStrategy: strategy });
@@ -304,8 +317,19 @@ async function handleByoPath(
   const codeDir = join(projectRoot, config.codeLocation.replace(/\/$/, ''));
   mkdirSync(codeDir, { recursive: true });
 
+  // If dockerfile is a path (contains /), copy it into the code directory and use the filename
+  let dockerfileName = config.dockerfile;
+  if (dockerfileName?.includes('/')) {
+    const sourcePath = resolve(projectRoot, dockerfileName);
+    if (!existsSync(sourcePath)) {
+      return { ok: false, error: `Dockerfile not found at ${sourcePath}` };
+    }
+    dockerfileName = basename(sourcePath);
+    copyFileSync(sourcePath, join(codeDir, dockerfileName));
+  }
+
   const project = await configIO.readProjectSpec();
-  const agent = mapByoConfigToAgent(config);
+  const agent = mapByoConfigToAgent({ ...config, dockerfile: dockerfileName });
 
   // Append new agent
   project.runtimes.push(agent);

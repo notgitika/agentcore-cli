@@ -19,6 +19,10 @@ interface PathInputProps {
   allowCreate?: boolean;
   /** Show hidden files (dotfiles) in completions (default: false) */
   showHidden?: boolean;
+  /** Allow empty input (user presses Enter without selecting a file) */
+  allowEmpty?: boolean;
+  /** Message shown when user submits empty input (only if allowEmpty is true) */
+  emptyHelpText?: string;
 }
 
 interface CompletionItem {
@@ -133,6 +137,8 @@ export function PathInput({
   maxVisibleItems = 8,
   allowCreate = false,
   showHidden = false,
+  allowEmpty = false,
+  emptyHelpText,
 }: PathInputProps) {
   const [value, setValue] = useState(initialValue);
   const [cursor, setCursor] = useState(initialValue.length);
@@ -207,6 +213,10 @@ export function PathInput({
     if (key.return) {
       const trimmed = value.trim();
       if (!trimmed) {
+        if (allowEmpty) {
+          onSubmit('');
+          return;
+        }
         setError('Please enter a path');
         return;
       }
@@ -322,8 +332,9 @@ export function PathInput({
       )}
 
       {/* Help text */}
-      <Box marginTop={1}>
+      <Box marginTop={1} flexDirection="column">
         <Text dimColor>↑↓ move → open ← back Enter submit Esc cancel</Text>
+        {allowEmpty && emptyHelpText && !value && <Text dimColor>{emptyHelpText}</Text>}
       </Box>
     </Box>
   );

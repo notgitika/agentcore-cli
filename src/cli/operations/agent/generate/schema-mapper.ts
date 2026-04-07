@@ -115,6 +115,7 @@ export function mapGenerateConfigToAgent(config: GenerateConfig): AgentEnvSpec {
   return {
     name: config.projectName,
     build: config.buildType ?? 'CodeZip',
+    ...(config.dockerfile && { dockerfile: config.dockerfile }),
     entrypoint: DEFAULT_PYTHON_ENTRYPOINT as FilePath,
     codeLocation: codeLocation as DirectoryPath,
     runtimeVersion: DEFAULT_PYTHON_VERSION,
@@ -276,5 +277,6 @@ export async function mapGenerateConfigToRenderConfig(
     gatewayProviders,
     gatewayAuthTypes: [...new Set(gatewayProviders.map(g => g.authType))],
     protocol: config.protocol,
+    dockerfile: config.dockerfile,
   };
 }

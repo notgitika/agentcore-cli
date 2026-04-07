@@ -1,4 +1,4 @@
-import { CONTAINER_INTERNAL_PORT, DOCKERFILE_NAME } from '../../../lib';
+import { CONTAINER_INTERNAL_PORT, DOCKERFILE_NAME, getDockerfilePath } from '../../../lib';
 import { getUvBuildArgs } from '../../../lib/packaging/build-args';
 import { detectContainerRuntime, getStartHint } from '../../external-requirements/detect';
 import { DevServer, type LogLevel, type SpawnConfig } from './dev-server';
@@ -73,9 +73,10 @@ export class ContainerDevServer extends DevServer {
     this.runtimeBinary = runtime.binary;
 
     // 2. Verify Dockerfile exists
-    const dockerfilePath = join(this.config.directory, DOCKERFILE_NAME);
+    const dockerfileName = this.config.dockerfile ?? DOCKERFILE_NAME;
+    const dockerfilePath = getDockerfilePath(this.config.directory, this.config.dockerfile);
     if (!existsSync(dockerfilePath)) {
-      onLog('error', `Dockerfile not found at ${dockerfilePath}. Container agents require a Dockerfile.`);
+      onLog('error', `${dockerfileName} not found at ${dockerfilePath}. Container agents require a Dockerfile.`);
       return false;
     }
 

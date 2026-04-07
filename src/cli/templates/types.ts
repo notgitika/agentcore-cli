@@ -66,4 +66,6 @@ export interface AgentRenderConfig {
   gatewayAuthTypes: string[];
   /** Protocol (HTTP, MCP, A2A). Defaults to HTTP. */
   protocol?: ProtocolMode;
+  /** Custom Dockerfile name — when set, the template Dockerfile is not scaffolded */
+  dockerfile?: string;
 }

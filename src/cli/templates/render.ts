@@ -47,13 +47,19 @@ export async function copyDir(src: string, dest: string): Promise<void> {
 /**
  * Recursively copies a directory, rendering Handlebars templates.
  */
-export async function copyAndRenderDir<T extends object>(src: string, dest: string, data: T): Promise<void> {
+export async function copyAndRenderDir<T extends object>(
+  src: string,
+  dest: string,
+  data: T,
+  options?: { exclude?: Set<string> }
+): Promise<void> {
   await fs.mkdir(dest, { recursive: true });
   const entries = await fs.readdir(src, { withFileTypes: true });
 
   for (const entry of entries) {
-    const srcPath = path.join(src, entry.name);
     const destName = resolveTemplateName(entry.name);
+    if (options?.exclude?.has(destName)) continue;
+    const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, destName);
 
     if (entry.isDirectory()) {

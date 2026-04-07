@@ -71,7 +71,8 @@ export abstract class BaseRenderer {
       const containerTemplateDir = path.join(this.baseTemplateDir, 'container', language);
 
       if (existsSync(containerTemplateDir)) {
-        await copyAndRenderDir(containerTemplateDir, projectDir, { ...templateData, entrypoint: 'main' });
+        const exclude = this.config.dockerfile ? new Set(['Dockerfile']) : undefined;
+        await copyAndRenderDir(containerTemplateDir, projectDir, { ...templateData, entrypoint: 'main' }, { exclude });
       }
     }
   }
