@@ -31,7 +31,7 @@ export const COMMAND_DESCRIPTIONS = {
   /** Main program description */
   program: 'Build and deploy Agentic AI applications on AgentCore',
   /** Command descriptions */
-  add: 'Add resources (agent, evaluator, online-eval, memory, credential, target)',
+  add: 'Add resources to project config.',
   create: 'Create a new AgentCore project',
   deploy: 'Deploy project infrastructure to AWS via CDK.',
   dev: 'Launch local dev server, or invoke an agent locally.',
@@ -46,7 +46,7 @@ export const COMMAND_DESCRIPTIONS = {
   pause: 'Pause an online eval config. Supports --arn for configs outside the project.',
   resume: 'Resume a paused online eval config. Supports --arn for configs outside the project.',
   run: 'Run on-demand evaluation. Supports --agent-arn for agents outside the project.',
-  import: 'Import resources from a Bedrock AgentCore Starter Toolkit project.',
+  import: 'Import a runtime, memory, or starter toolkit into this project. [experimental]',
   update: 'Check for and install CLI updates',
   validate: 'Validate agentcore/ config files.',
 } as const;

@@ -1,5 +1,6 @@
 import { findConfigRoot, getWorkingDirectory, readEnvFile } from '../../../lib';
 import { getErrorMessage } from '../../errors';
+import { detectContainerRuntime } from '../../external-requirements';
 import { ExecLogger } from '../../logging';
 import {
   callMcpTool,
@@ -22,6 +23,7 @@ import { COMMAND_DESCRIPTIONS } from '../../tui/copy';
 import { requireProject } from '../../tui/guards';
 import { parseHeaderFlags } from '../shared/header-utils';
 import type { Command } from '@commander-js/extra-typings';
+import { spawn } from 'child_process';
 import { Text, render } from 'ink';
 import React from 'react';
 
@@ -140,6 +142,26 @@ async function handleMcpInvoke(
   }
 }
 
+async function execInContainer(command: string, containerName: string): Promise<void> {
+  const detection = await detectContainerRuntime();
+  if (!detection.runtime) {
+    console.error('Error: No container runtime found (docker, podman, or finch required)');
+    process.exit(1);
+  }
+  return new Promise((resolve, reject) => {
+    const child = spawn(detection.runtime!.binary, ['exec', containerName, 'bash', '-c', command], {
+      stdio: 'inherit',
+    });
+    child.on('error', reject);
+    child.on('close', code => {
+      if (code !== 0 && code !== null) {
+        process.exit(code);
+      }
+      resolve();
+    });
+  });
+}
+
 export const registerDev = (program: Command) => {
   program
     .command('dev')
@@ -150,6 +172,7 @@ export const registerDev = (program: Command) => {
     .option('-r, --runtime <name>', 'Runtime to run or invoke (required if multiple runtimes)')
     .option('-s, --stream', 'Stream response when invoking [non-interactive]')
     .option('-l, --logs', 'Run dev server with logs to stdout [non-interactive]')
+    .option('--exec', 'Execute a shell command in the running dev container (Container agents only) [non-interactive]')
     .option('--tool <name>', 'MCP tool name (used with "call-tool" prompt) [non-interactive]')
     .option('--input <json>', 'MCP tool arguments as JSON (used with --tool) [non-interactive]')
     .option(
@@ -166,6 +189,26 @@ export const registerDev = (program: Command) => {
         let headers: Record<string, string> | undefined;
         if (opts.header && opts.header.length > 0) {
           headers = parseHeaderFlags(opts.header);
+        }
+
+        // Exec mode: run shell command in the dev container
+        if (opts.exec) {
+          if (!positionalPrompt) {
+            console.error('A command is required with --exec. Usage: agentcore dev --exec "whoami"');
+            process.exit(1);
+          }
+          const workingDir = getWorkingDirectory();
+          const project = await loadProjectConfig(workingDir);
+          const agentName = opts.runtime ?? project?.runtimes[0]?.name ?? 'unknown';
+          const targetAgent = project?.runtimes.find(a => a.name === agentName);
+          if (targetAgent?.build !== 'Container') {
+            console.error('Error: --exec is only supported for Container build agents.');
+            console.error('For CodeZip agents, use your terminal to run commands directly.');
+            process.exit(1);
+          }
+          const containerName = `agentcore-dev-${agentName}`.toLowerCase();
+          await execInContainer(positionalPrompt, containerName);
+          return;
         }
 
         // If a prompt is provided, invoke a running dev server

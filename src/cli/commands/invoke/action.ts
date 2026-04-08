@@ -1,6 +1,7 @@
 import { ConfigIO } from '../../../lib';
 import type { AgentCoreProjectSpec, AwsDeploymentTargets, DeployedState } from '../../../schema';
 import {
+  executeBashCommand,
   invokeA2ARuntime,
   invokeAgentRuntime,
   invokeAgentRuntimeStreaming,
@@ -103,6 +104,104 @@ export async function handleInvoke(context: InvokeContext, options: InvokeOption
           error: `CUSTOM_JWT agent requires a bearer token. Auto-fetch failed: ${err instanceof Error ? err.message : String(err)}\nProvide one manually with --bearer-token.`,
         };
       }
+    }
+  }
+
+  // Exec mode: run shell command in runtime container
+  if (options.exec) {
+    const logger = new InvokeLogger({
+      agentName: agentSpec.name,
+      runtimeArn: agentState.runtimeArn,
+      region: targetConfig.region,
+    });
+    const command = options.prompt;
+    if (!command) {
+      return { success: false, error: '--exec requires a command (prompt)' };
+    }
+    logger.logPrompt(command, undefined, options.userId);
+
+    try {
+      const result = await executeBashCommand({
+        region: targetConfig.region,
+        runtimeArn: agentState.runtimeArn,
+        command,
+        sessionId: options.sessionId,
+        timeout: options.timeout,
+        headers: options.headers,
+        bearerToken: options.bearerToken,
+      });
+
+      let stdout = '';
+      let stderr = '';
+      let exitCode: number | undefined;
+      let status: string | undefined;
+
+      for await (const event of result.stream) {
+        switch (event.type) {
+          case 'stdout':
+            if (event.data) {
+              stdout += event.data;
+              if (!options.json) {
+                process.stdout.write(event.data);
+              }
+            }
+            break;
+          case 'stderr':
+            if (event.data) {
+              stderr += event.data;
+              if (!options.json) {
+                process.stderr.write(event.data);
+              }
+            }
+            break;
+          case 'stop':
+            exitCode = event.exitCode;
+            status = event.status;
+            break;
+        }
+      }
+
+      logger.logResponse(stdout || stderr || `exit code: ${exitCode}`);
+
+      if (options.json) {
+        return {
+          success: exitCode === 0,
+          agentName: agentSpec.name,
+          targetName: selectedTargetName,
+          response: JSON.stringify({ stdout, stderr, exitCode, status }),
+          logFilePath: logger.logFilePath,
+        };
+      }
+
+      if (exitCode === undefined) {
+        return {
+          success: false,
+          agentName: agentSpec.name,
+          targetName: selectedTargetName,
+          error: 'Command stream ended without exit code',
+          logFilePath: logger.logFilePath,
+        };
+      }
+
+      if (exitCode !== 0) {
+        return {
+          success: false,
+          agentName: agentSpec.name,
+          targetName: selectedTargetName,
+          error: `Command exited with code ${exitCode}${status === 'TIMED_OUT' ? ' (timed out)' : ''}`,
+          logFilePath: logger.logFilePath,
+        };
+      }
+
+      return {
+        success: true,
+        agentName: agentSpec.name,
+        targetName: selectedTargetName,
+        logFilePath: logger.logFilePath,
+      };
+    } catch (err) {
+      logger.logError(err, 'exec command failed');
+      throw err;
     }
   }
 
@@ -214,9 +313,6 @@ export async function handleInvoke(context: InvokeContext, options: InvokeOption
     }
   }
 
-  // modelProvider has been removed from schema
-  const providerInfo = undefined;
-
   // Create logger for this invocation
   const logger = new InvokeLogger({
     agentName: agentSpec.name,
@@ -255,7 +351,6 @@ export async function handleInvoke(context: InvokeContext, options: InvokeOption
         targetName: selectedTargetName,
         response: fullResponse,
         logFilePath: logger.logFilePath,
-        providerInfo,
       };
     } catch (err) {
       logger.logError(err, 'invoke streaming failed');
@@ -282,6 +377,5 @@ export async function handleInvoke(context: InvokeContext, options: InvokeOption
     targetName: selectedTargetName,
     response: response.content,
     logFilePath: logger.logFilePath,
-    providerInfo,
   };
 }

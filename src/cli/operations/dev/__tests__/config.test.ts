@@ -367,6 +367,35 @@ describe('getDevConfig', () => {
     expect(config).not.toBeNull();
     expect(config!.isPython).toBe(true);
   });
+
+  it('threads dockerfile from Container agent spec to DevConfig', () => {
+    const project: AgentCoreProjectSpec = {
+      name: 'TestProject',
+      version: 1,
+      managedBy: 'CDK' as const,
+      runtimes: [
+        {
+          name: 'ContainerAgent',
+          build: 'Container',
+          runtimeVersion: 'PYTHON_3_12',
+          entrypoint: filePath('main.py'),
+          codeLocation: dirPath('./agents/container'),
+          protocol: 'HTTP',
+          dockerfile: 'Dockerfile.gpu',
+        },
+      ],
+      memories: [],
+      credentials: [],
+      evaluators: [],
+      onlineEvalConfigs: [],
+      agentCoreGateways: [],
+      policyEngines: [],
+    };
+
+    const config = getDevConfig(workingDir, project, '/test/project/agentcore');
+    expect(config).not.toBeNull();
+    expect(config?.dockerfile).toBe('Dockerfile.gpu');
+  });
 });
 
 describe('getAgentPort', () => {

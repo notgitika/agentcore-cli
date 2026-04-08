@@ -1,12 +1,11 @@
 import type { AgentEnvSpec } from '../../schema';
-import { CONTAINER_RUNTIMES, DOCKERFILE_NAME, ONE_GB } from '../constants';
+import { CONTAINER_RUNTIMES, DOCKERFILE_NAME, ONE_GB, getDockerfilePath } from '../constants';
 import { getUvBuildArgs } from './build-args';
 import { PackagingError } from './errors';
 import { resolveCodeLocation } from './helpers';
 import type { ArtifactResult, PackageOptions, RuntimePackager } from './types/packaging';
 import { spawnSync } from 'child_process';
 import { existsSync } from 'fs';
-import { join } from 'path';
 
 /**
  * Detect container runtime synchronously.
@@ -36,12 +35,14 @@ export class ContainerPackager implements RuntimePackager {
     const agentName = options.agentName ?? spec.name;
     const configBaseDir = options.artifactDir ?? options.projectRoot ?? process.cwd();
     const codeLocation = resolveCodeLocation(spec.codeLocation, configBaseDir);
-    const dockerfilePath = join(codeLocation, DOCKERFILE_NAME);
+    const dockerfilePath = getDockerfilePath(codeLocation, spec.dockerfile);
 
     // Preflight: Dockerfile must exist
     if (!existsSync(dockerfilePath)) {
       return Promise.reject(
-        new PackagingError(`Dockerfile not found at ${dockerfilePath}. Container agents require a Dockerfile.`)
+        new PackagingError(
+          `${spec.dockerfile ?? DOCKERFILE_NAME} not found at ${dockerfilePath}. Container agents require a Dockerfile.`
+        )
       );
     }
 

@@ -33,4 +33,32 @@ describe('validateInvokeOptions', () => {
   it('returns valid with agentName and targetName', () => {
     expect(validateInvokeOptions({ agentName: 'my-agent', targetName: 'default' })).toEqual({ valid: true });
   });
+
+  it('returns invalid when exec is true but no prompt', () => {
+    const result = validateInvokeOptions({ exec: true });
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('--exec');
+  });
+
+  it('returns invalid when exec is combined with --tool', () => {
+    const result = validateInvokeOptions({ exec: true, prompt: 'ls', tool: 'myTool' });
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('--exec cannot be combined');
+  });
+
+  it('returns invalid when exec is combined with --input', () => {
+    const result = validateInvokeOptions({ exec: true, prompt: 'ls', input: '{}' });
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('--exec cannot be combined');
+  });
+
+  it('returns invalid when exec is combined with --stream', () => {
+    const result = validateInvokeOptions({ exec: true, prompt: 'ls', stream: true });
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('--exec already streams');
+  });
+
+  it('returns valid with exec and prompt', () => {
+    expect(validateInvokeOptions({ exec: true, prompt: 'ls -la' })).toEqual({ valid: true });
+  });
 });

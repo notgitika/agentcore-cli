@@ -2,6 +2,51 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.1] - 2026-04-07
+
+### Added
+- feat: add custom dockerfile support for Container agent builds (#783) (cdd5a15)
+
+### Fixed
+- fix: make add command description consistent with remove (#773) (2eb9edb)
+
+### Other Changes
+- fix(ci): pin npm version to avoid self-upgrade corruption (#785) (9c10f2c)
+- chore: bump version to 0.7.0 (#784) (a4f9948)
+- feat(invoke,dev): add exec mode for running shell commands in runtimes (#750) (27ce2d0)
+- feat(import): add evaluator and online eval config import subcommands (#780) (e266576)
+- feat(create): add --skip-install flag to skip dependency installation (#782) (380ac6e)
+- feat(status): display runtime invocation URL for deployed agents (#775) (0aa9d55)
+- fix(fetch): add --identity-name option for custom credential lookup (#715) (#774) (a6bf024)
+- chore(deps): bump vite from 8.0.3 to 8.0.5 (#777) (c9e5cfe)
+
+## [0.7.0] - 2026-04-07
+
+### Added
+- feat: add custom dockerfile support for Container agent builds (#783) (cdd5a15)
+
+### Fixed
+- fix: make add command description consistent with remove (#773) (2eb9edb)
+
+### Other Changes
+- feat(invoke,dev): add exec mode for running shell commands in runtimes (#750) (27ce2d0)
+- feat(import): add evaluator and online eval config import subcommands (#780) (e266576)
+- feat(create): add --skip-install flag to skip dependency installation (#782) (380ac6e)
+- feat(status): display runtime invocation URL for deployed agents (#775) (0aa9d55)
+- fix(fetch): add --identity-name option for custom credential lookup (#715) (#774) (a6bf024)
+- chore(deps): bump vite from 8.0.3 to 8.0.5 (#777) (c9e5cfe)
+
+## [0.6.0] - 2026-04-02
+
+### Added
+- feat: add code-based evaluator support (#739) (11ca658)
+
+### Other Changes
+- ci: block schema changes in PRs (#712) (8119910)
+- fix(ci): regenerate lockfile for npm 11 compatibility (#770) (ee7aea2)
+- feat(import): add runtime and memory import subcommands with TUI wizard (#763) (cb79649)
+- ci: use draft releases for PR tarballs to avoid notifying watchers (#745) (1a45c28)
+
 ## [0.5.1] - 2026-03-31
 
 ### Added

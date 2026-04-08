@@ -24,6 +24,10 @@ interface TextInputProps {
   hideArrow?: boolean;
   /** Allow text to wrap across multiple lines instead of truncating (default false) */
   expandable?: boolean;
+  /** Called when the input value changes, with a setValue callback to transform input */
+  onChange?: (value: string, setValue: (v: string) => void) => void;
+  /** Called when backspace is pressed on an empty input */
+  onBackspaceEmpty?: () => void;
   /** Called when up arrow is pressed */
   onUpArrow?: () => void;
   /** Called when down arrow is pressed */
@@ -62,14 +66,18 @@ export function TextInput({
   mask,
   hideArrow = false,
   expandable = false,
+  onChange: onChangeProp,
+  onBackspaceEmpty,
   onUpArrow,
   onDownArrow,
 }: TextInputProps) {
   const [showError, setShowError] = useState(false);
   const { stdout } = useStdout();
 
-  const { value, cursor } = useTextInput({
+  const { value, cursor, setValue } = useTextInput({
     initialValue,
+    onChange: onChangeProp ? (v: string) => onChangeProp(v, setValue) : undefined,
+    onBackspaceEmpty,
     onUpArrow,
     onDownArrow,
     onSubmit: val => {

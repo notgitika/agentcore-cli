@@ -178,6 +178,38 @@ describe('ContainerPackager', () => {
     expect(result.artifactPath).toBe('finch://agentcore-package-agent');
   });
 
+  it('uses custom dockerfile name from spec', async () => {
+    mockResolveCodeLocation.mockReturnValue('/resolved/src');
+    mockExistsSync.mockReturnValue(true);
+    mockSpawnSync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'which' && args[0] === 'docker') return { status: 0 };
+      if (cmd === 'docker' && args[0] === '--version') return { status: 0 };
+      if (cmd === 'docker' && args[0] === 'build') return { status: 0 };
+      if (cmd === 'docker' && args[0] === 'image') return { status: 0, stdout: Buffer.from('1000') };
+      return { status: 1 };
+    });
+
+    const specWithDockerfile = { ...baseSpec, dockerfile: 'Dockerfile.gpu' };
+    await packager.pack(specWithDockerfile as any);
+
+    // Verify build was called with custom dockerfile path
+    const buildCall = mockSpawnSync.mock.calls.find(
+      (c: unknown[]) => c[0] === 'docker' && (c[1] as string[])[0] === 'build'
+    );
+    expect(buildCall).toBeDefined();
+    const buildArgs = buildCall![1] as string[];
+    const fIdx = buildArgs.indexOf('-f');
+    expect(buildArgs[fIdx + 1]).toBe('/resolved/src/Dockerfile.gpu');
+  });
+
+  it('rejects when custom dockerfile not found', async () => {
+    mockResolveCodeLocation.mockReturnValue('/resolved/src');
+    mockExistsSync.mockReturnValue(false);
+
+    const specWithDockerfile = { ...baseSpec, dockerfile: 'Dockerfile.custom' };
+    await expect(packager.pack(specWithDockerfile as any)).rejects.toThrow('Dockerfile.custom not found');
+  });
+
   it('detects podman runtime last', async () => {
     mockResolveCodeLocation.mockReturnValue('/resolved/src');
     mockExistsSync.mockReturnValue(true);

@@ -260,6 +260,7 @@ export function useCreateFlow(cwd: string): CreateFlowState {
                 const generateConfig: GenerateConfig = {
                   projectName: addAgentConfig.name,
                   buildType: addAgentConfig.buildType,
+                  ...(addAgentConfig.dockerfile && { dockerfile: addAgentConfig.dockerfile }),
                   protocol: addAgentConfig.protocol,
                   sdk: addAgentConfig.framework,
                   modelProvider: addAgentConfig.modelProvider,
@@ -272,6 +273,8 @@ export function useCreateFlow(cwd: string): CreateFlowState {
                   requestHeaderAllowlist: addAgentConfig.requestHeaderAllowlist,
                   authorizerType: addAgentConfig.authorizerType,
                   jwtConfig: addAgentConfig.jwtConfig,
+                  idleRuntimeSessionTimeout: addAgentConfig.idleRuntimeSessionTimeout,
+                  maxLifetime: addAgentConfig.maxLifetime,
                 };
 
                 logger.logSubStep(`Framework: ${generateConfig.sdk}`);

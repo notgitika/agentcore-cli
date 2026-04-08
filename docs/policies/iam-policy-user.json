@@ -36,6 +36,7 @@
       "Action": [
         "bedrock-agentcore:InvokeAgentRuntime",
         "bedrock-agentcore:InvokeAgentRuntimeForUser",
+        "bedrock-agentcore:InvokeAgentRuntimeCommand",
         "bedrock-agentcore:Evaluate",
         "bedrock-agentcore:StopRuntimeSession"
       ],

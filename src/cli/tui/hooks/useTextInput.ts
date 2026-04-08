@@ -25,6 +25,8 @@ export interface UseTextInputOptions {
   onCancel?: () => void;
   /** Called when value changes */
   onChange?: (value: string) => void;
+  /** Called when backspace is pressed on an empty input */
+  onBackspaceEmpty?: () => void;
   /** Called when up arrow is pressed */
   onUpArrow?: () => void;
   /** Called when down arrow is pressed */
@@ -62,6 +64,7 @@ export function useTextInput({
   onSubmit,
   onCancel,
   onChange,
+  onBackspaceEmpty,
   onUpArrow,
   onDownArrow,
   isActive = true,
@@ -102,8 +105,14 @@ export function useTextInput({
 
       // Backspace variants
       if (key.backspace || key.delete) {
+        if (state.cursor === 0 && state.text.length === 0) {
+          onBackspaceEmpty?.();
+          return;
+        }
         setState(prev => {
-          if (prev.cursor === 0) return prev;
+          if (prev.cursor === 0) {
+            return prev;
+          }
           // Cmd+Backspace: delete to start
           if (key.meta) {
             return { text: prev.text.slice(prev.cursor), cursor: 0 };

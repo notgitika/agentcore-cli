@@ -311,11 +311,12 @@ Required for all deployment operations (`deploy`, `status`, `diff`).
 
 ### Agent invocation
 
-| Action                                        | CLI Commands | Purpose                                                                                   |
-| --------------------------------------------- | ------------ | ----------------------------------------------------------------------------------------- |
-| `bedrock-agentcore:InvokeAgentRuntime`        | `invoke`     | Invoke deployed agents (HTTP, MCP, and A2A protocols)                                     |
-| `bedrock-agentcore:InvokeAgentRuntimeForUser` | `invoke`     | Invoke agents with a user ID (requires `X-Amzn-Bedrock-AgentCore-Runtime-User-Id` header) |
-| `bedrock-agentcore:StopRuntimeSession`        | `invoke`     | End an agent runtime session                                                              |
+| Action                                        | CLI Commands    | Purpose                                                                                   |
+| --------------------------------------------- | --------------- | ----------------------------------------------------------------------------------------- |
+| `bedrock-agentcore:InvokeAgentRuntime`        | `invoke`        | Invoke deployed agents (HTTP, MCP, and A2A protocols)                                     |
+| `bedrock-agentcore:InvokeAgentRuntimeForUser` | `invoke`        | Invoke agents with a user ID (requires `X-Amzn-Bedrock-AgentCore-Runtime-User-Id` header) |
+| `bedrock-agentcore:InvokeAgentRuntimeCommand` | `invoke --exec` | Execute shell commands in a runtime container                                             |
+| `bedrock-agentcore:StopRuntimeSession`        | `invoke`        | End an agent runtime session                                                              |
 
 ### Runtime and resource status
 

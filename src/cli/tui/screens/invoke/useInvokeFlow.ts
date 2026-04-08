@@ -11,6 +11,7 @@ import type {
 import {
   DEFAULT_RUNTIME_USER_ID,
   type McpToolDef,
+  executeBashCommand,
   invokeA2ARuntime,
   invokeAgentRuntimeStreaming,
   mcpCallTool,
@@ -67,6 +68,7 @@ export interface InvokeFlowState {
   setBearerToken: (token: string) => void;
   fetchBearerToken: () => Promise<void>;
   invoke: (prompt: string) => Promise<void>;
+  execCommand: (command: string) => Promise<void>;
   newSession: () => void;
   fetchMcpTools: () => Promise<void>;
 }
@@ -76,7 +78,9 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
   const [phase, setPhase] = useState<'loading' | 'ready' | 'invoking' | 'error'>('loading');
   const [config, setConfig] = useState<InvokeConfig | null>(null);
   const [selectedAgent, setSelectedAgent] = useState(0);
-  const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; content: string; isHint?: boolean }[]>([]);
+  const [messages, setMessages] = useState<
+    { role: 'user' | 'assistant'; content: string; isHint?: boolean; isExec?: boolean }[]
+  >([]);
   const [error, setError] = useState<string | null>(null);
   const [logFilePath, setLogFilePath] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -369,6 +373,95 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
     [config, selectedAgent, phase, sessionId, userId, headers, bearerToken, fetchMcpTools, getMcpInvokeOptions]
   );
 
+  const execCommand = useCallback(
+    async (command: string) => {
+      if (!config || phase === 'invoking') return;
+
+      const agent = config.runtimes[selectedAgent];
+      if (!agent) return;
+
+      // Create logger on first invoke or if agent changed
+      if (!loggerRef.current) {
+        loggerRef.current = new InvokeLogger({
+          agentName: agent.name,
+          runtimeArn: agent.state.runtimeArn,
+          region: config.target.region,
+          sessionId: sessionId ?? undefined,
+        });
+        setLogFilePath(loggerRef.current.getAbsoluteLogPath());
+      }
+
+      const logger = loggerRef.current;
+
+      setMessages(prev => [
+        ...prev,
+        { role: 'user', content: `! ${command}`, isExec: true },
+        { role: 'assistant', content: '', isExec: true },
+      ]);
+      setPhase('invoking');
+      streamingContentRef.current = '';
+
+      logger.logPrompt(`exec: ${command}`, sessionId ?? undefined, userId);
+
+      try {
+        const result = await executeBashCommand({
+          region: config.target.region,
+          runtimeArn: agent.state.runtimeArn,
+          command,
+          sessionId: sessionId ?? undefined,
+          headers,
+          bearerToken: bearerToken || undefined,
+        });
+
+        for await (const event of result.stream) {
+          switch (event.type) {
+            case 'stdout':
+              if (event.data) {
+                streamingContentRef.current += event.data;
+              }
+              break;
+            case 'stderr':
+              if (event.data) {
+                streamingContentRef.current += event.data;
+              }
+              break;
+            case 'stop':
+              if (event.exitCode !== undefined && event.exitCode !== 0) {
+                streamingContentRef.current += `\n[exit code: ${event.exitCode}${event.status === 'TIMED_OUT' ? ' (timed out)' : ''}]`;
+              }
+              break;
+          }
+          const currentContent = streamingContentRef.current;
+          setMessages(prev => {
+            const updated = [...prev];
+            const lastIdx = updated.length - 1;
+            if (lastIdx >= 0 && updated[lastIdx]?.role === 'assistant') {
+              updated[lastIdx] = { ...updated[lastIdx], content: currentContent };
+            }
+            return updated;
+          });
+        }
+
+        logger.logResponse(streamingContentRef.current);
+        setPhase('ready');
+      } catch (err) {
+        const errMsg = getErrorMessage(err);
+        logger.logError(err, 'exec command failed');
+
+        setMessages(prev => {
+          const updated = [...prev];
+          const lastIdx = updated.length - 1;
+          if (lastIdx >= 0 && updated[lastIdx]?.role === 'assistant') {
+            updated[lastIdx] = { ...updated[lastIdx], content: `Error: ${errMsg}` };
+          }
+          return updated;
+        });
+        setPhase('ready');
+      }
+    },
+    [config, selectedAgent, phase, sessionId, userId, headers, bearerToken]
+  );
+
   const newSession = useCallback(() => {
     const newId = generateSessionId();
     setSessionId(newId);
@@ -400,6 +493,7 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
     setBearerToken,
     fetchBearerToken,
     invoke,
+    execCommand,
     newSession,
     fetchMcpTools,
   };

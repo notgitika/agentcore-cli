@@ -405,6 +405,88 @@ describe('LifecycleConfigurationSchema', () => {
   });
 });
 
+describe('AgentEnvSpecSchema - dockerfile', () => {
+  const validContainerAgent = {
+    name: 'ContainerAgent',
+    build: 'Container',
+    entrypoint: 'main.py',
+    codeLocation: './agents/container',
+  };
+
+  const validCodeZipAgent = {
+    name: 'CodeZipAgent',
+    build: 'CodeZip',
+    entrypoint: 'main.py:handler',
+    codeLocation: './agents/test',
+    runtimeVersion: 'PYTHON_3_12',
+  };
+
+  it('accepts Container agent with custom dockerfile', () => {
+    const result = AgentEnvSpecSchema.safeParse({ ...validContainerAgent, dockerfile: 'Dockerfile.gpu' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.dockerfile).toBe('Dockerfile.gpu');
+    }
+  });
+
+  it('accepts Container agent without dockerfile (optional)', () => {
+    const result = AgentEnvSpecSchema.safeParse(validContainerAgent);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.dockerfile).toBeUndefined();
+    }
+  });
+
+  it.each(['Dockerfile', 'Dockerfile.dev', 'Dockerfile.gpu-v2', 'my.Dockerfile', 'dockerfile_test'])(
+    'accepts valid dockerfile name "%s"',
+    name => {
+      expect(AgentEnvSpecSchema.safeParse({ ...validContainerAgent, dockerfile: name }).success).toBe(true);
+    }
+  );
+
+  it('rejects dockerfile on CodeZip builds', () => {
+    const result = AgentEnvSpecSchema.safeParse({ ...validCodeZipAgent, dockerfile: 'Dockerfile.custom' });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some(i => i.message.includes('only allowed for Container'))).toBe(true);
+    }
+  });
+
+  it.each(['../Dockerfile', '/etc/Dockerfile', 'path/to/Dockerfile', '.hidden'])(
+    'rejects path traversal or path separator in dockerfile "%s"',
+    name => {
+      expect(AgentEnvSpecSchema.safeParse({ ...validContainerAgent, dockerfile: name }).success).toBe(false);
+    }
+  );
+
+  it('rejects empty string dockerfile', () => {
+    expect(AgentEnvSpecSchema.safeParse({ ...validContainerAgent, dockerfile: '' }).success).toBe(false);
+  });
+
+  it('rejects shell metacharacters in dockerfile', () => {
+    expect(AgentEnvSpecSchema.safeParse({ ...validContainerAgent, dockerfile: 'Dockerfile;rm -rf /' }).success).toBe(
+      false
+    );
+  });
+
+  it('rejects dockerfile exceeding 255 characters', () => {
+    const longName = 'D' + 'a'.repeat(255);
+    expect(AgentEnvSpecSchema.safeParse({ ...validContainerAgent, dockerfile: longName }).success).toBe(false);
+  });
+
+  it('accepts dockerfile at exactly 255 characters', () => {
+    const maxName = 'D' + 'a'.repeat(254);
+    expect(AgentEnvSpecSchema.safeParse({ ...validContainerAgent, dockerfile: maxName }).success).toBe(true);
+  });
+
+  it.each(['\\\\server\\share', 'Dockerfile\\..\\secret', '..\\Dockerfile'])(
+    'rejects backslash path traversal in dockerfile "%s"',
+    name => {
+      expect(AgentEnvSpecSchema.safeParse({ ...validContainerAgent, dockerfile: name }).success).toBe(false);
+    }
+  );
+});
+
 describe('AgentEnvSpecSchema - lifecycleConfiguration', () => {
   const validAgent = {
     name: 'TestAgent',

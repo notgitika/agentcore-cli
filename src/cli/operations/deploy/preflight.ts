@@ -1,4 +1,4 @@
-import { ConfigIO, DOCKERFILE_NAME, requireConfigRoot, resolveCodeLocation } from '../../../lib';
+import { ConfigIO, DOCKERFILE_NAME, getDockerfilePath, requireConfigRoot, resolveCodeLocation } from '../../../lib';
 import type { AgentCoreProjectSpec, AwsDeploymentTarget } from '../../../schema';
 import { validateAwsCredentials } from '../../aws/account';
 import { LocalCdkProject } from '../../cdk/local-cdk-project';
@@ -147,11 +147,11 @@ export function validateContainerAgents(projectSpec: AgentCoreProjectSpec, confi
   for (const agent of projectSpec.runtimes || []) {
     if (agent.build === 'Container') {
       const codeLocation = resolveCodeLocation(agent.codeLocation, configRoot);
-      const dockerfilePath = path.join(codeLocation, DOCKERFILE_NAME);
+      const dockerfilePath = getDockerfilePath(codeLocation, agent.dockerfile);
 
       if (!existsSync(dockerfilePath)) {
         errors.push(
-          `Agent "${agent.name}": Dockerfile not found at ${dockerfilePath}. Container agents require a Dockerfile.`
+          `Agent "${agent.name}": ${agent.dockerfile ?? DOCKERFILE_NAME} not found at ${dockerfilePath}. Container agents require a Dockerfile.`
         );
       }
     }

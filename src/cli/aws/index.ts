@@ -9,6 +9,7 @@ export {
   type ClaudeResponse,
 } from './bedrock';
 export {
+  createControlClient,
   getAgentRuntimeStatus,
   type AgentRuntimeStatusResult,
   type GetAgentRuntimeStatusOptions,
@@ -25,6 +26,7 @@ export {
 } from './policy-generation';
 export {
   DEFAULT_RUNTIME_USER_ID,
+  executeBashCommand,
   invokeA2ARuntime,
   invokeAgentRuntime,
   invokeAgentRuntimeStreaming,
@@ -32,6 +34,9 @@ export {
   mcpListTools,
   mcpCallTool,
   stopRuntimeSession,
+  type ExecuteBashOptions,
+  type ExecuteBashResult,
+  type ExecuteBashStreamEvent,
   type InvokeAgentRuntimeOptions,
   type InvokeAgentRuntimeResult,
   type McpInvokeOptions,

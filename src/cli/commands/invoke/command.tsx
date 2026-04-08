@@ -42,8 +42,8 @@ async function handleInvokeCLI(options: InvokeOptions): Promise<void> {
   try {
     const context = await loadInvokeConfig();
 
-    // Show spinner for non-streaming, non-json invocations
-    if (!options.stream && !options.json) {
+    // Show spinner for non-streaming, non-json, non-exec invocations
+    if (!options.stream && !options.json && !options.exec) {
       spinner = startSpinner('Invoking agent...');
     }
 
@@ -62,9 +62,6 @@ async function handleInvokeCLI(options: InvokeOptions): Promise<void> {
       }
     } else {
       // Non-streaming, non-json: print provider info and response or error
-      if (result.providerInfo) {
-        console.error(`Provider: ${result.providerInfo}`);
-      }
       if (result.success && result.response) {
         console.log(result.response);
       } else if (!result.success && result.error) {
@@ -104,6 +101,8 @@ export const registerInvoke = (program: Command) => {
     .option('--stream', 'Stream response in real-time (TUI streams by default) [non-interactive]')
     .option('--tool <name>', 'MCP tool name (use with "call-tool" prompt) [non-interactive]')
     .option('--input <json>', 'MCP tool arguments as JSON (use with --tool) [non-interactive]')
+    .option('--exec', 'Execute a shell command in the runtime container [non-interactive]')
+    .option('--timeout <seconds>', 'Timeout in seconds for --exec commands [non-interactive]', parseInt)
     .option(
       '-H, --header <header>',
       'Custom header to forward to the agent (format: "Name: Value", repeatable) [non-interactive]',
@@ -124,6 +123,8 @@ export const registerInvoke = (program: Command) => {
           stream?: boolean;
           tool?: string;
           input?: string;
+          exec?: boolean;
+          timeout?: number;
           header?: string[];
           bearerToken?: string;
         }
@@ -147,6 +148,7 @@ export const registerInvoke = (program: Command) => {
             cliOptions.stream ||
             cliOptions.runtime ||
             cliOptions.tool ||
+            cliOptions.exec ||
             cliOptions.bearerToken
           ) {
             await handleInvokeCLI({
@@ -159,6 +161,8 @@ export const registerInvoke = (program: Command) => {
               stream: cliOptions.stream,
               tool: cliOptions.tool,
               input: cliOptions.input,
+              exec: cliOptions.exec,
+              timeout: cliOptions.timeout,
               headers,
               bearerToken: cliOptions.bearerToken,
             });

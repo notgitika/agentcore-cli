@@ -10,6 +10,10 @@ export interface InvokeOptions {
   tool?: string;
   /** MCP tool arguments as JSON string (used with --tool) */
   input?: string;
+  /** Execute a shell command in the runtime container instead of invoking the agent */
+  exec?: boolean;
+  /** Timeout in seconds for exec commands */
+  timeout?: number;
   /** Custom headers to forward to the agent runtime (key-value pairs) */
   headers?: Record<string, string>;
   /** Bearer token for CUSTOM_JWT auth (bypasses SigV4) */
@@ -23,6 +27,4 @@ export interface InvokeResult {
   response?: string;
   error?: string;
   logFilePath?: string;
-  /** Model provider (e.g., "Anthropic", "Bedrock") */
-  providerInfo?: string;
 }

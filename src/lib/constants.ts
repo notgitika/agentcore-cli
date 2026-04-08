@@ -59,7 +59,13 @@ export const START_HINTS: Record<ContainerRuntime, string> = {
 
 /**
  * Get the Dockerfile path for a given code location.
+ * @param codeLocation - Directory containing the Dockerfile
+ * @param dockerfile - Custom Dockerfile name (default: 'Dockerfile')
  */
-export function getDockerfilePath(codeLocation: string): string {
-  return join(codeLocation, DOCKERFILE_NAME);
+export function getDockerfilePath(codeLocation: string, dockerfile?: string): string {
+  const name = dockerfile ?? DOCKERFILE_NAME;
+  if (name.includes('/') || name.includes('\\') || name.includes('..')) {
+    throw new Error(`Invalid dockerfile name: must be a filename without path separators or traversal`);
+  }
+  return join(codeLocation, name);
 }

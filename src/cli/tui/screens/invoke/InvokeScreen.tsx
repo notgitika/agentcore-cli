@@ -18,25 +18,37 @@ interface InvokeScreenProps {
 
 type Mode = 'select-agent' | 'chat' | 'input' | 'token-input';
 
+interface ColoredLine {
+  text: string;
+  color?: string;
+}
+
 /**
- * Render conversation messages as a single string for scrolling.
+ * Render conversation as colored lines for scrolling.
+ * Each line carries its own color so that word-wrapping preserves it.
  */
-function formatConversation(messages: { role: 'user' | 'assistant'; content: string; isHint?: boolean }[]): string {
-  const lines: string[] = [];
+function formatConversation(
+  messages: { role: 'user' | 'assistant'; content: string; isHint?: boolean; isExec?: boolean }[]
+): ColoredLine[] {
+  const lines: ColoredLine[] = [];
 
   for (const msg of messages) {
     // Skip empty assistant messages (placeholder before streaming starts)
     if (msg.role === 'assistant' && !msg.content) continue;
 
-    if (msg.role === 'user') {
-      lines.push(`> ${msg.content}`);
+    if (msg.role === 'user' && msg.isExec) {
+      lines.push({ text: msg.content, color: 'magenta' });
+    } else if (msg.role === 'user') {
+      lines.push({ text: `> ${msg.content}`, color: 'blue' });
+    } else if (msg.isExec) {
+      lines.push({ text: msg.content });
     } else {
-      lines.push(msg.content);
+      lines.push({ text: msg.content, color: 'green' });
     }
-    lines.push(''); // blank line between messages
+    lines.push({ text: '', color: 'green' }); // blank line between messages
   }
 
-  return lines.join('\n');
+  return lines;
 }
 
 /**
@@ -81,14 +93,16 @@ function wrapLine(line: string, maxWidth: number): string[] {
 }
 
 /**
- * Wrap multi-line text to fit within maxWidth.
+ * Wrap colored lines for display, preserving color on continuation lines.
  */
-function wrapText(text: string, maxWidth: number): string[] {
-  if (!text) return [];
-  const lines = text.split('\n');
-  const wrapped: string[] = [];
-  for (const line of lines) {
-    wrapped.push(...wrapLine(line, maxWidth));
+function wrapColoredLines(lines: ColoredLine[], maxWidth: number): ColoredLine[] {
+  const wrapped: ColoredLine[] = [];
+  for (const { text, color } of lines) {
+    for (const subLine of text.split('\n')) {
+      for (const wrappedLine of wrapLine(subLine, maxWidth)) {
+        wrapped.push({ text: wrappedLine, color });
+      }
+    }
   }
   return wrapped;
 }
@@ -118,10 +132,13 @@ export function InvokeScreen({
     setBearerToken,
     fetchBearerToken,
     invoke,
+    execCommand,
     newSession,
     fetchMcpTools,
   } = useInvokeFlow({ initialSessionId, initialUserId, headers: initialHeaders, initialBearerToken });
   const [mode, setMode] = useState<Mode>('select-agent');
+  const [isExecInput, setIsExecInput] = useState(false);
+  const [execInputEmpty, setExecInputEmpty] = useState(true);
   const [scrollOffset, setScrollOffset] = useState(0);
   const [userScrolled, setUserScrolled] = useState(false);
   const { stdout } = useStdout();
@@ -181,11 +198,11 @@ export function InvokeScreen({
   const displayHeight = mode === 'input' ? Math.max(3, baseHeight - 2) : baseHeight;
   const contentWidth = Math.max(40, terminalWidth - 4);
 
-  // Format conversation content
-  const conversationText = useMemo(() => formatConversation(messages), [messages]);
+  // Format conversation content into colored lines
+  const coloredLines = useMemo(() => formatConversation(messages), [messages]);
 
-  // Wrap text for display
-  const lines = useMemo(() => wrapText(conversationText, contentWidth), [conversationText, contentWidth]);
+  // Wrap lines for display, preserving color on continuation lines
+  const lines = useMemo(() => wrapColoredLines(coloredLines, contentWidth), [coloredLines, contentWidth]);
 
   const totalLines = lines.length;
   const maxScroll = Math.max(0, totalLines - displayHeight);
@@ -343,9 +360,11 @@ export function InvokeScreen({
       : mode === 'token-input'
         ? 'Enter confirm · Esc skip'
         : mode === 'input'
-          ? isMcp
-            ? 'Enter send · Esc cancel · "list" to refresh tools'
-            : 'Enter send · Esc cancel'
+          ? isExecInput
+            ? 'Enter run · Esc cancel · Backspace to exit exec mode'
+            : isMcp
+              ? 'Enter send · Esc cancel · "list" to refresh tools · ! exec mode'
+              : 'Enter send · Esc cancel · ! exec mode'
           : phase === 'invoking'
             ? '↑↓ scroll'
             : messages.length > 0
@@ -430,20 +449,22 @@ export function InvokeScreen({
   const showThinking = phase === 'invoking' && lastMessage?.role === 'assistant' && !lastMessage.content;
 
   return (
-    <Screen title="AgentCore Invoke" onExit={onExit} helpText={helpText} headerContent={headerContent}>
+    <Screen
+      title="AgentCore Invoke"
+      onExit={onExit}
+      helpText={helpText}
+      headerContent={headerContent}
+      exitEnabled={mode !== 'input'}
+    >
       <Box flexDirection="column" flexGrow={1}>
         {/* Conversation display - always visible when there's content */}
         {messages.length > 0 && (
           <Box flexDirection="column" height={needsScroll ? displayHeight : undefined}>
-            {visibleLines.map((line, idx) => {
-              // Detect user messages (start with "> ")
-              const isUserMessage = line.startsWith('> ');
-              return (
-                <Text key={effectiveOffset + idx} color={isUserMessage ? 'blue' : 'green'} wrap="truncate">
-                  {line || ' '}
-                </Text>
-              );
-            })}
+            {visibleLines.map((line, idx) => (
+              <Text key={effectiveOffset + idx} color={line.color} wrap="truncate">
+                {line.text || ' '}
+              </Text>
+            ))}
             {/* Thinking indicator - shows while waiting for response to start */}
             {showThinking && <GradientText text="Thinking..." />}
           </Box>
@@ -464,7 +485,7 @@ export function InvokeScreen({
 
         {mode === 'chat' && phase === 'ready' && messages.length > 0 && (
           <Box>
-            <Text dimColor>&gt; </Text>
+            <Text dimColor>{isExecInput ? '! ' : '> '}</Text>
           </Box>
         )}
         {mode === 'chat' && phase === 'ready' && messages.length === 0 && (!isMcp || mcpToolsFetched) && (
@@ -495,31 +516,65 @@ export function InvokeScreen({
           </Box>
         )}
         {mode === 'input' && phase === 'ready' && (
-          <Box>
-            <Text color="blue">&gt; </Text>
-            <TextInput
-              prompt=""
-              hideArrow
-              placeholder={
-                isMcp ? 'tool_name {"arg": "value"}' : agentProtocol === 'A2A' ? 'Send a message...' : undefined
-              }
-              onSubmit={text => {
-                if (text.trim()) {
-                  setMode('chat');
-                  setUserScrolled(false);
-                  void invoke(text);
-                } else {
-                  setMode('chat');
+          <>
+            <Box>
+              <Text color={isExecInput ? 'magenta' : 'blue'}>{isExecInput ? '! ' : '> '}</Text>
+              <TextInput
+                prompt=""
+                hideArrow
+                placeholder={
+                  isExecInput
+                    ? undefined
+                    : isMcp
+                      ? 'tool_name {"arg": "value"}'
+                      : agentProtocol === 'A2A'
+                        ? 'Send a message...'
+                        : undefined
                 }
-              }}
-              onCancel={() => {
-                justCancelledRef.current = true;
-                setMode('chat');
-              }}
-              onUpArrow={() => scrollUp(1)}
-              onDownArrow={() => scrollDown(1)}
-            />
-          </Box>
+                onChange={(value, setValue) => {
+                  if (!isExecInput && value.startsWith('!')) {
+                    setIsExecInput(true);
+                    const rest = value.slice(1);
+                    setValue(rest);
+                    setExecInputEmpty(!rest);
+                  } else {
+                    setExecInputEmpty(!value);
+                  }
+                }}
+                onBackspaceEmpty={isExecInput ? () => setIsExecInput(false) : undefined}
+                onSubmit={text => {
+                  const trimmed = text.trim();
+                  if (trimmed) {
+                    setMode('chat');
+                    setUserScrolled(false);
+                    if (isExecInput) {
+                      void execCommand(trimmed);
+                    } else {
+                      void invoke(text);
+                    }
+                  } else if (!isExecInput) {
+                    setMode('chat');
+                  }
+                }}
+                onCancel={() => {
+                  if (isExecInput) {
+                    setIsExecInput(false);
+                  } else {
+                    justCancelledRef.current = true;
+                    setMode('chat');
+                  }
+                }}
+                onUpArrow={() => scrollUp(1)}
+                onDownArrow={() => scrollDown(1)}
+              />
+            </Box>
+            {isExecInput && execInputEmpty && (
+              <Text color="magenta" dimColor>
+                {' '}
+                Run a shell command in the runtime
+              </Text>
+            )}
+          </>
         )}
       </Box>
     </Screen>

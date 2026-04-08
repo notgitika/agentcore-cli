@@ -178,10 +178,19 @@ export type LifecycleConfiguration = z.infer<typeof LifecycleConfigurationSchema
 export const AgentEnvSpecSchema = z
   .object({
     name: AgentNameSchema,
+    /** Optional description for the runtime. */
+    description: z.string().max(200).optional(),
     build: BuildTypeSchema,
     entrypoint: EntrypointSchema,
     codeLocation: DirectoryPathSchema,
-    runtimeVersion: RuntimeVersionSchemaFromConstants,
+    /** Custom Dockerfile name for Container builds. Must be a filename, not a path. Default: 'Dockerfile' */
+    dockerfile: z
+      .string()
+      .min(1)
+      .max(255)
+      .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/, 'Must be a filename (no path separators or traversal)')
+      .optional(),
+    runtimeVersion: RuntimeVersionSchemaFromConstants.optional(),
     /** Environment variables to set on the runtime */
     envVars: z.array(EnvVarSchema).optional(),
     /** Network mode for the runtime. Defaults to PUBLIC. */
@@ -231,6 +240,14 @@ export const AgentEnvSpecSchema = z
         code: z.ZodIssueCode.custom,
         message: 'authorizerConfiguration is only allowed when authorizerType is CUSTOM_JWT',
         path: ['authorizerConfiguration'],
+      });
+    }
+    // If adding more Container-specific fields, consider consolidating into a containerConfig object (see networkConfig pattern)
+    if (data.build !== 'Container' && data.dockerfile) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'dockerfile is only allowed for Container builds',
+        path: ['dockerfile'],
       });
     }
   });

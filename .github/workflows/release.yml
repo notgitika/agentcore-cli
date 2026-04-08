@@ -317,7 +317,7 @@ jobs:
       - name: Ensure npm 11.5.1+ for trusted publishing
         run: |
           echo "Current npm version: $(npm --version)"
-          npm install -g npm@latest
+          npm install -g npm@11.5.1
           echo "Updated npm version: $(npm --version)"
 
       - name: Download artifacts

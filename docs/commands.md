@@ -505,20 +505,27 @@ agentcore invoke --json                      # JSON output
 
 # MCP protocol invoke
 agentcore invoke call-tool --tool myTool --input '{"key": "value"}'
+
+# Execute shell commands in the runtime container
+agentcore invoke --exec "ls -la /app"
+agentcore invoke --exec "python script.py" --timeout 120
+agentcore invoke --exec "cat /etc/os-release" --json
 ```
 
-| Flag                | Description                                              |
-| ------------------- | -------------------------------------------------------- |
-| `[prompt]`          | Prompt text (positional argument)                        |
-| `--prompt <text>`   | Prompt text (flag, takes precedence over positional)     |
-| `--agent <name>`    | Specific agent                                           |
-| `--target <name>`   | Deployment target                                        |
-| `--session-id <id>` | Continue a specific session                              |
-| `--user-id <id>`    | User ID for runtime invocation (default: `default-user`) |
-| `--stream`          | Stream response in real-time                             |
-| `--tool <name>`     | MCP tool name (use with `call-tool` prompt)              |
-| `--input <json>`    | MCP tool arguments as JSON (use with `--tool`)           |
-| `--json`            | JSON output                                              |
+| Flag                  | Description                                              |
+| --------------------- | -------------------------------------------------------- |
+| `[prompt]`            | Prompt text (positional argument)                        |
+| `--prompt <text>`     | Prompt text (flag, takes precedence over positional)     |
+| `--agent <name>`      | Specific agent                                           |
+| `--target <name>`     | Deployment target                                        |
+| `--session-id <id>`   | Continue a specific session                              |
+| `--user-id <id>`      | User ID for runtime invocation (default: `default-user`) |
+| `--stream`            | Stream response in real-time                             |
+| `--tool <name>`       | MCP tool name (use with `call-tool` prompt)              |
+| `--input <json>`      | MCP tool arguments as JSON (use with `--tool`)           |
+| `--exec`              | Execute a shell command in the runtime container         |
+| `--timeout <seconds>` | Timeout in seconds for `--exec` commands                 |
+| `--json`              | JSON output                                              |
 
 ---
 

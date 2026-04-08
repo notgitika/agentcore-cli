@@ -5,6 +5,7 @@ import {
   EvaluateCommand,
   type EvaluationReferenceInput,
   InvokeAgentRuntimeCommand,
+  InvokeAgentRuntimeCommandCommand,
   StopRuntimeSessionCommand,
 } from '@aws-sdk/client-bedrock-agentcore';
 import type { HttpRequest } from '@smithy/protocol-http';
@@ -326,9 +327,7 @@ export async function invokeAgentRuntimeStreaming(options: InvokeAgentRuntimeOpt
         buffer += decoded;
         fullResponse += decoded;
 
-        // Process complete lines from the buffer
         const lines = buffer.split('\n');
-        // Keep the last incomplete line in the buffer
         buffer = lines.pop() ?? '';
 
         for (const line of lines) {
@@ -824,8 +823,9 @@ export async function invokeA2ARuntime(options: A2AInvokeOptions, message: strin
 }
 
 /** Wrap a single string value as an AsyncGenerator for StreamingInvokeResult compatibility. */
+// eslint-disable-next-line @typescript-eslint/require-await
 async function* singleValueStream(value: string): AsyncGenerator<string, void, unknown> {
-  yield await Promise.resolve(value);
+  yield value;
 }
 
 /** Extract text content from A2A JSON-RPC response. Supports both kind:'text' and type:'text' part formats. */
@@ -903,4 +903,90 @@ export async function stopRuntimeSession(options: StopRuntimeSessionOptions): Pr
     sessionId: response.runtimeSessionId,
     statusCode: response.statusCode,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Execute Bash: Run shell commands in runtime containers
+// ---------------------------------------------------------------------------
+
+export interface ExecuteBashOptions {
+  region: string;
+  runtimeArn: string;
+  command: string;
+  sessionId?: string;
+  timeout?: number;
+  /** Custom headers to forward to the agent runtime */
+  headers?: Record<string, string>;
+  /** Bearer token for CUSTOM_JWT auth — not yet supported for exec, will throw */
+  bearerToken?: string;
+}
+
+export interface ExecuteBashStreamEvent {
+  type: 'start' | 'stdout' | 'stderr' | 'stop';
+  data?: string;
+  exitCode?: number;
+  status?: string;
+}
+
+export interface ExecuteBashResult {
+  stream: AsyncGenerator<ExecuteBashStreamEvent, void, unknown>;
+  sessionId: string | undefined;
+}
+
+/**
+ * Execute a shell command in a running AgentCore Runtime container.
+ * Returns a streaming result with stdout/stderr events and exit code.
+ */
+export async function executeBashCommand(options: ExecuteBashOptions): Promise<ExecuteBashResult> {
+  if (options.bearerToken) {
+    throw new Error('Bearer token auth for exec is not yet supported. Use SigV4 credentials.');
+  }
+
+  const client = createAgentCoreClient(options.region, options.headers);
+
+  const command = new InvokeAgentRuntimeCommandCommand({
+    agentRuntimeArn: options.runtimeArn,
+    runtimeSessionId: options.sessionId,
+    body: {
+      command: options.command,
+      ...(options.timeout != null ? { timeout: options.timeout } : {}),
+    },
+  });
+
+  const response = await client.send(command);
+  const sessionId = response.runtimeSessionId;
+
+  async function* streamEvents(): AsyncGenerator<ExecuteBashStreamEvent, void, unknown> {
+    if (!response.stream) {
+      throw new Error('No stream in response from AgentCore Runtime');
+    }
+    for await (const event of response.stream) {
+      // SDK types for InvokeAgentRuntimeCommandCommand stream events are not yet published — cast needed until SDK stabilizes
+      const chunk = (event as unknown as Record<string, unknown>).chunk as Record<string, unknown> | undefined;
+      if (!chunk || typeof chunk !== 'object') continue;
+
+      if (chunk.contentStart !== undefined) {
+        yield { type: 'start' };
+      }
+      const delta = chunk.contentDelta as { stdout?: string; stderr?: string } | undefined;
+      if (delta) {
+        if (delta.stdout) {
+          yield { type: 'stdout', data: delta.stdout };
+        }
+        if (delta.stderr) {
+          yield { type: 'stderr', data: delta.stderr };
+        }
+      }
+      const stop = chunk.contentStop as { exitCode?: number; status?: string } | undefined;
+      if (stop) {
+        yield {
+          type: 'stop',
+          exitCode: stop.exitCode,
+          status: stop.status,
+        };
+      }
+    }
+  }
+
+  return { stream: streamEvents(), sessionId };
 }

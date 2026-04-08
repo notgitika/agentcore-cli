@@ -1,8 +1,9 @@
+import { validateDockerfileInput } from '../types';
 import { useGenerateWizard } from '../useGenerateWizard';
 import { Text } from 'ink';
 import { render } from 'ink-testing-library';
 import React, { act, useImperativeHandle } from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Imperative harness — exposes wizard methods via ref for act()-based tests
@@ -20,7 +21,7 @@ const Harness = React.forwardRef<HarnessHandle, { initialName?: string }>((props
   return (
     <Text>
       step:{wizard.step} steps:{wizard.steps.join(',')} networkMode:{wizard.config.networkMode ?? 'undefined'}{' '}
-      advancedSelected:{String(wizard.advancedSelected)}
+      advancedSelected:{String(wizard.advancedSelected)} dockerfile:{wizard.config.dockerfile ?? 'undefined'}
     </Text>
   );
 });
@@ -89,12 +90,12 @@ describe('useGenerateWizard — advanced config gate', () => {
       });
     }
 
-    it('setAdvanced(false) jumps to confirm with PUBLIC defaults', () => {
+    it('setAdvanced([]) jumps to confirm with PUBLIC defaults', () => {
       const { ref, lastFrame } = setup();
       walkToAdvanced(ref);
       expect(lastFrame()).toContain('step:advanced');
 
-      act(() => ref.current!.wizard.setAdvanced(false));
+      act(() => ref.current!.wizard.setAdvanced([]));
 
       const frame = lastFrame()!;
       expect(frame).toContain('step:confirm');
@@ -102,22 +103,28 @@ describe('useGenerateWizard — advanced config gate', () => {
       expect(frame).toContain('advancedSelected:false');
     });
 
-    it('setAdvanced(true) navigates to networkMode', () => {
+    it('setAdvanced with network selected navigates to networkMode', () => {
+      vi.useFakeTimers();
       const { ref, lastFrame } = setup();
       walkToAdvanced(ref);
 
-      act(() => ref.current!.wizard.setAdvanced(true));
+      act(() => ref.current!.wizard.setAdvanced(['network', 'headers', 'auth', 'lifecycle']));
+      // Flush setTimeout used for navigating to first sub-step
+      act(() => {
+        vi.runAllTimers();
+      });
 
       const frame = lastFrame()!;
       expect(frame).toContain('step:networkMode');
       expect(frame).toContain('advancedSelected:true');
+      vi.useRealTimers();
     });
 
-    it('setAdvanced(true) injects networkMode and requestHeaderAllowlist into steps', () => {
+    it('setAdvanced with settings injects sub-steps after advanced', () => {
       const { ref } = setup();
       walkToAdvanced(ref);
 
-      act(() => ref.current!.wizard.setAdvanced(true));
+      act(() => ref.current!.wizard.setAdvanced(['network', 'headers', 'auth', 'lifecycle']));
 
       const steps = ref.current!.wizard.steps;
       const advIdx = steps.indexOf('advanced');
@@ -132,11 +139,11 @@ describe('useGenerateWizard — advanced config gate', () => {
       ]);
     });
 
-    it('setAdvanced(true) then VPC injects subnets and securityGroups', () => {
+    it('network setting with VPC injects subnets and securityGroups', () => {
       const { ref } = setup();
       walkToAdvanced(ref);
 
-      act(() => ref.current!.wizard.setAdvanced(true));
+      act(() => ref.current!.wizard.setAdvanced(['network', 'headers', 'auth', 'lifecycle']));
       act(() => ref.current!.wizard.setNetworkMode('VPC'));
 
       const steps = ref.current!.wizard.steps;
@@ -156,7 +163,7 @@ describe('useGenerateWizard — advanced config gate', () => {
   });
 
   describe('state cleanup on toggle', () => {
-    function walkToAdvancedAndSelectYes(ref: React.RefObject<HarnessHandle | null>) {
+    function walkToAdvancedAndSelectSettings(ref: React.RefObject<HarnessHandle | null>) {
       act(() => {
         ref.current!.wizard.setProjectName('Test');
         ref.current!.wizard.setLanguage('Python');
@@ -166,18 +173,18 @@ describe('useGenerateWizard — advanced config gate', () => {
         ref.current!.wizard.setModelProvider('Bedrock');
         ref.current!.wizard.setMemory('none');
       });
-      act(() => ref.current!.wizard.setAdvanced(true));
+      act(() => ref.current!.wizard.setAdvanced(['network', 'headers', 'auth', 'lifecycle']));
       act(() => ref.current!.wizard.setNetworkMode('VPC'));
       act(() => ref.current!.wizard.setSubnets(['subnet-123']));
       act(() => ref.current!.wizard.setSecurityGroups(['sg-456']));
     }
 
-    it('switching from Yes to No clears VPC config', () => {
+    it('switching to empty selection clears VPC config', () => {
       const { ref } = setup();
-      walkToAdvancedAndSelectYes(ref);
+      walkToAdvancedAndSelectSettings(ref);
 
-      // Now go back and select No
-      act(() => ref.current!.wizard.setAdvanced(false));
+      // Now go back and deselect all
+      act(() => ref.current!.wizard.setAdvanced([]));
 
       const w = ref.current!.wizard;
       expect(w.step).toBe('confirm');
@@ -191,9 +198,9 @@ describe('useGenerateWizard — advanced config gate', () => {
 
     it('config subnets and securityGroups are cleared to undefined', () => {
       const { ref } = setup();
-      walkToAdvancedAndSelectYes(ref);
+      walkToAdvancedAndSelectSettings(ref);
 
-      act(() => ref.current!.wizard.setAdvanced(false));
+      act(() => ref.current!.wizard.setAdvanced([]));
 
       expect(ref.current!.wizard.config.subnets).toBeUndefined();
       expect(ref.current!.wizard.config.securityGroups).toBeUndefined();
@@ -272,6 +279,112 @@ describe('useGenerateWizard — advanced config gate', () => {
     });
   });
 
+  describe('dockerfile advanced setting', () => {
+    function walkToAdvancedWithContainer(ref: React.RefObject<HarnessHandle | null>) {
+      act(() => {
+        ref.current!.wizard.setProjectName('Test');
+        ref.current!.wizard.setLanguage('Python');
+        ref.current!.wizard.setBuildType('Container');
+        ref.current!.wizard.setProtocol('HTTP');
+        ref.current!.wizard.setSdk('Strands');
+        ref.current!.wizard.setModelProvider('Bedrock');
+        ref.current!.wizard.setMemory('none');
+      });
+    }
+
+    it('setAdvanced with only dockerfile navigates to dockerfile step', () => {
+      vi.useFakeTimers();
+      const { ref, lastFrame } = setup();
+      walkToAdvancedWithContainer(ref);
+      expect(lastFrame()).toContain('step:advanced');
+
+      act(() => ref.current!.wizard.setAdvanced(['dockerfile']));
+      act(() => {
+        vi.runAllTimers();
+      });
+
+      expect(lastFrame()).toContain('step:dockerfile');
+      vi.useRealTimers();
+    });
+
+    it('setDockerfile navigates to confirm when only dockerfile is selected', () => {
+      vi.useFakeTimers();
+      const { ref, lastFrame } = setup();
+      walkToAdvancedWithContainer(ref);
+
+      act(() => ref.current!.wizard.setAdvanced(['dockerfile']));
+      act(() => {
+        vi.runAllTimers();
+      });
+      expect(lastFrame()).toContain('step:dockerfile');
+
+      act(() => ref.current!.wizard.setDockerfile('Dockerfile.gpu'));
+      act(() => {
+        vi.runAllTimers();
+      });
+
+      expect(lastFrame()).toContain('step:confirm');
+      expect(lastFrame()).toContain('dockerfile:Dockerfile.gpu');
+      vi.useRealTimers();
+    });
+
+    it('dockerfile + lifecycle injects both sub-steps but not networkMode', () => {
+      const { ref } = setup();
+      walkToAdvancedWithContainer(ref);
+
+      act(() => ref.current!.wizard.setAdvanced(['dockerfile', 'lifecycle']));
+
+      const steps = ref.current!.wizard.steps;
+      const advIdx = steps.indexOf('advanced');
+      expect(steps.slice(advIdx)).toEqual(['advanced', 'dockerfile', 'idleTimeout', 'maxLifetime', 'confirm']);
+      expect(steps).not.toContain('networkMode');
+    });
+
+    it('dockerfile is hidden for CodeZip builds even when selected', () => {
+      const { ref } = setup();
+      // Use CodeZip (default from walkToAdvanced)
+      act(() => {
+        ref.current!.wizard.setProjectName('Test');
+        ref.current!.wizard.setLanguage('Python');
+        ref.current!.wizard.setBuildType('CodeZip');
+        ref.current!.wizard.setProtocol('HTTP');
+        ref.current!.wizard.setSdk('Strands');
+        ref.current!.wizard.setModelProvider('Bedrock');
+        ref.current!.wizard.setMemory('none');
+      });
+
+      // Even if dockerfile somehow gets into the set, it shouldn't appear for CodeZip
+      act(() => ref.current!.wizard.setAdvanced(['dockerfile', 'lifecycle']));
+
+      const steps = ref.current!.wizard.steps;
+      expect(steps).not.toContain('dockerfile');
+      expect(steps).toContain('idleTimeout');
+    });
+
+    it('deselecting all advanced clears dockerfile config', () => {
+      vi.useFakeTimers();
+      const { ref } = setup();
+      walkToAdvancedWithContainer(ref);
+
+      act(() => ref.current!.wizard.setAdvanced(['dockerfile']));
+      act(() => {
+        vi.runAllTimers();
+      });
+      act(() => ref.current!.wizard.setDockerfile('Dockerfile.gpu'));
+      act(() => {
+        vi.runAllTimers();
+      });
+      expect(ref.current!.wizard.config.dockerfile).toBe('Dockerfile.gpu');
+
+      // Go back and deselect all
+      act(() => ref.current!.wizard.setAdvanced([]));
+
+      expect(ref.current!.wizard.config.dockerfile).toBeUndefined();
+      expect(ref.current!.wizard.step).toBe('confirm');
+      vi.useRealTimers();
+    });
+  });
+
   describe('reset clears advancedSelected', () => {
     it('reset returns advancedSelected to false', () => {
       const { ref, lastFrame } = setup();
@@ -283,7 +396,7 @@ describe('useGenerateWizard — advanced config gate', () => {
         ref.current!.wizard.setSdk('Strands');
         ref.current!.wizard.setModelProvider('Bedrock');
         ref.current!.wizard.setMemory('none');
-        ref.current!.wizard.setAdvanced(true);
+        ref.current!.wizard.setAdvanced(['network']);
       });
       expect(lastFrame()).toContain('advancedSelected:true');
 
@@ -291,5 +404,34 @@ describe('useGenerateWizard — advanced config gate', () => {
 
       expect(lastFrame()).toContain('advancedSelected:false');
     });
+  });
+});
+
+describe('validateDockerfileInput', () => {
+  it('accepts empty string (use default)', () => {
+    expect(validateDockerfileInput('')).toBe(true);
+    expect(validateDockerfileInput('  ')).toBe(true);
+  });
+
+  it.each(['Dockerfile', 'Dockerfile.gpu', 'Dockerfile.dev-v2', 'my.Dockerfile'])(
+    'accepts valid filename "%s"',
+    name => {
+      expect(validateDockerfileInput(name)).toBe(true);
+    }
+  );
+
+  it('accepts path input (delegates existence check to caller)', () => {
+    expect(validateDockerfileInput('../shared/Dockerfile.gpu')).toBe(true);
+    expect(validateDockerfileInput('/absolute/path/Dockerfile')).toBe(true);
+  });
+
+  it('rejects name exceeding 255 characters', () => {
+    const longName = 'D' + 'a'.repeat(255);
+    expect(validateDockerfileInput(longName)).toContain('255 characters');
+  });
+
+  it.each(['.hidden', '-bad', '_under'])('rejects invalid filename "%s"', name => {
+    const result = validateDockerfileInput(name);
+    expect(result).not.toBe(true);
   });
 });

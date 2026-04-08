@@ -1,5 +1,6 @@
 import { findConfigRoot, readEnvFile } from '../../../lib';
 import type { AgentCoreProjectSpec, ProtocolMode } from '../../../schema';
+import { detectContainerRuntime } from '../../external-requirements';
 import { DevLogger } from '../../logging/dev-logger';
 import {
   type A2AAgentCard,
@@ -23,6 +24,7 @@ import {
 } from '../../operations/dev';
 import { getGatewayEnvVars } from '../../operations/dev/gateway-env.js';
 import { formatMcpToolList } from '../../operations/dev/utils';
+import { spawn } from 'child_process';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type ServerStatus = 'starting' | 'running' | 'error' | 'stopped';
@@ -37,6 +39,7 @@ export interface ConversationMessage {
   content: string;
   isError?: boolean;
   isHint?: boolean;
+  isExec?: boolean;
 }
 
 const MAX_LOG_ENTRIES = 50;
@@ -385,6 +388,98 @@ export function useDevServer(options: {
     }
   };
 
+  const runSpawnCommand = async (
+    spawnBinary: string,
+    spawnArgs: string[],
+    spawnOpts: { cwd?: string; env?: NodeJS.ProcessEnv },
+    label: string,
+    prefix: string,
+    command: string,
+    onStart?: () => void
+  ) => {
+    setConversation(prev => [...prev, { role: 'user', content: `${prefix} ${command}`, isExec: true }]);
+    setStreamingResponse(null);
+    setIsStreaming(true);
+    onStart?.();
+
+    let output = '';
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn(spawnBinary, spawnArgs, { stdio: 'pipe', ...spawnOpts });
+
+        child.stdout?.on('data', (data: Buffer) => {
+          output += data.toString();
+          setStreamingResponse(output);
+        });
+
+        child.stderr?.on('data', (data: Buffer) => {
+          output += data.toString();
+          setStreamingResponse(output);
+        });
+
+        child.on('error', reject);
+        child.on('close', code => {
+          if (code !== 0 && code !== null) {
+            output += `\n[exit code: ${code}]`;
+            setStreamingResponse(output);
+          }
+          resolve();
+        });
+      });
+
+      setConversation(prev => [...prev, { role: 'assistant', content: output || '(no output)', isExec: true }]);
+      setStreamingResponse(null);
+      loggerRef.current?.log('system', `${label}: ${command}`);
+      loggerRef.current?.log('response', output);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      addLog('error', `${label} failed: ${errMsg}`);
+      setConversation(prev => [...prev, { role: 'assistant', content: `Error: ${errMsg}`, isError: true }]);
+      setStreamingResponse(null);
+    } finally {
+      setIsStreaming(false);
+    }
+  };
+
+  const execCommand = async (command: string, onStart?: () => void) => {
+    await runSpawnCommand(
+      'bash',
+      ['-c', command],
+      { cwd: options.workingDir, env: { ...process.env, ...envVars } },
+      'exec',
+      '!',
+      command,
+      onStart
+    );
+  };
+
+  const execInContainer = async (command: string, onStart?: () => void) => {
+    const containerName = `agentcore-dev-${config?.agentName ?? ''}`.toLowerCase();
+    const detection = await detectContainerRuntime();
+    if (!detection.runtime) {
+      addLog('error', 'No container runtime found (docker, podman, or finch required)');
+      setConversation(prev => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: 'Error: No container runtime found (docker, podman, or finch required)',
+          isError: true,
+        },
+      ]);
+      return;
+    }
+    await runSpawnCommand(
+      detection.runtime.binary,
+      ['exec', containerName, 'bash', '-c', command],
+      {},
+      'container exec',
+      '!!',
+      command,
+      onStart
+    );
+  };
+
   const clearLogs = () => {
     setLogs([]);
     logsRef.current = [];
@@ -426,6 +521,9 @@ export function useDevServer(options: {
     configLoaded,
     actualPort,
     invoke,
+    execCommand,
+    execInContainer,
+    isContainer: config?.buildType === 'Container',
     clearLogs,
     clearConversation,
     restart,
@@ -433,7 +531,6 @@ export function useDevServer(options: {
     logFilePath: loggerRef.current?.getRelativeLogPath(),
     hasMemory: (project?.memories?.length ?? 0) > 0,
     hasVpc: project?.runtimes.find(a => a.name === config?.agentName)?.networkMode === 'VPC',
-    modelProvider: undefined,
     protocol,
     mcpTools,
     fetchMcpTools,

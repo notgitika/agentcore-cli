@@ -1,21 +1,75 @@
 import { handleImport } from './actions';
+import { ANSI } from './constants';
+import { registerImportEvaluator } from './import-evaluator';
+import { registerImportMemory } from './import-memory';
+import { registerImportOnlineEval } from './import-online-eval';
+import { registerImportRuntime } from './import-runtime';
 import type { Command } from '@commander-js/extra-typings';
 import * as fs from 'node:fs';
 
-const green = '\x1b[32m';
-const yellow = '\x1b[33m';
-const cyan = '\x1b[36m';
-const dim = '\x1b[2m';
-const reset = '\x1b[0m';
+const { green, yellow, cyan, dim, reset } = ANSI;
 
 export const registerImport = (program: Command) => {
-  program
+  const importCmd = program
     .command('import')
-    .description('Import resources from a Bedrock AgentCore Starter Toolkit project')
-    .requiredOption('--source <path>', 'Path to the .bedrock_agentcore.yaml configuration file')
+    .description('Import a runtime, memory, or starter toolkit into this project. [experimental]');
+
+  // Existing YAML flow: agentcore import --source <path>
+  importCmd
+    .option('--source <path>', 'Path to the .bedrock_agentcore.yaml configuration file')
     .option('--target <target>', 'Deployment target name (only needed if project has multiple targets)')
     .option('-y, --yes', 'Auto-confirm prompts')
-    .action(async (cliOptions: { source: string; target?: string; yes?: boolean }) => {
+    .action(async (cliOptions: { source?: string; target?: string; yes?: boolean }) => {
+      if (!cliOptions.source) {
+        // No --source and no subcommand — launch interactive TUI
+        const { requireProject } = await import('../../tui/guards/project');
+        requireProject();
+        const { render } = await import('ink');
+        const React = await import('react');
+        const { ImportFlow } = await import('../../tui/screens/import');
+        const inkRef: { current?: { clear: () => void; unmount: () => void } } = {};
+
+        const exitTui = () => {
+          inkRef.current?.clear();
+          inkRef.current?.unmount();
+        };
+
+        const navigateTo = async (command: string) => {
+          exitTui();
+          if (command === 'deploy') {
+            const { DeployScreen } = await import('../../tui/screens/deploy/DeployScreen');
+            const deployInstance = render(
+              React.createElement(DeployScreen, {
+                isInteractive: false,
+                onExit: () => {
+                  deployInstance.unmount();
+                  process.exit(0);
+                },
+              })
+            );
+          } else if (command === 'status') {
+            const { StatusScreen } = await import('../../tui/screens/status/StatusScreen');
+            const statusInstance = render(
+              React.createElement(StatusScreen, {
+                isInteractive: false,
+                onExit: () => {
+                  statusInstance.unmount();
+                  process.exit(0);
+                },
+              })
+            );
+          }
+        };
+
+        inkRef.current = render(
+          React.createElement(ImportFlow, {
+            onBack: exitTui,
+            onNavigate: (command: string) => void navigateTo(command),
+          })
+        );
+        return;
+      }
+
       // Validate source file exists
       if (!fs.existsSync(cliOptions.source)) {
         console.error(`\x1b[31m[error]${reset} Source file not found: ${cliOptions.source}`);
@@ -92,4 +146,10 @@ export const registerImport = (program: Command) => {
         process.exit(1);
       }
     });
+
+  // Register subcommands for importing individual resource types from AWS
+  registerImportRuntime(importCmd);
+  registerImportMemory(importCmd);
+  registerImportEvaluator(importCmd);
+  registerImportOnlineEval(importCmd);
 };

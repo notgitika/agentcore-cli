@@ -46,7 +46,8 @@ interface AgentEnvSpec {
   build: BuildType;
   entrypoint: string; // @regex ^[a-zA-Z0-9_][a-zA-Z0-9_/.-]*\.(py|ts|js)(:[a-zA-Z_][a-zA-Z0-9_]*)?$ e.g. "main.py:handler" or "index.ts"
   codeLocation: string; // Directory path
-  runtimeVersion: RuntimeVersion;
+  dockerfile?: string; // Custom Dockerfile name for Container builds (default: 'Dockerfile'). Must be a filename, not a path.
+  runtimeVersion?: RuntimeVersion;
   envVars?: EnvVar[];
   networkMode?: NetworkMode; // default 'PUBLIC'
   networkConfig?: NetworkConfig; // Required when networkMode is 'VPC'

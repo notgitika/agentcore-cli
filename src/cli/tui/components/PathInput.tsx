@@ -17,6 +17,12 @@ interface PathInputProps {
   maxVisibleItems?: number;
   /** Allow the final path segment to not exist (for create workflows). Parent directory must still exist. */
   allowCreate?: boolean;
+  /** Show hidden files (dotfiles) in completions (default: false) */
+  showHidden?: boolean;
+  /** Allow empty input (user presses Enter without selecting a file) */
+  allowEmpty?: boolean;
+  /** Message shown when user submits empty input (only if allowEmpty is true) */
+  emptyHelpText?: string;
 }
 
 interface CompletionItem {
@@ -37,7 +43,7 @@ function parsePath(input: string, basePath: string): { dir: string; prefix: stri
   return { dir, prefix };
 }
 
-function getCompletions(input: string, basePath: string, pathType: PathType): CompletionItem[] {
+function getCompletions(input: string, basePath: string, pathType: PathType, showHidden = false): CompletionItem[] {
   try {
     const { dir, prefix } = parsePath(input, basePath);
     const entries = readdirSync(dir, { withFileTypes: true });
@@ -45,7 +51,7 @@ function getCompletions(input: string, basePath: string, pathType: PathType): Co
     const items = entries
       .filter(entry => {
         if (!entry.name.toLowerCase().startsWith(prefix.toLowerCase())) return false;
-        if (entry.name.startsWith('.')) return false;
+        if (!showHidden && entry.name.startsWith('.')) return false;
         if (pathType === 'directory' && !entry.isDirectory()) return false;
         return true;
       })
@@ -130,6 +136,9 @@ export function PathInput({
   pathType = 'file',
   maxVisibleItems = 8,
   allowCreate = false,
+  showHidden = false,
+  allowEmpty = false,
+  emptyHelpText,
 }: PathInputProps) {
   const [value, setValue] = useState(initialValue);
   const [cursor, setCursor] = useState(initialValue.length);
@@ -137,7 +146,7 @@ export function PathInput({
   const [error, setError] = useState<string | null>(null);
 
   // Get live completions based on current value
-  const matches = getCompletions(value, basePath, pathType);
+  const matches = getCompletions(value, basePath, pathType, showHidden);
 
   // Calculate viewport for scrolling
   const totalItems = matches.length;
@@ -204,6 +213,10 @@ export function PathInput({
     if (key.return) {
       const trimmed = value.trim();
       if (!trimmed) {
+        if (allowEmpty) {
+          onSubmit('');
+          return;
+        }
         setError('Please enter a path');
         return;
       }
@@ -319,8 +332,9 @@ export function PathInput({
       )}
 
       {/* Help text */}
-      <Box marginTop={1}>
+      <Box marginTop={1} flexDirection="column">
         <Text dimColor>↑↓ move → open ← back Enter submit Esc cancel</Text>
+        {allowEmpty && emptyHelpText && !value && <Text dimColor>{emptyHelpText}</Text>}
       </Box>
     </Box>
   );

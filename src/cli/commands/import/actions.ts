@@ -8,14 +8,10 @@ import type {
   Memory,
 } from '../../../schema';
 import { validateAwsCredentials } from '../../aws/account';
-import { LocalCdkProject } from '../../cdk/local-cdk-project';
-import { silentIoHost } from '../../cdk/toolkit-lib';
 import { ExecLogger } from '../../logging';
-import { bootstrapEnvironment, buildCdkProject, checkBootstrapNeeded, synthesizeCdk } from '../../operations/deploy';
 import { setupPythonProject } from '../../operations/python/setup';
-import { executePhase1, getDeployedTemplate } from './phase1-update';
-import { executePhase2, publishCdkAssets } from './phase2-import';
-import type { CfnTemplate } from './template-utils';
+import { executeCdkImportPipeline } from './import-pipeline';
+import { copyDirRecursive, fixPyprojectForSetuptools, toStackName } from './import-utils';
 import { findLogicalIdByProperty, findLogicalIdsByType } from './template-utils';
 import type { ImportResult, ParsedStarterToolkitConfig, ResourceToImport } from './types';
 import { parseStarterToolkitYaml } from './yaml-parser';
@@ -27,14 +23,6 @@ export interface ImportOptions {
   target?: string;
   yes?: boolean;
   onProgress?: (message: string) => void;
-}
-
-function sanitize(name: string): string {
-  return name.replace(/_/g, '-');
-}
-
-function toStackName(projectName: string, targetName: string): string {
-  return `AgentCore-${sanitize(projectName)}-${sanitize(targetName)}`;
 }
 
 /**
@@ -516,160 +504,114 @@ export async function handleImport(options: ImportOptions): Promise<ImportResult
     }
     logger.endStep('success');
 
-    // 8. Build and synth CDK to get the full template
-    logger.startStep('Build and synth CDK');
-    logger.log('Building CDK project...');
-    onProgress?.('Building CDK project...');
-    const cdkProject = new LocalCdkProject(projectRoot);
-    await buildCdkProject(cdkProject);
+    // 8-11. CDK build → synth → bootstrap → phase 1 → phase 2 → update state
+    logger.startStep('Build and import via CDK');
+    const progressFn =
+      onProgress ??
+      ((_msg: string) => {
+        /* no-op when caller doesn't provide onProgress */
+      });
 
-    logger.log('Synthesizing CloudFormation template...');
-    onProgress?.('Synthesizing CloudFormation template...');
-    const synthResult = await synthesizeCdk(cdkProject, { ioHost: silentIoHost });
-    const { toolkitWrapper } = synthResult;
+    const importedResources = [
+      ...agentsToImport
+        .filter(a => a.physicalAgentId)
+        .map(a => ({
+          type: 'runtime' as const,
+          name: a.name,
+          id: a.physicalAgentId!,
+          arn:
+            a.physicalAgentArn ??
+            `arn:aws:bedrock-agentcore:${target.region}:${target.account}:runtime/${a.physicalAgentId}`,
+        })),
+      ...memoriesToImport
+        .filter(m => m.physicalMemoryId)
+        .map(m => ({
+          type: 'memory' as const,
+          name: m.name,
+          id: m.physicalMemoryId!,
+          arn:
+            m.physicalMemoryArn ??
+            `arn:aws:bedrock-agentcore:${target.region}:${target.account}:memory/${m.physicalMemoryId}`,
+        })),
+    ];
 
-    // Read the synthesized template from the assembly directory
-    const synthInfo = await toolkitWrapper.synth();
-    const assemblyDirectory = synthInfo.assemblyDirectory;
-    const synthTemplatePath = path.join(assemblyDirectory, `${stackName}.template.json`);
-
-    let synthTemplate: CfnTemplate;
-    try {
-      synthTemplate = JSON.parse(fs.readFileSync(synthTemplatePath, 'utf-8')) as CfnTemplate;
-    } catch (_err) {
-      // Try without stack name prefix
-      const files = fs.readdirSync(assemblyDirectory).filter((f: string) => f.endsWith('.template.json'));
-      if (files.length === 0) {
-        await toolkitWrapper.dispose();
-        await rollbackConfig();
-        const error = 'No CloudFormation template found in CDK assembly';
-        logger.endStep('error', error);
-        logger.finalize(false);
-        return { success: false, error, logPath: logger.getRelativeLogPath() };
-      }
-      synthTemplate = JSON.parse(fs.readFileSync(path.join(assemblyDirectory, files[0]!), 'utf-8')) as CfnTemplate;
-    }
-
-    // 8b. Check CDK bootstrap and auto-bootstrap if needed (before disposing toolkit wrapper)
-    logger.log('Checking CDK bootstrap status...');
-    onProgress?.('Checking CDK bootstrap status...');
-    const bootstrapCheck = await checkBootstrapNeeded([target]);
-    if (bootstrapCheck.needsBootstrap) {
-      logger.log('AWS environment not bootstrapped. Bootstrapping...');
-      onProgress?.('AWS environment not bootstrapped. Bootstrapping...');
-      await bootstrapEnvironment(toolkitWrapper, target);
-      logger.log('CDK bootstrap complete');
-      onProgress?.('CDK bootstrap complete');
-    }
-
-    await toolkitWrapper.dispose();
-    logger.endStep('success');
-
-    // 8c. Publish CDK assets to S3 (source zips needed by CodeBuild during Phase 1)
-    logger.startStep('Publish CDK assets');
-    logger.log('Publishing CDK assets to S3...');
-    onProgress?.('Publishing CDK assets to S3...');
-    await publishCdkAssets(assemblyDirectory, target.region, onProgress);
-    logger.endStep('success');
-
-    // 9. Phase 1: UPDATE — deploy companion resources
-    logger.startStep('Phase 1: Deploy companion resources');
-    logger.log('Phase 1: Deploying companion resources (IAM roles, policies)...');
-    onProgress?.('Phase 1: Deploying companion resources (IAM roles, policies)...');
-    const phase1Result = await executePhase1({
-      region: target.region,
+    const pipelineResult = await executeCdkImportPipeline({
+      projectRoot,
       stackName,
-      synthTemplate,
-      onProgress,
+      target,
+      configIO,
+      targetName,
+      onProgress: progressFn,
+      buildResourcesToImport: synthTemplate => {
+        const resourcesToImport: ResourceToImport[] = [];
+
+        for (const agent of agentsToImport) {
+          const runtimeLogicalIds = findLogicalIdsByType(synthTemplate, 'AWS::BedrockAgentCore::Runtime');
+          let logicalId: string | undefined;
+
+          const expectedRuntimeName = `${projectName}_${agent.name}`;
+          logicalId = findLogicalIdByProperty(
+            synthTemplate,
+            'AWS::BedrockAgentCore::Runtime',
+            'AgentRuntimeName',
+            expectedRuntimeName
+          );
+
+          if (!logicalId && runtimeLogicalIds.length === 1) {
+            logicalId = runtimeLogicalIds[0];
+          }
+
+          if (!logicalId) {
+            logger.log(`Warning: Could not find logical ID for agent ${agent.name}, skipping`, 'warn');
+            progressFn(`Warning: Could not find logical ID for agent ${agent.name}, skipping`);
+            continue;
+          }
+
+          resourcesToImport.push({
+            resourceType: 'AWS::BedrockAgentCore::Runtime',
+            logicalResourceId: logicalId,
+            resourceIdentifier: { AgentRuntimeId: agent.physicalAgentId! },
+          });
+        }
+
+        for (const memory of memoriesToImport) {
+          const memoryLogicalIds = findLogicalIdsByType(synthTemplate, 'AWS::BedrockAgentCore::Memory');
+          let logicalId: string | undefined;
+
+          logicalId = findLogicalIdByProperty(synthTemplate, 'AWS::BedrockAgentCore::Memory', 'Name', memory.name);
+
+          // CDK prefixes memory names with the project name (e.g. "myproject_Agent_mem"),
+          // so also try matching with the project name prefix.
+          if (!logicalId) {
+            const prefixedName = `${projectName}_${memory.name}`;
+            logicalId = findLogicalIdByProperty(synthTemplate, 'AWS::BedrockAgentCore::Memory', 'Name', prefixedName);
+          }
+
+          if (!logicalId && memoryLogicalIds.length === 1) {
+            logicalId = memoryLogicalIds[0];
+          }
+
+          if (!logicalId) {
+            logger.log(`Warning: Could not find logical ID for memory ${memory.name}, skipping`, 'warn');
+            progressFn(`Warning: Could not find logical ID for memory ${memory.name}, skipping`);
+            continue;
+          }
+
+          resourcesToImport.push({
+            resourceType: 'AWS::BedrockAgentCore::Memory',
+            logicalResourceId: logicalId,
+            resourceIdentifier: { MemoryId: memory.physicalMemoryId! },
+          });
+        }
+
+        return resourcesToImport;
+      },
+      deployedStateEntries: importedResources,
     });
 
-    if (!phase1Result.success) {
-      const error = `Phase 1 failed: ${phase1Result.error}`;
-      await rollbackConfig();
-      logger.endStep('error', error);
-      logger.finalize(false);
-      return { success: false, error, logPath: logger.getRelativeLogPath() };
-    }
-    logger.endStep('success');
-
-    // 10. Phase 2: IMPORT — adopt primary resources
-    logger.startStep('Phase 2: Import resources');
-    logger.log('Reading deployed template...');
-    onProgress?.('Reading deployed template...');
-    const deployedTemplate = await getDeployedTemplate(target.region, stackName);
-    if (!deployedTemplate) {
-      const error = 'Could not read deployed template after Phase 1';
-      await rollbackConfig();
-      logger.endStep('error', error);
-      logger.finalize(false);
-      return { success: false, error, logPath: logger.getRelativeLogPath() };
-    }
-
-    // Build ResourcesToImport list
-    const resourcesToImport: ResourceToImport[] = [];
-
-    for (const agent of agentsToImport) {
-      const runtimeLogicalIds = findLogicalIdsByType(synthTemplate, 'AWS::BedrockAgentCore::Runtime');
-      let logicalId: string | undefined;
-
-      const expectedRuntimeName = `${projectName}_${agent.name}`;
-      logicalId = findLogicalIdByProperty(
-        synthTemplate,
-        'AWS::BedrockAgentCore::Runtime',
-        'AgentRuntimeName',
-        expectedRuntimeName
-      );
-
-      if (!logicalId && runtimeLogicalIds.length === 1) {
-        logicalId = runtimeLogicalIds[0];
-      }
-
-      if (!logicalId) {
-        logger.log(`Warning: Could not find logical ID for agent ${agent.name}, skipping`, 'warn');
-        onProgress?.(`Warning: Could not find logical ID for agent ${agent.name}, skipping`);
-        continue;
-      }
-
-      resourcesToImport.push({
-        resourceType: 'AWS::BedrockAgentCore::Runtime',
-        logicalResourceId: logicalId,
-        resourceIdentifier: { AgentRuntimeId: agent.physicalAgentId! },
-      });
-    }
-
-    for (const memory of memoriesToImport) {
-      const memoryLogicalIds = findLogicalIdsByType(synthTemplate, 'AWS::BedrockAgentCore::Memory');
-      let logicalId: string | undefined;
-
-      logicalId = findLogicalIdByProperty(synthTemplate, 'AWS::BedrockAgentCore::Memory', 'Name', memory.name);
-
-      // CDK prefixes memory names with the project name (e.g. "myproject_Agent_mem"),
-      // so also try matching with the project name prefix.
-      if (!logicalId) {
-        const prefixedName = `${projectName}_${memory.name}`;
-        logicalId = findLogicalIdByProperty(synthTemplate, 'AWS::BedrockAgentCore::Memory', 'Name', prefixedName);
-      }
-
-      if (!logicalId && memoryLogicalIds.length === 1) {
-        logicalId = memoryLogicalIds[0];
-      }
-
-      if (!logicalId) {
-        logger.log(`Warning: Could not find logical ID for memory ${memory.name}, skipping`, 'warn');
-        onProgress?.(`Warning: Could not find logical ID for memory ${memory.name}, skipping`);
-        continue;
-      }
-
-      resourcesToImport.push({
-        resourceType: 'AWS::BedrockAgentCore::Memory',
-        logicalResourceId: logicalId,
-        resourceIdentifier: { MemoryId: memory.physicalMemoryId! },
-      });
-    }
-
-    if (resourcesToImport.length === 0) {
+    if (pipelineResult.noResources) {
       logger.log('No resources could be matched for import');
-      onProgress?.('No resources could be matched for import');
+      progressFn('No resources could be matched for import');
       logger.endStep('success');
       logger.finalize(true);
       return {
@@ -682,69 +624,13 @@ export async function handleImport(options: ImportOptions): Promise<ImportResult
       };
     }
 
-    logger.log(`Phase 2: Importing ${resourcesToImport.length} resource(s) via CloudFormation IMPORT...`);
-    onProgress?.(`Phase 2: Importing ${resourcesToImport.length} resource(s) via CloudFormation IMPORT...`);
-    const phase2Result = await executePhase2({
-      region: target.region,
-      stackName,
-      deployedTemplate,
-      synthTemplate,
-      resourcesToImport,
-      assemblyDirectory,
-      onProgress,
-    });
-
-    if (!phase2Result.success) {
-      const error = `Phase 2 failed: ${phase2Result.error}`;
+    if (!pipelineResult.success) {
+      const error = pipelineResult.error!;
       await rollbackConfig();
       logger.endStep('error', error);
       logger.finalize(false);
       return { success: false, error, logPath: logger.getRelativeLogPath() };
     }
-    logger.endStep('success');
-
-    // 11. Update deployed state
-    logger.startStep('Update deployed state');
-    logger.log('Updating deployed state...');
-    onProgress?.('Updating deployed state...');
-    /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any */
-    const existingState: any = await configIO.readDeployedState().catch(() => ({ targets: {} }));
-    const targetState = existingState.targets[targetName] ?? { resources: {} };
-    targetState.resources ??= {};
-    targetState.resources.stackName = stackName;
-
-    if (agentsToImport.length > 0) {
-      targetState.resources.runtimes ??= {};
-      for (const agent of agentsToImport) {
-        if (agent.physicalAgentId) {
-          targetState.resources.runtimes[agent.name] = {
-            runtimeId: agent.physicalAgentId,
-            runtimeArn:
-              agent.physicalAgentArn ??
-              `arn:aws:bedrock-agentcore:${target.region}:${target.account}:runtime/${agent.physicalAgentId}`,
-            roleArn: 'imported', // Placeholder — updated after agentcore deploy
-          };
-        }
-      }
-    }
-
-    if (memoriesToImport.length > 0) {
-      targetState.resources.memories ??= {};
-      for (const memory of memoriesToImport) {
-        if (memory.physicalMemoryId) {
-          targetState.resources.memories[memory.name] = {
-            memoryId: memory.physicalMemoryId,
-            memoryArn:
-              memory.physicalMemoryArn ??
-              `arn:aws:bedrock-agentcore:${target.region}:${target.account}:memory/${memory.physicalMemoryId}`,
-          };
-        }
-      }
-    }
-
-    existingState.targets[targetName] = targetState;
-    await configIO.writeDeployedState(existingState);
-    /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any */
     logger.endStep('success');
 
     logger.finalize(true);
@@ -762,55 +648,5 @@ export async function handleImport(options: ImportOptions): Promise<ImportResult
     logger.log(message, 'error');
     logger.finalize(false);
     return { success: false, error: message, logPath: logger.getRelativeLogPath() };
-  }
-}
-
-/**
- * Fix pyproject.toml for setuptools auto-discovery issues.
- * Starter toolkit projects may have multiple top-level directories (model/, mcp_client/)
- * which causes setuptools to refuse building. Adding `py-modules = []` tells setuptools
- * not to auto-discover packages.
- */
-function fixPyprojectForSetuptools(pyprojectPath: string): void {
-  if (!fs.existsSync(pyprojectPath)) return;
-
-  const content = fs.readFileSync(pyprojectPath, 'utf-8');
-
-  // Already has [tool.setuptools] section — don't touch it
-  if (content.includes('[tool.setuptools]')) return;
-
-  // Append the fix
-  fs.writeFileSync(pyprojectPath, content.trimEnd() + '\n\n[tool.setuptools]\npy-modules = []\n');
-}
-
-const COPY_EXCLUDE_DIRS = new Set([
-  '.venv',
-  '.git',
-  '__pycache__',
-  'node_modules',
-  '.pytest_cache',
-  '.bedrock_agentcore',
-  '.mypy_cache',
-  '.ruff_cache',
-]);
-
-/**
- * Recursively copy directory contents, skipping excluded directories and symlinks.
- */
-function copyDirRecursive(src: string, dest: string): void {
-  const entries = fs.readdirSync(src, { withFileTypes: true });
-  for (const entry of entries) {
-    if (entry.isSymbolicLink()) continue;
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-    if (entry.isDirectory()) {
-      if (COPY_EXCLUDE_DIRS.has(entry.name)) continue;
-      if (!fs.existsSync(destPath)) {
-        fs.mkdirSync(destPath, { recursive: true });
-      }
-      copyDirRecursive(srcPath, destPath);
-    } else {
-      fs.copyFileSync(srcPath, destPath);
-    }
   }
 }
