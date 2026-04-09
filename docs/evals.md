@@ -37,7 +37,7 @@ agentcore add evaluator
 agentcore add evaluator \
   --name ResponseQuality \
   --level SESSION \
-  --model us.anthropic.claude-sonnet-4-5-20250929-v1:0 \
+  --model us.anthropic.claude-sonnet-4-5-20250514-v1:0 \
   --instructions "Evaluate the agent response quality. Context: {context}" \
   --rating-scale 1-5-quality
 ```
@@ -106,12 +106,11 @@ Evaluators are stored in the `evaluators` array of `agentcore.json`:
 {
   "evaluators": [
     {
-      "type": "CustomEvaluator",
       "name": "ResponseQuality",
       "level": "SESSION",
       "config": {
         "llmAsAJudge": {
-          "model": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+          "model": "us.anthropic.claude-sonnet-4-5-20250514-v1:0",
           "instructions": "Evaluate the agent response quality. Context: {context}",
           "ratingScale": {
             "numerical": [
@@ -150,42 +149,42 @@ Run evaluators against historical agent traces.
 ```bash
 # Project mode — evaluate a project agent
 agentcore run eval \
-  --agent MyAgent \
+  --runtime MyAgent \
   --evaluator ResponseQuality \
   --days 7
 
 # Standalone mode — evaluate any agent by ARN
 agentcore run eval \
-  --agent-arn arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/abc123 \
+  --runtime-arn arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/abc123 \
   --evaluator-arn arn:aws:bedrock-agentcore:us-east-1:123456789012:evaluator/eval123 \
   --region us-east-1
 
 # Multiple evaluators
 agentcore run eval \
-  --agent MyAgent \
+  --runtime MyAgent \
   --evaluator ResponseQuality Builtin.Faithfulness \
   --days 14
 
 # Target specific session or trace
 agentcore run eval \
-  --agent MyAgent \
+  --runtime MyAgent \
   --evaluator ResponseQuality \
   --session-id abc123 \
   --days 7
 ```
 
-| Flag                         | Description                                              |
-| ---------------------------- | -------------------------------------------------------- |
-| `-a, --agent <name>`         | Agent name from project config                           |
-| `--agent-arn <arn>`          | Agent runtime ARN (standalone mode, no project required) |
-| `-e, --evaluator <names...>` | Evaluator name(s) from project or `Builtin.*` IDs        |
-| `--evaluator-arn <arns...>`  | Evaluator ARN(s) (use with `--agent-arn`)                |
-| `--region <region>`          | AWS region (required with `--agent-arn`)                 |
-| `-s, --session-id <id>`      | Evaluate a specific session only                         |
-| `-t, --trace-id <id>`        | Evaluate a specific trace only                           |
-| `--days <days>`              | Lookback window in days (default: 7)                     |
-| `--output <path>`            | Custom output file path                                  |
-| `--json`                     | JSON output                                              |
+| Flag                         | Description                                        |
+| ---------------------------- | -------------------------------------------------- |
+| `-r, --runtime <name>`       | Runtime name from project config                   |
+| `--runtime-arn <arn>`        | Runtime ARN (standalone mode, no project required) |
+| `-e, --evaluator <names...>` | Evaluator name(s) from project or `Builtin.*` IDs  |
+| `--evaluator-arn <arns...>`  | Evaluator ARN(s) (use with `--runtime-arn`)        |
+| `--region <region>`          | AWS region (required with `--runtime-arn`)         |
+| `-s, --session-id <id>`      | Evaluate a specific session only                   |
+| `-t, --trace-id <id>`        | Evaluate a specific trace only                     |
+| `--days <days>`              | Lookback window in days (default: 7)               |
+| `--output <path>`            | Custom output file path                            |
+| `--json`                     | JSON output                                        |
 
 > **Note**: Traces may take 5–10 minutes to appear after agent invocations. If a run returns no sessions, try increasing
 > `--days` or waiting for traces to propagate.
@@ -209,17 +208,17 @@ Results are saved locally and can be viewed in the TUI or CLI:
 agentcore evals history
 
 # Filter by agent
-agentcore evals history --agent MyAgent
+agentcore evals history --runtime MyAgent
 
 # JSON output
 agentcore evals history --json --limit 10
 ```
 
-| Flag                  | Description                   |
-| --------------------- | ----------------------------- |
-| `-a, --agent <name>`  | Filter by agent name          |
-| `-n, --limit <count>` | Max number of runs to display |
-| `--json`              | JSON output                   |
+| Flag                   | Description                   |
+| ---------------------- | ----------------------------- |
+| `-r, --runtime <name>` | Filter by runtime name        |
+| `-n, --limit <count>`  | Max number of runs to display |
+| `--json`               | JSON output                   |
 
 Results are stored in `agentcore/.cli/eval-runs/` within your project directory.
 
@@ -238,7 +237,7 @@ agentcore add online-eval
 # Non-interactive
 agentcore add online-eval \
   --name QualityMonitor \
-  --agent MyAgent \
+  --runtime MyAgent \
   --evaluator ResponseQuality Builtin.Faithfulness \
   --sampling-rate 10
 ```
@@ -246,7 +245,7 @@ agentcore add online-eval \
 | Flag                         | Description                                           |
 | ---------------------------- | ----------------------------------------------------- |
 | `--name <name>`              | Config name (alphanumeric + underscore, max 48 chars) |
-| `-a, --agent <name>`         | Agent to monitor                                      |
+| `-r, --runtime <name>`       | Runtime to monitor                                    |
 | `-e, --evaluator <names...>` | Evaluator name(s), `Builtin.*` IDs, or ARNs           |
 | `--evaluator-arn <arns...>`  | Evaluator ARN(s)                                      |
 | `--sampling-rate <rate>`     | Percentage of requests to evaluate (0.01–100)         |
@@ -272,7 +271,6 @@ Online eval configs are stored in the `onlineEvalConfigs` array of `agentcore.js
 {
   "onlineEvalConfigs": [
     {
-      "type": "OnlineEvaluationConfig",
       "name": "QualityMonitor",
       "agent": "MyAgent",
       "evaluators": ["ResponseQuality", "Builtin.Faithfulness"],
@@ -321,20 +319,20 @@ The TUI provides a dashboard for monitoring online eval results (`agentcore` →
 agentcore logs evals
 
 # Search historical logs
-agentcore logs evals --agent MyAgent --since 1h
+agentcore logs evals --runtime MyAgent --since 1h
 
 # JSON output
-agentcore logs evals --json --lines 100
+agentcore logs evals --json --limit 100
 ```
 
-| Flag                  | Description                                   |
-| --------------------- | --------------------------------------------- |
-| `-a, --agent <name>`  | Filter by agent                               |
-| `--since <time>`      | Start time (e.g. `1h`, `30m`, `2d`, ISO 8601) |
-| `--until <time>`      | End time (e.g. `now`, ISO 8601)               |
-| `-n, --lines <count>` | Maximum number of log lines                   |
-| `-f, --follow`        | Stream logs in real-time                      |
-| `--json`              | JSON Lines output                             |
+| Flag                   | Description                                   |
+| ---------------------- | --------------------------------------------- |
+| `-r, --runtime <name>` | Filter by runtime                             |
+| `--since <time>`       | Start time (e.g. `1h`, `30m`, `2d`, ISO 8601) |
+| `--until <time>`       | End time (e.g. `now`, ISO 8601)               |
+| `-n, --limit <count>`  | Maximum number of log lines                   |
+| `-f, --follow`         | Stream logs in real-time                      |
+| `--json`               | JSON Lines output                             |
 
 ---
 
@@ -359,7 +357,7 @@ AgentCore provides pre-built evaluators that can be used without creating custom
 by their `Builtin.*` ID in `--evaluator` flags or in online eval config `evaluators` arrays.
 
 ```bash
-agentcore run eval --agent MyAgent --evaluator Builtin.Faithfulness
+agentcore run eval --runtime MyAgent --evaluator Builtin.Faithfulness
 ```
 
 ---
@@ -370,7 +368,7 @@ agentcore run eval --agent MyAgent --evaluator Builtin.Faithfulness
 
 ```bash
 # Run eval and fail pipeline if score < threshold
-result=$(agentcore run eval --agent MyAgent --evaluator ResponseQuality --days 1 --json)
+result=$(agentcore run eval --runtime MyAgent --evaluator ResponseQuality --days 1 --json)
 score=$(echo "$result" | jq '.run.results[0].aggregateScore')
 if (( $(echo "$score < 0.7" | bc -l) )); then
   echo "Quality gate failed: score $score < 0.7"
@@ -385,16 +383,16 @@ fi
 agentcore add evaluator \
   --name ResponseQuality \
   --level SESSION \
-  --model us.anthropic.claude-sonnet-4-5-20250929-v1:0 \
+  --model us.anthropic.claude-sonnet-4-5-20250514-v1:0 \
   --instructions "Evaluate the agent response quality. Context: {context}"
 
 # 2. Run on-demand eval to verify
-agentcore run eval --agent MyAgent --evaluator ResponseQuality --days 7
+agentcore run eval --runtime MyAgent --evaluator ResponseQuality --days 7
 
 # 3. Set up continuous monitoring
 agentcore add online-eval \
   --name QualityMonitor \
-  --agent MyAgent \
+  --runtime MyAgent \
   --evaluator ResponseQuality \
   --sampling-rate 10
 
@@ -408,7 +406,7 @@ Evaluate agents and use evaluators outside of a project directory using ARNs:
 
 ```bash
 agentcore run eval \
-  --agent-arn arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/my-agent \
+  --runtime-arn arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/my-agent \
   --evaluator-arn arn:aws:bedrock-agentcore:us-east-1:123456789012:evaluator/my-eval \
   --region us-east-1 \
   --days 7

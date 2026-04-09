@@ -50,7 +50,7 @@ agentcore add gateway-target \
   --gateway my-gateway
 ```
 
-Supports outbound auth: `oauth`, `api-key`, or `none`.
+Supports outbound auth: `oauth` or `none`.
 
 ### API Gateway REST API (`api-gateway`)
 
@@ -137,12 +137,12 @@ agentcore add gateway \
   --discovery-url https://idp.example.com/.well-known/openid-configuration \
   --allowed-audience my-api \
   --allowed-clients my-client-id \
-  --agent-client-id agent-client-id \
-  --agent-client-secret agent-client-secret
+  --client-id agent-client-id \
+  --client-secret agent-client-secret
 ```
 
-When you provide `--agent-client-id` and `--agent-client-secret`, the CLI automatically creates a managed OAuth
-credential that your agent uses to obtain Bearer tokens at runtime.
+When you provide `--client-id` and `--client-secret`, the CLI automatically creates a managed OAuth credential that your
+agent uses to obtain Bearer tokens at runtime.
 
 ### Outbound Authentication
 
@@ -172,7 +172,7 @@ agentcore add gateway-target \
 You can also reference an existing credential:
 
 ```bash
-agentcore add identity \
+agentcore add credential \
   --name MyOAuthProvider \
   --type oauth \
   --discovery-url https://auth.example.com/.well-known/openid-configuration \
@@ -245,6 +245,28 @@ To get the correct code for your setup:
    ```bash
    agentcore remove agent --name TempAgent
    ```
+
+## Gateway Configuration Options
+
+Gateways support additional configuration fields in `agentcore.json`:
+
+| Field                  | Default | Description                                                      |
+| ---------------------- | ------- | ---------------------------------------------------------------- |
+| `enableSemanticSearch` | `true`  | Enable semantic search for tool discovery                        |
+| `exceptionLevel`       | `NONE`  | Exception verbosity: `"NONE"` or `"DEBUG"` (for troubleshooting) |
+
+```json
+{
+  "agentCoreGateways": [
+    {
+      "name": "MyGateway",
+      "enableSemanticSearch": false,
+      "exceptionLevel": "DEBUG",
+      "targets": [...]
+    }
+  ]
+}
+```
 
 ## Local Development
 

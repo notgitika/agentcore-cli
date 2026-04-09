@@ -1,6 +1,12 @@
 <div align="center">
   <h1>AgentCore CLI</h1>
-  <h2>Create, develop, and deploy AI agents to Amazon Bedrock AgentCore</h2>
+  <p><strong>Create, develop, and deploy AI agents to Amazon Bedrock AgentCore</strong></p>
+
+  <p>
+    <a href="https://github.com/aws/agentcore-cli/actions/workflows/build-and-test.yml"><img src="https://img.shields.io/github/actions/workflow/status/aws/agentcore-cli/build-and-test.yml?branch=main&label=build" alt="Build Status"></a>
+    <a href="https://www.npmjs.com/package/@aws/agentcore"><img src="https://img.shields.io/npm/v/@aws/agentcore" alt="npm version"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/aws/agentcore-cli" alt="License"></a>
+  </p>
 </div>
 
 ## Overview
@@ -60,17 +66,18 @@ agentcore invoke
 | ------------------- | ----------------------------- |
 | Strands Agents      | AWS-native, streaming support |
 | LangChain/LangGraph | Graph-based workflows         |
+| CrewAI              | Multi-agent orchestration     |
 | Google ADK          | Gemini models only            |
 | OpenAI Agents       | OpenAI models only            |
 
 ## Supported Model Providers
 
-| Provider       | API Key Required          | Default Model                 |
-| -------------- | ------------------------- | ----------------------------- |
-| Amazon Bedrock | No (uses AWS credentials) | claude-sonnet-4-5-20250929-v1 |
-| Anthropic      | Yes                       | claude-sonnet-4-5-20250929    |
-| Google Gemini  | Yes                       | gemini-2.5-flash              |
-| OpenAI         | Yes                       | gpt-4o                        |
+| Provider       | API Key Required          | Default Model                                |
+| -------------- | ------------------------- | -------------------------------------------- |
+| Amazon Bedrock | No (uses AWS credentials) | us.anthropic.claude-sonnet-4-5-20250514-v1:0 |
+| Anthropic      | Yes                       | claude-sonnet-4-5-20250514                   |
+| Google Gemini  | Yes                       | gemini-2.5-flash                             |
+| OpenAI         | Yes                       | gpt-4.1                                      |
 
 ## Commands
 
@@ -85,12 +92,21 @@ agentcore invoke
 
 ### Resource Management
 
-| Command  | Description                                       |
-| -------- | ------------------------------------------------- |
-| `add`    | Add agents, memory, identity, evaluators, targets |
-| `remove` | Remove resources from project                     |
+| Command  | Description                                          |
+| -------- | ---------------------------------------------------- |
+| `add`    | Add agents, memory, credentials, evaluators, targets |
+| `remove` | Remove resources from project                        |
 
 > **Note**: Run `agentcore deploy` after `add` or `remove` to update resources in AWS.
+
+### Observability
+
+| Command       | Description                             |
+| ------------- | --------------------------------------- |
+| `logs`        | Stream or search agent runtime logs     |
+| `traces list` | List recent traces for a deployed agent |
+| `traces get`  | Download a trace to a JSON file         |
+| `status`      | Show deployed resource details          |
 
 ### Evaluations
 
@@ -102,6 +118,16 @@ agentcore invoke
 | `evals history`      | View past eval run results                    |
 | `pause online-eval`  | Pause a deployed online eval config           |
 | `resume online-eval` | Resume a paused online eval config            |
+| `logs evals`         | Stream or search online eval logs             |
+
+### Utilities
+
+| Command        | Description                               |
+| -------------- | ----------------------------------------- |
+| `validate`     | Validate configuration files              |
+| `package`      | Package agent artifacts without deploying |
+| `fetch access` | Fetch access info for deployed resources  |
+| `update`       | Check for and install CLI updates         |
 
 ## Project Structure
 
@@ -129,7 +155,7 @@ my-project/
 
 Projects use JSON schema files in the `agentcore/` directory:
 
-- `agentcore.json` - Agent specifications, memory, identity, evaluators, online evals
+- `agentcore.json` - Agent specifications, memory, credentials, evaluators, online evals
 - `deployed-state.json` - Runtime state in agentcore/.cli/ (auto-managed)
 - `aws-targets.json` - Deployment targets (account, region)
 
@@ -137,7 +163,7 @@ Projects use JSON schema files in the `agentcore/` directory:
 
 - **Runtime** - Managed execution environment for deployed agents
 - **Memory** - Semantic, summarization, and user preference strategies
-- **Identity** - Secure API key management via Secrets Manager
+- **Credentials** - Secure API key management via Secrets Manager
 - **Evaluations** - LLM-as-a-Judge for on-demand and continuous agent quality monitoring
 
 ## Documentation

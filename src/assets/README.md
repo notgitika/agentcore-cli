@@ -58,7 +58,7 @@ The project uses a **flat resource model** where agents, memories, and credentia
 | Command              | Description                                     |
 | -------------------- | ----------------------------------------------- |
 | `agentcore create`   | Create a new AgentCore project                  |
-| `agentcore add`      | Add resources (agent, memory, identity, target) |
+| `agentcore add`      | Add resources (agent, memory, credential, target) |
 | `agentcore remove`   | Remove resources                                |
 | `agentcore dev`      | Run agent locally                               |
 | `agentcore deploy`   | Deploy to AWS                                   |
@@ -70,7 +70,7 @@ The project uses a **flat resource model** where agents, memories, and credentia
 
 ### Agent Types
 
-- **Template agents**: Created from framework templates (Strands, LangChain_LangGraph, GoogleADK, OpenAIAgents)
+- **Template agents**: Created from framework templates (Strands, LangChain_LangGraph, CrewAI, GoogleADK, OpenAIAgents)
 - **BYO agents**: Bring your own code with `agentcore add agent --type byo`
 
 ## Documentation

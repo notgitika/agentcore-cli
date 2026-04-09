@@ -54,7 +54,6 @@ In `agentcore.json`, set `"build": "Container"`:
 
 ```json
 {
-  "type": "AgentCoreRuntime",
   "name": "MyAgent",
   "build": "Container",
   "entrypoint": "main.py",
@@ -87,7 +86,7 @@ AWS credentials are forwarded automatically (environment variables and `~/.aws` 
 
 ```bash
 agentcore package              # Build image locally, validate < 1 GB
-agentcore deploy -y --progress # Build via CodeBuild, push to ECR
+agentcore deploy -y            # Build via CodeBuild, push to ECR
 ```
 
 Local packaging validates the image size (1 GB limit). If no local runtime is available, packaging is skipped and

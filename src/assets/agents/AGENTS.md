@@ -79,7 +79,7 @@ file maps to a JSON config file and includes validation constraints as comments.
 - **LangChain_LangGraph** - Works with Bedrock, Anthropic, OpenAI, Gemini
 - **GoogleADK** - Gemini only
 - **OpenAIAgents** - OpenAI only
-- **AutoGen** - Works with Bedrock, Anthropic, OpenAI, Gemini
+
 
 ### Specific Context
 

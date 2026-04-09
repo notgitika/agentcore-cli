@@ -65,30 +65,33 @@ agentcore create \
   --memory none
 ```
 
-| Flag                      | Description                                                                                                    |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `--name <name>`           | Project name (alphanumeric, starts with letter, max 23 chars)                                                  |
-| `--defaults`              | Use defaults (Python, Strands, Bedrock, no memory)                                                             |
-| `--no-agent`              | Skip agent creation                                                                                            |
-| `--type <type>`           | `create` (default) or `import`                                                                                 |
-| `--language <lang>`       | `Python` (default)                                                                                             |
-| `--framework <fw>`        | `Strands`, `LangChain_LangGraph`, `GoogleADK`, `OpenAIAgents`                                                  |
-| `--model-provider <p>`    | `Bedrock`, `Anthropic`, `OpenAI`, `Gemini`                                                                     |
-| `--build <type>`          | `CodeZip` (default) or `Container` (see [Container Builds](container-builds.md))                               |
-| `--api-key <key>`         | API key for non-Bedrock providers                                                                              |
-| `--memory <opt>`          | `none`, `shortTerm`, `longAndShortTerm` (see [Memory Shorthand Mapping](memory.md#--memory-shorthand-mapping)) |
-| `--protocol <protocol>`   | `HTTP` (default), `MCP`, `A2A`                                                                                 |
-| `--network-mode <mode>`   | `PUBLIC` (default) or `VPC`                                                                                    |
-| `--subnets <ids>`         | Comma-separated subnet IDs (required for VPC mode)                                                             |
-| `--security-groups <ids>` | Comma-separated security group IDs (required for VPC mode)                                                     |
-| `--agent-id <id>`         | Bedrock Agent ID (import only)                                                                                 |
-| `--agent-alias-id <id>`   | Bedrock Agent Alias ID (import only)                                                                           |
-| `--region <region>`       | AWS region for Bedrock Agent (import only)                                                                     |
-| `--output-dir <dir>`      | Output directory                                                                                               |
-| `--skip-git`              | Skip git initialization                                                                                        |
-| `--skip-python-setup`     | Skip venv setup                                                                                                |
-| `--dry-run`               | Preview without creating                                                                                       |
-| `--json`                  | JSON output                                                                                                    |
+| Flag                       | Description                                                                                                    |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `--name <name>`            | Project name (alphanumeric, starts with letter, max 23 chars)                                                  |
+| `--defaults`               | Use defaults (Python, Strands, Bedrock, no memory)                                                             |
+| `--no-agent`               | Skip agent creation                                                                                            |
+| `--type <type>`            | `create` (default) or `import`                                                                                 |
+| `--language <lang>`        | `Python` (default)                                                                                             |
+| `--framework <fw>`         | `Strands`, `LangChain_LangGraph`, `GoogleADK`, `OpenAIAgents`                                                  |
+| `--model-provider <p>`     | `Bedrock`, `Anthropic`, `OpenAI`, `Gemini`                                                                     |
+| `--build <type>`           | `CodeZip` (default) or `Container` (see [Container Builds](container-builds.md))                               |
+| `--api-key <key>`          | API key for non-Bedrock providers                                                                              |
+| `--memory <opt>`           | `none`, `shortTerm`, `longAndShortTerm` (see [Memory Shorthand Mapping](memory.md#--memory-shorthand-mapping)) |
+| `--protocol <protocol>`    | `HTTP` (default), `MCP`, `A2A`                                                                                 |
+| `--network-mode <mode>`    | `PUBLIC` (default) or `VPC`                                                                                    |
+| `--subnets <ids>`          | Comma-separated subnet IDs (required for VPC mode)                                                             |
+| `--security-groups <ids>`  | Comma-separated security group IDs (required for VPC mode)                                                     |
+| `--agent-id <id>`          | Bedrock Agent ID (import only)                                                                                 |
+| `--agent-alias-id <id>`    | Bedrock Agent Alias ID (import only)                                                                           |
+| `--region <region>`        | AWS region for Bedrock Agent (import only)                                                                     |
+| `--idle-timeout <seconds>` | Idle session timeout in seconds                                                                                |
+| `--max-lifetime <seconds>` | Max instance lifetime in seconds                                                                               |
+| `--output-dir <dir>`       | Output directory                                                                                               |
+| `--skip-git`               | Skip git initialization                                                                                        |
+| `--skip-python-setup`      | Skip venv setup                                                                                                |
+| `--skip-install`           | Skip all dependency installation (npm install, uv sync)                                                        |
+| `--dry-run`                | Preview without creating                                                                                       |
+| `--json`                   | JSON output                                                                                                    |
 
 ### deploy
 
@@ -98,7 +101,7 @@ Deploy infrastructure to AWS.
 agentcore deploy
 agentcore deploy -y                  # Auto-confirm
 agentcore deploy -y -v               # Auto-confirm with verbose output
-agentcore deploy --plan              # Preview without deploying (dry-run)
+agentcore deploy --dry-run           # Preview without deploying
 agentcore deploy --diff              # Show CDK diff without deploying
 agentcore deploy --target staging -y # Deploy to a specific target
 agentcore deploy -y --json           # JSON output
@@ -109,7 +112,7 @@ agentcore deploy -y --json           # JSON output
 | `--target <name>` | Deployment target name (default: `"default"`) |
 | `-y, --yes`       | Auto-confirm prompts                          |
 | `-v, --verbose`   | Resource-level deployment events              |
-| `--plan`          | Preview deployment without deploying          |
+| `--dry-run`       | Preview deployment without deploying          |
 | `--diff`          | Show CDK diff without deploying               |
 | `--json`          | JSON output                                   |
 
@@ -119,21 +122,21 @@ Check deployment status and resource details.
 
 ```bash
 agentcore status
-agentcore status --agent MyAgent
+agentcore status --runtime MyAgent
 agentcore status --type evaluator
 agentcore status --state deployed
-agentcore status --agent-runtime-id abc123
+agentcore status --runtime-id abc123
 agentcore status --json
 ```
 
-| Flag                      | Description                                                                                     |
-| ------------------------- | ----------------------------------------------------------------------------------------------- |
-| `--agent-runtime-id <id>` | Look up a specific agent runtime by ID                                                          |
-| `--target <name>`         | Select deployment target                                                                        |
-| `--type <type>`           | Filter by resource type: `agent`, `memory`, `credential`, `gateway`, `evaluator`, `online-eval` |
-| `--state <state>`         | Filter by deployment state: `deployed`, `local-only`, `pending-removal`                         |
-| `--agent <name>`          | Filter to a specific agent                                                                      |
-| `--json`                  | JSON output                                                                                     |
+| Flag                | Description                                                                                                                |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `--runtime-id <id>` | Look up a specific runtime by ID                                                                                           |
+| `--target <name>`   | Select deployment target                                                                                                   |
+| `--type <type>`     | Filter by resource type: `agent`, `memory`, `credential`, `gateway`, `evaluator`, `online-eval`, `policy-engine`, `policy` |
+| `--state <state>`   | Filter by deployment state: `deployed`, `local-only`, `pending-removal`                                                    |
+| `--runtime <name>`  | Filter to a specific runtime                                                                                               |
+| `--json`            | JSON output                                                                                                                |
 
 ### validate
 
@@ -193,26 +196,36 @@ agentcore add agent \
   --memory none
 ```
 
-| Flag                      | Description                                                                                                                       |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `--name <name>`           | Agent name (alphanumeric + underscores, starts with letter, max 48 chars)                                                         |
-| `--type <type>`           | `create` (default), `byo`, or `import`                                                                                            |
-| `--build <type>`          | `CodeZip` (default) or `Container` (see [Container Builds](container-builds.md))                                                  |
-| `--language <lang>`       | `Python` (create); `Python`, `TypeScript`, `Other` (BYO)                                                                          |
-| `--framework <fw>`        | `Strands`, `LangChain_LangGraph`, `GoogleADK`, `OpenAIAgents`                                                                     |
-| `--model-provider <p>`    | `Bedrock`, `Anthropic`, `OpenAI`, `Gemini`                                                                                        |
-| `--api-key <key>`         | API key for non-Bedrock providers                                                                                                 |
-| `--memory <opt>`          | `none`, `shortTerm`, `longAndShortTerm` (create and import; see [Memory Shorthand Mapping](memory.md#--memory-shorthand-mapping)) |
-| `--protocol <protocol>`   | `HTTP` (default), `MCP`, `A2A`                                                                                                    |
-| `--code-location <path>`  | Path to existing code (BYO only)                                                                                                  |
-| `--entrypoint <file>`     | Entry file relative to code-location (BYO, default: `main.py`)                                                                    |
-| `--network-mode <mode>`   | `PUBLIC` (default) or `VPC`                                                                                                       |
-| `--subnets <ids>`         | Comma-separated subnet IDs (required for VPC mode)                                                                                |
-| `--security-groups <ids>` | Comma-separated security group IDs (required for VPC mode)                                                                        |
-| `--agent-id <id>`         | Bedrock Agent ID (import only)                                                                                                    |
-| `--agent-alias-id <id>`   | Bedrock Agent Alias ID (import only)                                                                                              |
-| `--region <region>`       | AWS region for Bedrock Agent (import only)                                                                                        |
-| `--json`                  | JSON output                                                                                                                       |
+| Flag                        | Description                                                                                                                       |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `--name <name>`             | Agent name (alphanumeric + underscores, starts with letter, max 48 chars)                                                         |
+| `--type <type>`             | `create` (default), `byo`, or `import`                                                                                            |
+| `--build <type>`            | `CodeZip` (default) or `Container` (see [Container Builds](container-builds.md))                                                  |
+| `--language <lang>`         | `Python` (create); `Python`, `TypeScript`, `Other` (BYO)                                                                          |
+| `--framework <fw>`          | `Strands`, `LangChain_LangGraph`, `GoogleADK`, `OpenAIAgents`                                                                     |
+| `--model-provider <p>`      | `Bedrock`, `Anthropic`, `OpenAI`, `Gemini`                                                                                        |
+| `--api-key <key>`           | API key for non-Bedrock providers                                                                                                 |
+| `--memory <opt>`            | `none`, `shortTerm`, `longAndShortTerm` (create and import; see [Memory Shorthand Mapping](memory.md#--memory-shorthand-mapping)) |
+| `--protocol <protocol>`     | `HTTP` (default), `MCP`, `A2A`                                                                                                    |
+| `--code-location <path>`    | Path to existing code (BYO only)                                                                                                  |
+| `--entrypoint <file>`       | Entry file relative to code-location (BYO, default: `main.py`)                                                                    |
+| `--network-mode <mode>`     | `PUBLIC` (default) or `VPC`                                                                                                       |
+| `--subnets <ids>`           | Comma-separated subnet IDs (required for VPC mode)                                                                                |
+| `--security-groups <ids>`   | Comma-separated security group IDs (required for VPC mode)                                                                        |
+| `--agent-id <id>`           | Bedrock Agent ID (import only)                                                                                                    |
+| `--agent-alias-id <id>`     | Bedrock Agent Alias ID (import only)                                                                                              |
+| `--region <region>`         | AWS region for Bedrock Agent (import only)                                                                                        |
+| `--authorizer-type <type>`  | Inbound auth: `AWS_IAM` or `CUSTOM_JWT`                                                                                           |
+| `--discovery-url <url>`     | OIDC discovery URL (for CUSTOM_JWT)                                                                                               |
+| `--allowed-audience <vals>` | Comma-separated allowed audiences (for CUSTOM_JWT)                                                                                |
+| `--allowed-clients <vals>`  | Comma-separated allowed client IDs (for CUSTOM_JWT)                                                                               |
+| `--allowed-scopes <scopes>` | Comma-separated allowed scopes (for CUSTOM_JWT)                                                                                   |
+| `--custom-claims <json>`    | Custom claim validations as JSON array (for CUSTOM_JWT)                                                                           |
+| `--client-id <id>`          | OAuth client ID for agent bearer token                                                                                            |
+| `--client-secret <secret>`  | OAuth client secret                                                                                                               |
+| `--idle-timeout <seconds>`  | Idle session timeout in seconds                                                                                                   |
+| `--max-lifetime <seconds>`  | Max instance lifetime in seconds                                                                                                  |
+| `--json`                    | JSON output                                                                                                                       |
 
 ### add memory
 
@@ -225,12 +238,16 @@ agentcore add memory \
   --expiry 30
 ```
 
-| Flag                   | Description                                                                 |
-| ---------------------- | --------------------------------------------------------------------------- |
-| `--name <name>`        | Memory name                                                                 |
-| `--strategies <types>` | Comma-separated: `SEMANTIC`, `SUMMARIZATION`, `USER_PREFERENCE`, `EPISODIC` |
-| `--expiry <days>`      | Event expiry duration in days (default: 30, min: 7, max: 365)               |
-| `--json`               | JSON output                                                                 |
+| Flag                                 | Description                                                                 |
+| ------------------------------------ | --------------------------------------------------------------------------- |
+| `--name <name>`                      | Memory name                                                                 |
+| `--strategies <types>`               | Comma-separated: `SEMANTIC`, `SUMMARIZATION`, `USER_PREFERENCE`, `EPISODIC` |
+| `--expiry <days>`                    | Event expiry duration in days (default: 30, min: 7, max: 365)               |
+| `--delivery-type <type>`             | Delivery target type (default: `kinesis`)                                   |
+| `--data-stream-arn <arn>`            | Kinesis data stream ARN for memory record streaming                         |
+| `--stream-content-level <level>`     | `FULL_CONTENT` (default) or `METADATA_ONLY`                                 |
+| `--stream-delivery-resources <json>` | Stream delivery config as JSON (advanced, overrides flat flags)             |
+| `--json`                             | JSON output                                                                 |
 
 ### add gateway
 
@@ -250,24 +267,28 @@ agentcore add gateway \
   --discovery-url https://idp.example.com/.well-known/openid-configuration \
   --allowed-audience my-api \
   --allowed-clients my-client-id \
-  --agent-client-id agent-client-id \
-  --agent-client-secret agent-client-secret
+  --client-id agent-client-id \
+  --client-secret agent-client-secret
 ```
 
-| Flag                             | Description                                                  |
-| -------------------------------- | ------------------------------------------------------------ |
-| `--name <name>`                  | Gateway name                                                 |
-| `--description <desc>`           | Gateway description                                          |
-| `--authorizer-type <type>`       | `NONE` (default) or `CUSTOM_JWT`                             |
-| `--discovery-url <url>`          | OIDC discovery URL (required for CUSTOM_JWT)                 |
-| `--allowed-audience <values>`    | Comma-separated allowed audiences (required for CUSTOM_JWT)  |
-| `--allowed-clients <values>`     | Comma-separated allowed client IDs (required for CUSTOM_JWT) |
-| `--allowed-scopes <scopes>`      | Comma-separated allowed scopes (optional for CUSTOM_JWT)     |
-| `--agent-client-id <id>`         | Agent OAuth client ID for Bearer token auth (CUSTOM_JWT)     |
-| `--agent-client-secret <secret>` | Agent OAuth client secret (CUSTOM_JWT)                       |
-| `--no-semantic-search`           | Disable semantic search for tool discovery                   |
-| `--exception-level <level>`      | Exception verbosity level (default: `NONE`)                  |
-| `--json`                         | JSON output                                                  |
+| Flag                          | Description                                                  |
+| ----------------------------- | ------------------------------------------------------------ |
+| `--name <name>`               | Gateway name                                                 |
+| `--description <desc>`        | Gateway description                                          |
+| `--runtimes <names>`          | Comma-separated runtime names to expose through this gateway |
+| `--authorizer-type <type>`    | `NONE` (default) or `CUSTOM_JWT`                             |
+| `--discovery-url <url>`       | OIDC discovery URL (required for CUSTOM_JWT)                 |
+| `--allowed-audience <values>` | Comma-separated allowed audiences (required for CUSTOM_JWT)  |
+| `--allowed-clients <values>`  | Comma-separated allowed client IDs (required for CUSTOM_JWT) |
+| `--allowed-scopes <scopes>`   | Comma-separated allowed scopes (optional for CUSTOM_JWT)     |
+| `--custom-claims <json>`      | Custom claim validations as JSON array (CUSTOM_JWT)          |
+| `--client-id <id>`            | OAuth client ID for gateway bearer tokens (CUSTOM_JWT)       |
+| `--client-secret <secret>`    | OAuth client secret for gateway bearer tokens (CUSTOM_JWT)   |
+| `--no-semantic-search`        | Disable semantic search for tool discovery                   |
+| `--exception-level <level>`   | Exception verbosity level: `NONE` (default) or `DEBUG`       |
+| `--policy-engine <name>`      | Policy engine name for Cedar-based authorization             |
+| `--policy-engine-mode <mode>` | Policy engine mode: `LOG_ONLY` or `ENFORCE`                  |
+| `--json`                      | JSON output                                                  |
 
 ### add gateway-target
 
@@ -331,48 +352,47 @@ agentcore add gateway-target \
   --gateway MyGateway
 ```
 
-| Flag                               | Description                                                                                                   |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `--name <name>`                    | Target name                                                                                                   |
-| `--description <desc>`             | Target description                                                                                            |
-| `--type <type>`                    | Target type (required): `mcp-server`, `api-gateway`, `open-api-schema`, `smithy-model`, `lambda-function-arn` |
-| `--endpoint <url>`                 | MCP server endpoint URL (mcp-server)                                                                          |
-| `--language <lang>`                | Implementation language: Python, TypeScript, Other (mcp-server)                                               |
-| `--host <host>`                    | Compute host: Lambda or AgentCoreRuntime (mcp-server)                                                         |
-| `--gateway <name>`                 | Gateway to attach target to                                                                                   |
-| `--outbound-auth <type>`           | `oauth`, `api-key`, or `none` (varies by target type)                                                         |
-| `--credential-name <name>`         | Existing credential name for outbound auth                                                                    |
-| `--oauth-client-id <id>`           | OAuth client ID (creates credential inline)                                                                   |
-| `--oauth-client-secret <secret>`   | OAuth client secret (creates credential inline)                                                               |
-| `--oauth-discovery-url <url>`      | OAuth discovery URL (creates credential inline)                                                               |
-| `--oauth-scopes <scopes>`          | OAuth scopes, comma-separated                                                                                 |
-| `--rest-api-id <id>`               | API Gateway REST API ID (api-gateway)                                                                         |
-| `--stage <stage>`                  | API Gateway stage name (api-gateway)                                                                          |
-| `--tool-filter-path <path>`        | Filter API paths, supports wildcards (api-gateway)                                                            |
-| `--tool-filter-methods <methods>`  | Comma-separated HTTP methods to expose (api-gateway)                                                          |
-| `--tool-filter-description <desc>` | Tool filter description pattern                                                                               |
-| `--schema <path>`                  | Path to schema file, relative to project root (open-api-schema, smithy-model)                                 |
-| `--schema-s3-account <account>`    | AWS account for S3-hosted schema (open-api-schema, smithy-model)                                              |
-| `--lambda-arn <arn>`               | Lambda function ARN (lambda-function-arn)                                                                     |
-| `--tool-schema-file <path>`        | Tool schema file, relative to project root or absolute path (lambda-function-arn)                             |
-| `--json`                           | JSON output                                                                                                   |
+| Flag                              | Description                                                                                                   |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `--name <name>`                   | Target name                                                                                                   |
+| `--description <desc>`            | Target description                                                                                            |
+| `--type <type>`                   | Target type (required): `mcp-server`, `api-gateway`, `open-api-schema`, `smithy-model`, `lambda-function-arn` |
+| `--endpoint <url>`                | MCP server endpoint URL (mcp-server)                                                                          |
+| `--language <lang>`               | Implementation language: Python, TypeScript, Other (mcp-server)                                               |
+| `--host <host>`                   | Compute host: Lambda or AgentCoreRuntime (mcp-server)                                                         |
+| `--gateway <name>`                | Gateway to attach target to                                                                                   |
+| `--outbound-auth <type>`          | `oauth`, `api-key`, or `none` (varies by target type)                                                         |
+| `--credential-name <name>`        | Existing credential name for outbound auth                                                                    |
+| `--oauth-client-id <id>`          | OAuth client ID (creates credential inline)                                                                   |
+| `--oauth-client-secret <secret>`  | OAuth client secret (creates credential inline)                                                               |
+| `--oauth-discovery-url <url>`     | OAuth discovery URL (creates credential inline)                                                               |
+| `--oauth-scopes <scopes>`         | OAuth scopes, comma-separated                                                                                 |
+| `--rest-api-id <id>`              | API Gateway REST API ID (api-gateway)                                                                         |
+| `--stage <stage>`                 | API Gateway stage name (api-gateway)                                                                          |
+| `--tool-filter-path <path>`       | Filter API paths, supports wildcards (api-gateway)                                                            |
+| `--tool-filter-methods <methods>` | Comma-separated HTTP methods to expose (api-gateway)                                                          |
+| `--schema <path>`                 | Path to schema file, relative to project root (open-api-schema, smithy-model)                                 |
+| `--schema-s3-account <account>`   | AWS account for S3-hosted schema (open-api-schema, smithy-model)                                              |
+| `--lambda-arn <arn>`              | Lambda function ARN (lambda-function-arn)                                                                     |
+| `--tool-schema-file <path>`       | Tool schema file, relative to project root or absolute path (lambda-function-arn)                             |
+| `--json`                          | JSON output                                                                                                   |
 
 > **Note**: `smithy-model` and `lambda-function-arn` use IAM role auth and do not support `--outbound-auth`.
 > `open-api-schema` requires `--outbound-auth` (`oauth` or `api-key`). `api-gateway` supports `api-key` or `none`.
 > `mcp-server` supports `oauth` or `none`.
 
-### add identity
+### add credential
 
 Add a credential to the project. Supports API key and OAuth credential types.
 
 ```bash
 # API key credential
-agentcore add identity \
+agentcore add credential \
   --name OpenAI \
   --api-key sk-...
 
 # OAuth credential
-agentcore add identity \
+agentcore add credential \
   --name MyOAuthProvider \
   --type oauth \
   --discovery-url https://idp.example.com/.well-known/openid-configuration \
@@ -400,7 +420,7 @@ Add a custom LLM-as-a-Judge evaluator. See [Evaluations](evals.md) for full deta
 agentcore add evaluator \
   --name ResponseQuality \
   --level SESSION \
-  --model us.anthropic.claude-sonnet-4-5-20250929-v1:0 \
+  --model us.anthropic.claude-sonnet-4-5-20250514-v1:0 \
   --instructions "Evaluate the response quality. Context: {context}" \
   --rating-scale 1-5-quality
 ```
@@ -422,7 +442,7 @@ Add an online eval config for continuous agent monitoring.
 ```bash
 agentcore add online-eval \
   --name QualityMonitor \
-  --agent MyAgent \
+  --runtime MyAgent \
   --evaluator ResponseQuality Builtin.Faithfulness \
   --sampling-rate 10
 ```
@@ -430,7 +450,7 @@ agentcore add online-eval \
 | Flag                         | Description                                   |
 | ---------------------------- | --------------------------------------------- |
 | `--name <name>`              | Config name                                   |
-| `-a, --agent <name>`         | Agent to monitor                              |
+| `-r, --runtime <name>`       | Runtime to monitor                            |
 | `-e, --evaluator <names...>` | Evaluator name(s), `Builtin.*` IDs, or ARNs   |
 | `--evaluator-arn <arns...>`  | Evaluator ARN(s)                              |
 | `--sampling-rate <rate>`     | Percentage of requests to evaluate (0.01–100) |
@@ -442,23 +462,23 @@ agentcore add online-eval \
 Remove resources from project.
 
 ```bash
-agentcore remove agent --name MyAgent --force
+agentcore remove agent --name MyAgent -y
 agentcore remove memory --name SharedMemory
-agentcore remove identity --name OpenAI
+agentcore remove credential --name OpenAI
 agentcore remove evaluator --name ResponseQuality
 agentcore remove online-eval --name QualityMonitor
 agentcore remove gateway --name MyGateway
 agentcore remove gateway-target --name WeatherTools
 
 # Reset everything
-agentcore remove all --force
+agentcore remove all -y
 agentcore remove all --dry-run  # Preview
 ```
 
 | Flag            | Description               |
 | --------------- | ------------------------- |
 | `--name <name>` | Resource name             |
-| `--force`       | Skip confirmation         |
+| `-y, --yes`     | Skip confirmation         |
 | `--dry-run`     | Preview (remove all only) |
 | `--json`        | JSON output               |
 
@@ -472,25 +492,27 @@ Start local development server with hot-reload.
 
 ```bash
 agentcore dev
-agentcore dev --agent MyAgent --port 3000
+agentcore dev --runtime MyAgent --port 3000
 agentcore dev --logs                      # Non-interactive
 agentcore dev "Hello" --stream            # Invoke running dev server
-agentcore dev "Hello" --agent MyAgent     # Invoke specific agent
+agentcore dev "Hello" --runtime MyAgent    # Invoke specific runtime
 
 # MCP protocol dev commands
 agentcore dev list-tools
 agentcore dev call-tool --tool myTool --input '{"arg": "value"}'
 ```
 
-| Flag / Argument      | Description                                          |
-| -------------------- | ---------------------------------------------------- |
-| `[prompt]`           | Send a prompt to a running dev server                |
-| `-p, --port <port>`  | Port (default: 8080; MCP uses 8000, A2A uses 9000)   |
-| `-a, --agent <name>` | Agent to run or invoke (required if multiple agents) |
-| `-s, --stream`       | Stream response when invoking                        |
-| `-l, --logs`         | Non-interactive stdout logging                       |
-| `--tool <name>`      | MCP tool name (with `call-tool` prompt)              |
-| `--input <json>`     | MCP tool arguments as JSON (with `--tool`)           |
+| Flag / Argument        | Description                                                           |
+| ---------------------- | --------------------------------------------------------------------- |
+| `[prompt]`             | Send a prompt to a running dev server                                 |
+| `-p, --port <port>`    | Port (default: 8080; MCP uses 8000, A2A uses 9000)                    |
+| `-r, --runtime <name>` | Runtime to run or invoke (required if multiple runtimes)              |
+| `-s, --stream`         | Stream response when invoking                                         |
+| `-l, --logs`           | Non-interactive stdout logging                                        |
+| `--tool <name>`        | MCP tool name (with `call-tool` prompt)                               |
+| `--input <json>`       | MCP tool arguments as JSON (with `--tool`)                            |
+| `-H, --header <h>`     | Custom header (`"Name: Value"`, repeatable)                           |
+| `--exec`               | Execute a shell command in the running dev container (Container only) |
 
 ### invoke
 
@@ -499,7 +521,7 @@ Invoke a deployed agent endpoint.
 ```bash
 agentcore invoke "What can you do?"
 agentcore invoke --prompt "Hello" --stream
-agentcore invoke --agent MyAgent --target staging
+agentcore invoke --runtime MyAgent --target staging
 agentcore invoke --session-id abc123         # Continue session
 agentcore invoke --json                      # JSON output
 
@@ -516,13 +538,15 @@ agentcore invoke --exec "cat /etc/os-release" --json
 | --------------------- | -------------------------------------------------------- |
 | `[prompt]`            | Prompt text (positional argument)                        |
 | `--prompt <text>`     | Prompt text (flag, takes precedence over positional)     |
-| `--agent <name>`      | Specific agent                                           |
+| `--runtime <name>`    | Specific runtime                                         |
 | `--target <name>`     | Deployment target                                        |
 | `--session-id <id>`   | Continue a specific session                              |
 | `--user-id <id>`      | User ID for runtime invocation (default: `default-user`) |
 | `--stream`            | Stream response in real-time                             |
 | `--tool <name>`       | MCP tool name (use with `call-tool` prompt)              |
 | `--input <json>`      | MCP tool arguments as JSON (use with `--tool`)           |
+| `-H, --header <h>`    | Custom header (`"Name: Value"`, repeatable)              |
+| `--bearer-token <t>`  | Bearer token for CUSTOM_JWT auth                         |
 | `--exec`              | Execute a shell command in the runtime container         |
 | `--timeout <seconds>` | Timeout in seconds for `--exec` commands                 |
 | `--json`              | JSON output                                              |
@@ -537,21 +561,21 @@ Stream or search agent runtime logs.
 
 ```bash
 agentcore logs                                   # Stream logs (follow mode)
-agentcore logs --agent MyAgent                   # Specific agent
+agentcore logs --runtime MyAgent                  # Specific runtime
 agentcore logs --since 1h --level error          # Search last hour for errors
 agentcore logs --since 2d --until 1d --query "timeout"
 agentcore logs --json                            # JSON Lines output
 ```
 
-| Flag              | Description                                                                      |
-| ----------------- | -------------------------------------------------------------------------------- |
-| `--agent <name>`  | Select specific agent                                                            |
-| `--since <time>`  | Start time (defaults to 1h ago in search mode; e.g. `1h`, `30m`, `2d`, ISO 8601) |
-| `--until <time>`  | End time (defaults to now in search mode; e.g. `now`, ISO 8601)                  |
-| `--level <level>` | Filter by log level: `error`, `warn`, `info`, `debug`                            |
-| `-n, --limit <n>` | Maximum number of log lines to return                                            |
-| `--query <text>`  | Server-side text filter                                                          |
-| `--json`          | Output as JSON Lines                                                             |
+| Flag               | Description                                                                      |
+| ------------------ | -------------------------------------------------------------------------------- |
+| `--runtime <name>` | Select specific runtime                                                          |
+| `--since <time>`   | Start time (defaults to 1h ago in search mode; e.g. `1h`, `30m`, `2d`, ISO 8601) |
+| `--until <time>`   | End time (defaults to now in search mode; e.g. `now`, ISO 8601)                  |
+| `--level <level>`  | Filter by log level: `error`, `warn`, `info`, `debug`                            |
+| `-n, --limit <n>`  | Maximum number of log lines to return                                            |
+| `--query <text>`   | Server-side text filter                                                          |
+| `--json`           | Output as JSON Lines                                                             |
 
 ### traces
 
@@ -561,31 +585,31 @@ View and download agent traces.
 
 ```bash
 agentcore traces list
-agentcore traces list --agent MyAgent --limit 50
+agentcore traces list --runtime MyAgent --limit 50
 agentcore traces list --since 1h --until now
 ```
 
-| Flag             | Description                                                                 |
-| ---------------- | --------------------------------------------------------------------------- |
-| `--agent <name>` | Select specific agent                                                       |
-| `--limit <n>`    | Maximum number of traces to display (default: 20)                           |
-| `--since <time>` | Start time (defaults to 12h ago; e.g. `5m`, `1h`, `2d`, ISO 8601, epoch ms) |
-| `--until <time>` | End time (defaults to now; e.g. `now`, `1h`, ISO 8601, epoch ms)            |
+| Flag               | Description                                                                 |
+| ------------------ | --------------------------------------------------------------------------- |
+| `--runtime <name>` | Select specific runtime                                                     |
+| `--limit <n>`      | Maximum number of traces to display (default: 20)                           |
+| `--since <time>`   | Start time (defaults to 12h ago; e.g. `5m`, `1h`, `2d`, ISO 8601, epoch ms) |
+| `--until <time>`   | End time (defaults to now; e.g. `now`, `1h`, ISO 8601, epoch ms)            |
 
 #### traces get
 
 ```bash
 agentcore traces get <traceId>
-agentcore traces get abc123 --agent MyAgent --output ./trace.json
+agentcore traces get abc123 --runtime MyAgent --output ./trace.json
 ```
 
-| Flag              | Description                      |
-| ----------------- | -------------------------------- |
-| `<traceId>`       | Trace ID to retrieve (required)  |
-| `--agent <name>`  | Select specific agent            |
-| `--output <path>` | Output file path                 |
-| `--since <time>`  | Start time (defaults to 12h ago) |
-| `--until <time>`  | End time (defaults to now)       |
+| Flag               | Description                      |
+| ------------------ | -------------------------------- |
+| `<traceId>`        | Trace ID to retrieve (required)  |
+| `--runtime <name>` | Select specific runtime          |
+| `--output <path>`  | Output file path                 |
+| `--since <time>`   | Start time (defaults to 12h ago) |
+| `--until <time>`   | End time (defaults to now)       |
 
 ---
 
@@ -599,27 +623,27 @@ Run on-demand evaluation against historical agent traces.
 
 ```bash
 # Project mode
-agentcore run eval --agent MyAgent --evaluator ResponseQuality --days 7
+agentcore run eval --runtime MyAgent --evaluator ResponseQuality --days 7
 
 # Standalone mode (no project required)
 agentcore run eval \
-  --agent-arn arn:aws:...:runtime/abc123 \
+  --runtime-arn arn:aws:...:runtime/abc123 \
   --evaluator-arn arn:aws:...:evaluator/eval123 \
   --region us-east-1
 ```
 
-| Flag                         | Description                               |
-| ---------------------------- | ----------------------------------------- |
-| `-a, --agent <name>`         | Agent name from project                   |
-| `--agent-arn <arn>`          | Agent runtime ARN (standalone mode)       |
-| `-e, --evaluator <names...>` | Evaluator name(s) or `Builtin.*` IDs      |
-| `--evaluator-arn <arns...>`  | Evaluator ARN(s) (use with `--agent-arn`) |
-| `--region <region>`          | AWS region (required with `--agent-arn`)  |
-| `-s, --session-id <id>`      | Evaluate a specific session               |
-| `-t, --trace-id <id>`        | Evaluate a specific trace                 |
-| `--days <days>`              | Lookback window in days (default: 7)      |
-| `--output <path>`            | Custom output file path                   |
-| `--json`                     | JSON output                               |
+| Flag                         | Description                                 |
+| ---------------------------- | ------------------------------------------- |
+| `-r, --runtime <name>`       | Runtime name from project                   |
+| `--runtime-arn <arn>`        | Runtime ARN (standalone mode)               |
+| `-e, --evaluator <names...>` | Evaluator name(s) or `Builtin.*` IDs        |
+| `--evaluator-arn <arns...>`  | Evaluator ARN(s) (use with `--runtime-arn`) |
+| `--region <region>`          | AWS region (required with `--runtime-arn`)  |
+| `-s, --session-id <id>`      | Evaluate a specific session                 |
+| `-t, --trace-id <id>`        | Evaluate a specific trace                   |
+| `--days <days>`              | Lookback window in days (default: 7)        |
+| `--output <path>`            | Custom output file path                     |
+| `--json`                     | JSON output                                 |
 
 ### evals history
 
@@ -627,14 +651,14 @@ View past on-demand eval run results.
 
 ```bash
 agentcore evals history
-agentcore evals history --agent MyAgent --limit 5 --json
+agentcore evals history --runtime MyAgent --limit 5 --json
 ```
 
-| Flag                  | Description          |
-| --------------------- | -------------------- |
-| `-a, --agent <name>`  | Filter by agent name |
-| `-n, --limit <count>` | Max runs to display  |
-| `--json`              | JSON output          |
+| Flag                   | Description            |
+| ---------------------- | ---------------------- |
+| `-r, --runtime <name>` | Filter by runtime name |
+| `-n, --limit <count>`  | Max runs to display    |
+| `--json`               | JSON output            |
 
 ### pause online-eval
 
@@ -673,22 +697,40 @@ agentcore resume online-eval --arn arn:aws:...:online-eval-config/abc123
 Stream or search online eval logs.
 
 ```bash
-agentcore logs evals --agent MyAgent --since 1h
+agentcore logs evals --runtime MyAgent --since 1h
 agentcore logs evals --follow --json
 ```
 
-| Flag                  | Description                                   |
-| --------------------- | --------------------------------------------- |
-| `-a, --agent <name>`  | Filter by agent                               |
-| `--since <time>`      | Start time (e.g. `1h`, `30m`, `2d`, ISO 8601) |
-| `--until <time>`      | End time                                      |
-| `-n, --limit <count>` | Maximum log lines                             |
-| `-f, --follow`        | Stream in real-time                           |
-| `--json`              | JSON Lines output                             |
+| Flag                   | Description                                   |
+| ---------------------- | --------------------------------------------- |
+| `-r, --runtime <name>` | Filter by runtime                             |
+| `--since <time>`       | Start time (e.g. `1h`, `30m`, `2d`, ISO 8601) |
+| `--until <time>`       | End time                                      |
+| `-n, --limit <count>`  | Maximum log lines                             |
+| `-f, --follow`         | Stream in real-time                           |
+| `--json`               | JSON Lines output                             |
 
 ---
 
 ## Utilities
+
+### fetch access
+
+Fetch access info (URL, token, auth guidance) for a deployed gateway or agent.
+
+```bash
+agentcore fetch access
+agentcore fetch access --name MyGateway --type gateway --json
+agentcore fetch access --name MyAgent --type agent --target staging
+```
+
+| Flag                     | Description                                   |
+| ------------------------ | --------------------------------------------- |
+| `--name <name>`          | Gateway or agent name                         |
+| `--type <type>`          | Resource type: `gateway` (default) or `agent` |
+| `--target <name>`        | Deployment target                             |
+| `--identity-name <name>` | Identity credential name for token fetch      |
+| `--json`                 | JSON output                                   |
 
 ### package
 
@@ -696,14 +738,14 @@ Package agent artifacts without deploying.
 
 ```bash
 agentcore package
-agentcore package --agent MyAgent
+agentcore package --runtime MyAgent
 agentcore package -d ./my-project
 ```
 
-| Flag                     | Description            |
-| ------------------------ | ---------------------- |
-| `-d, --directory <path>` | Project directory      |
-| `-a, --agent <name>`     | Package specific agent |
+| Flag                     | Description              |
+| ------------------------ | ------------------------ |
+| `-d, --directory <path>` | Project directory        |
+| `-r, --runtime <name>`   | Package specific runtime |
 
 ### update
 
@@ -735,7 +777,7 @@ agentcore help modes   # Explain interactive vs non-interactive modes
 ```bash
 # Validate, preview, and deploy
 agentcore validate
-agentcore deploy --plan --json        # Preview changes
+agentcore deploy --dry-run --json     # Preview changes
 agentcore deploy -y --json            # Deploy with auto-confirm
 ```
 
@@ -764,13 +806,13 @@ agentcore deploy -y
 
 ```bash
 # Stream runtime logs
-agentcore logs --agent MyAgent
+agentcore logs --runtime MyAgent
 
 # Search for errors in the last 2 hours
 agentcore logs --since 2h --level error
 
 # List recent traces
-agentcore traces list --agent MyAgent --limit 10
+agentcore traces list --runtime MyAgent --limit 10
 
 # Download a specific trace
 agentcore traces get <traceId> --output ./debug-trace.json

@@ -76,8 +76,8 @@ After transaction search is fully active (~10 minutes), you can view traces for 
 
 ```bash
 # List recent traces
-agentcore traces
+agentcore traces list
 
 # Get a specific trace
-agentcore traces --trace-id <trace-id>
+agentcore traces get <traceId>
 ```

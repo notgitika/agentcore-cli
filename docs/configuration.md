@@ -4,13 +4,12 @@ AgentCore projects use JSON configuration files in the `agentcore/` directory.
 
 ## Files Overview
 
-| File                  | Purpose                                                          |
-| --------------------- | ---------------------------------------------------------------- |
-| `agentcore.json`      | Project, agents, memories, credentials, evaluators, online evals |
-| `mcp.json`            | Gateways, gateway targets, and MCP tools                         |
-| `aws-targets.json`    | Deployment targets                                               |
-| `deployed-state.json` | Runtime state (auto-managed, do not edit)                        |
-| `.env.local`          | API keys for local development (gitignored)                      |
+| File                       | Purpose                                                                    |
+| -------------------------- | -------------------------------------------------------------------------- |
+| `agentcore.json`           | Project, agents, memories, credentials, evaluators, online evals, gateways |
+| `aws-targets.json`         | Deployment targets                                                         |
+| `.cli/deployed-state.json` | Runtime state (auto-managed, do not edit)                                  |
+| `.env.local`               | API keys for local development (gitignored)                                |
 
 ---
 
@@ -22,50 +21,27 @@ Main project configuration using a **flat resource model**. Agents, memories, an
 {
   "name": "MyProject",
   "version": 1,
+  "tags": {
+    "agentcore:created-by": "agentcore-cli",
+    "agentcore:project-name": "MyProject"
+  },
   "runtimes": [
     {
-      "type": "AgentCoreRuntime",
       "name": "MyAgent",
       "build": "CodeZip",
       "entrypoint": "main.py",
       "codeLocation": "app/MyAgent/",
-      "runtimeVersion": "PYTHON_3_13"
+      "runtimeVersion": "PYTHON_3_13",
+      "networkMode": "PUBLIC",
+      "protocol": "HTTP"
     }
   ],
-  "memories": [
-    {
-      "type": "AgentCoreMemory",
-      "name": "MyMemory",
-      "eventExpiryDuration": 30,
-      "strategies": [{ "type": "SEMANTIC" }]
-    }
-  ],
-  "credentials": [
-    {
-      "type": "ApiKeyCredentialProvider",
-      "name": "OpenAI"
-    }
-  ],
-  "evaluators": [
-    {
-      "type": "CustomEvaluator",
-      "name": "ResponseQuality",
-      "level": "SESSION",
-      "config": {
-        "llmAsAJudge": {
-          "model": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-          "instructions": "Evaluate the response quality. Context: {context}",
-          "ratingScale": {
-            "numerical": [
-              { "value": 1, "label": "Poor", "definition": "Fails to meet expectations" },
-              { "value": 5, "label": "Excellent", "definition": "Far exceeds expectations" }
-            ]
-          }
-        }
-      }
-    }
-  ],
-  "onlineEvalConfigs": []
+  "memories": [],
+  "credentials": [],
+  "evaluators": [],
+  "onlineEvalConfigs": [],
+  "agentCoreGateways": [],
+  "policyEngines": []
 }
 ```
 
@@ -81,8 +57,13 @@ Main project configuration using a **flat resource model**. Agents, memories, an
 | `credentials`       | Yes      | Array of credential providers (API key or OAuth)            |
 | `evaluators`        | Yes      | Array of custom evaluator definitions                       |
 | `onlineEvalConfigs` | Yes      | Array of online eval configurations                         |
+| `policyEngines`     | No       | Array of policy engine configurations                       |
+| `agentCoreGateways` | No       | Array of gateway definitions                                |
+| `mcpRuntimeTools`   | No       | Array of MCP runtime tool definitions                       |
+| `unassignedTargets` | No       | Targets not yet assigned to a gateway                       |
 
-> Gateway configuration is stored separately in `mcp.json`. See [mcp.json](#mcpjson) below.
+> Gateway configuration is in the `agentCoreGateways` field. See [Gateways and MCP Tools](#gateways-and-mcp-tools)
+> below.
 
 ---
 
@@ -134,7 +115,6 @@ resource-level value takes precedence for that specific resource.
   },
   "runtimes": [
     {
-      "type": "AgentCoreRuntime",
       "name": "MyAgent",
       "tags": {
         "Environment": "staging",
@@ -182,7 +162,6 @@ on the next deployment.
 
 ```json
 {
-  "type": "AgentCoreRuntime",
   "name": "MyAgent",
   "build": "CodeZip",
   "entrypoint": "main.py",
@@ -196,17 +175,23 @@ on the next deployment.
 }
 ```
 
-| Field             | Required | Description                                        |
-| ----------------- | -------- | -------------------------------------------------- |
-| `type`            | Yes      | Always `"AgentCoreRuntime"`                        |
-| `name`            | Yes      | Agent name (1-48 chars, alphanumeric + underscore) |
-| `build`           | Yes      | `"CodeZip"` or `"Container"`                       |
-| `entrypoint`      | Yes      | Entry file (e.g., `main.py` or `main.py:handler`)  |
-| `codeLocation`    | Yes      | Directory containing agent code                    |
-| `runtimeVersion`  | Yes      | Runtime version (see below)                        |
-| `networkMode`     | No       | `"PUBLIC"` (default) or `"PRIVATE"`                |
-| `envVars`         | No       | Custom environment variables                       |
-| `instrumentation` | No       | OpenTelemetry settings                             |
+| Field                     | Required | Description                                                     |
+| ------------------------- | -------- | --------------------------------------------------------------- |
+| `name`                    | Yes      | Agent name (1-48 chars, alphanumeric + underscore)              |
+| `build`                   | Yes      | `"CodeZip"` or `"Container"`                                    |
+| `entrypoint`              | Yes      | Entry file (e.g., `main.py` or `main.py:handler`)               |
+| `codeLocation`            | Yes      | Directory containing agent code                                 |
+| `runtimeVersion`          | Yes      | Runtime version (see below)                                     |
+| `networkMode`             | No       | `"PUBLIC"` (default) or `"VPC"`                                 |
+| `networkConfig`           | No       | VPC configuration (subnets, security groups)                    |
+| `protocol`                | No       | `"HTTP"` (default), `"MCP"`, or `"A2A"`                         |
+| `envVars`                 | No       | Custom environment variables                                    |
+| `instrumentation`         | No       | OpenTelemetry settings                                          |
+| `authorizerType`          | No       | `"AWS_IAM"` or `"CUSTOM_JWT"`                                   |
+| `authorizerConfiguration` | No       | JWT authorizer settings (for `CUSTOM_JWT`)                      |
+| `requestHeaderAllowlist`  | No       | Headers to forward to the agent                                 |
+| `lifecycleConfiguration`  | No       | Runtime session lifecycle settings (idle timeout, max lifetime) |
+| `tags`                    | No       | Agent-level tags                                                |
 
 ### Runtime Versions
 
@@ -217,25 +202,29 @@ on the next deployment.
 - `PYTHON_3_12`
 - `PYTHON_3_13`
 
+**Node.js:**
+
+- `NODE_18`
+- `NODE_20`
+- `NODE_22`
+
 ---
 
 ## Memory Resource
 
 ```json
 {
-  "type": "AgentCoreMemory",
   "name": "MyMemory",
   "eventExpiryDuration": 30,
   "strategies": [{ "type": "SEMANTIC" }, { "type": "SUMMARIZATION" }]
 }
 ```
 
-| Field                 | Required | Description                             |
-| --------------------- | -------- | --------------------------------------- |
-| `type`                | Yes      | Always `"AgentCoreMemory"`              |
-| `name`                | Yes      | Memory name (1-48 chars)                |
-| `eventExpiryDuration` | Yes      | Days until events expire (7-365)        |
-| `strategies`          | Yes      | Array of memory strategies (at least 1) |
+| Field                 | Required | Description                                                     |
+| --------------------- | -------- | --------------------------------------------------------------- |
+| `name`                | Yes      | Memory name (1-48 chars)                                        |
+| `eventExpiryDuration` | Yes      | Days until events expire (7-365)                                |
+| `strategies`          | Yes      | Array of memory strategies (can be empty for short-term memory) |
 
 ### Memory Strategies
 
@@ -265,36 +254,36 @@ Strategy configuration:
 
 ```json
 {
-  "type": "ApiKeyCredentialProvider",
+  "authorizerType": "ApiKeyCredentialProvider",
   "name": "OpenAI"
 }
 ```
 
-| Field  | Required | Description                         |
-| ------ | -------- | ----------------------------------- |
-| `type` | Yes      | Always `"ApiKeyCredentialProvider"` |
-| `name` | Yes      | Credential name (1-128 chars)       |
+| Field            | Required | Description                         |
+| ---------------- | -------- | ----------------------------------- |
+| `authorizerType` | Yes      | Always `"ApiKeyCredentialProvider"` |
+| `name`           | Yes      | Credential name (1-128 chars)       |
 
 ### OAuth Credential
 
 ```json
 {
-  "type": "OAuthCredentialProvider",
+  "authorizerType": "OAuthCredentialProvider",
   "name": "MyOAuthProvider",
   "discoveryUrl": "https://idp.example.com/.well-known/openid-configuration",
   "scopes": ["read", "write"]
 }
 ```
 
-| Field          | Required | Description                                            |
-| -------------- | -------- | ------------------------------------------------------ |
-| `type`         | Yes      | Always `"OAuthCredentialProvider"`                     |
-| `name`         | Yes      | Credential name (1-128 chars)                          |
-| `discoveryUrl` | Yes      | OIDC discovery URL (must be a valid URL)               |
-| `scopes`       | No       | Array of OAuth scopes                                  |
-| `vendor`       | No       | Credential provider vendor (default: `"CustomOauth2"`) |
-| `managed`      | No       | Whether auto-created by the CLI (do not edit)          |
-| `usage`        | No       | `"inbound"` or `"outbound"`                            |
+| Field            | Required | Description                                            |
+| ---------------- | -------- | ------------------------------------------------------ |
+| `authorizerType` | Yes      | Always `"OAuthCredentialProvider"`                     |
+| `name`           | Yes      | Credential name (1-128 chars)                          |
+| `discoveryUrl`   | Yes      | OIDC discovery URL (must be a valid URL)               |
+| `scopes`         | No       | Array of OAuth scopes                                  |
+| `vendor`         | No       | Credential provider vendor (default: `"CustomOauth2"`) |
+| `managed`        | No       | Whether auto-created by the CLI (do not edit)          |
+| `usage`          | No       | `"inbound"` or `"outbound"`                            |
 
 The actual secrets (API keys, client IDs, client secrets) are stored in `.env.local` for local development and in
 AgentCore Identity service for deployed environments.
@@ -307,13 +296,12 @@ See [Evaluations](evals.md) for the full guide.
 
 ```json
 {
-  "type": "CustomEvaluator",
   "name": "ResponseQuality",
   "level": "SESSION",
   "description": "Evaluate response quality",
   "config": {
     "llmAsAJudge": {
-      "model": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "model": "us.anthropic.claude-sonnet-4-5-20250514-v1:0",
       "instructions": "Evaluate the response quality. Context: {context}",
       "ratingScale": {
         "numerical": [
@@ -328,7 +316,6 @@ See [Evaluations](evals.md) for the full guide.
 
 | Field         | Required | Description                                     |
 | ------------- | -------- | ----------------------------------------------- |
-| `type`        | Yes      | Always `"CustomEvaluator"`                      |
 | `name`        | Yes      | Evaluator name (1-48 chars, alphanumeric + `_`) |
 | `level`       | Yes      | `"SESSION"`, `"TRACE"`, or `"TOOL_CALL"`        |
 | `description` | No       | Evaluator description                           |
@@ -362,7 +349,6 @@ See [Evaluations](evals.md) for the full guide.
 
 ```json
 {
-  "type": "OnlineEvaluationConfig",
   "name": "QualityMonitor",
   "agent": "MyAgent",
   "evaluators": ["ResponseQuality", "Builtin.Faithfulness"],
@@ -373,7 +359,6 @@ See [Evaluations](evals.md) for the full guide.
 
 | Field            | Required | Description                                                  |
 | ---------------- | -------- | ------------------------------------------------------------ |
-| `type`           | Yes      | Always `"OnlineEvaluationConfig"`                            |
 | `name`           | Yes      | Config name (1-48 chars, alphanumeric + `_`)                 |
 | `agent`          | Yes      | Agent name to monitor (must match a project agent)           |
 | `evaluators`     | Yes      | Array of evaluator names, `Builtin.*` IDs, or evaluator ARNs |
@@ -383,12 +368,16 @@ See [Evaluations](evals.md) for the full guide.
 
 ---
 
-## mcp.json
+## Gateways and MCP Tools
 
-Gateway and MCP tool configuration. Gateways, their targets, and standalone MCP runtime tools are defined here.
+Gateway and MCP tool configuration is part of `agentcore.json` (in the `agentCoreGateways`, `mcpRuntimeTools`, and
+`unassignedTargets` fields).
 
 ```json
 {
+  "name": "MyProject",
+  "version": 1,
+  "runtimes": [...],
   "agentCoreGateways": [
     {
       "name": "MyGateway",
@@ -402,23 +391,15 @@ Gateway and MCP tool configuration. Gateways, their targets, and standalone MCP 
         }
       ]
     }
-  ],
-  "unassignedTargets": []
+  ]
 }
 ```
-
-### Top-Level Fields
-
-| Field               | Required | Description                           |
-| ------------------- | -------- | ------------------------------------- |
-| `agentCoreGateways` | Yes      | Array of gateway definitions          |
-| `unassignedTargets` | No       | Targets not yet assigned to a gateway |
 
 ### Gateway
 
 | Field                     | Required | Description                                                  |
 | ------------------------- | -------- | ------------------------------------------------------------ |
-| `name`                    | Yes      | Gateway name (alphanumeric, hyphens, 1-63 chars)             |
+| `name`                    | Yes      | Gateway name (alphanumeric, hyphens, 1-100 chars)            |
 | `description`             | No       | Gateway description                                          |
 | `targets`                 | Yes      | Array of gateway targets                                     |
 | `authorizerType`          | No       | `"NONE"` (default), `"AWS_IAM"`, or `"CUSTOM_JWT"`           |
@@ -443,9 +424,12 @@ Gateway and MCP tool configuration. Gateways, their targets, and standalone MCP 
 | Field             | Required | Description                                                            |
 | ----------------- | -------- | ---------------------------------------------------------------------- |
 | `discoveryUrl`    | Yes      | OIDC discovery URL (must end with `/.well-known/openid-configuration`) |
-| `allowedAudience` | Yes      | Array of allowed audience values                                       |
-| `allowedClients`  | Yes      | Array of allowed client IDs (at least 1)                               |
-| `allowedScopes`   | No       | Array of allowed scopes                                                |
+| `allowedAudience` | Cond.    | Array of allowed audience values                                       |
+| `allowedClients`  | Cond.    | Array of allowed client IDs                                            |
+| `allowedScopes`   | Cond.    | Array of allowed scopes                                                |
+| `customClaims`    | Cond.    | Custom claims for JWT validation                                       |
+
+> At least one of `allowedAudience`, `allowedClients`, `allowedScopes`, or `customClaims` must be provided.
 
 ### Gateway Target
 
@@ -477,14 +461,14 @@ implementations.
 }
 ```
 
-| Field             | Required | Description                                                          |
-| ----------------- | -------- | -------------------------------------------------------------------- |
-| `name`            | Yes      | Target name                                                          |
-| `targetType`      | Yes      | `"mcpServer"` or `"lambda"`                                          |
-| `endpoint`        | Cond.    | MCP server URL (required for external `mcpServer` targets)           |
-| `compute`         | Cond.    | Compute configuration (required for `lambda` and scaffolded targets) |
-| `toolDefinitions` | Cond.    | Array of tool definitions (required for `lambda` targets)            |
-| `outboundAuth`    | No       | Outbound authentication configuration                                |
+| Field             | Required | Description                                                                                             |
+| ----------------- | -------- | ------------------------------------------------------------------------------------------------------- |
+| `name`            | Yes      | Target name                                                                                             |
+| `targetType`      | Yes      | `"mcpServer"`, `"lambda"`, `"openApiSchema"`, `"smithyModel"`, `"apiGateway"`, or `"lambdaFunctionArn"` |
+| `endpoint`        | Cond.    | MCP server URL (required for external `mcpServer` targets)                                              |
+| `compute`         | Cond.    | Compute configuration (required for `lambda` and scaffolded targets)                                    |
+| `toolDefinitions` | Cond.    | Array of tool definitions (required for `lambda` targets)                                               |
+| `outboundAuth`    | No       | Outbound authentication configuration                                                                   |
 
 ### Outbound Auth
 

@@ -26,7 +26,6 @@ Memory is a **top-level resource** in the flat resource model. Memories are defi
 {
   "memories": [
     {
-      "type": "AgentCoreMemory",
       "name": "MyMemory",
       "eventExpiryDuration": 30,
       "strategies": [{ "type": "SEMANTIC" }, { "type": "SUMMARIZATION" }]
@@ -215,7 +214,6 @@ Memory events expire after a configurable duration (7-365 days, default 30):
 
 ```json
 {
-  "type": "AgentCoreMemory",
   "name": "MyMemory",
   "eventExpiryDuration": 90,
   "strategies": [{ "type": "SEMANTIC" }]
@@ -259,7 +257,6 @@ agentcore add memory \
 
 ```json
 {
-  "type": "AgentCoreMemory",
   "name": "MyMemory",
   "eventExpiryDuration": 30,
   "strategies": [{ "type": "SEMANTIC" }],

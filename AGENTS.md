@@ -31,10 +31,10 @@ These options are available on all commands:
 ## CLI Commands
 
 - `create` - Create new AgentCore project
-- `add` - Add resources (agent, memory, identity, evaluator, online-eval, gateway, gateway-target, policy-engine,
+- `add` - Add resources (agent, memory, credential, evaluator, online-eval, gateway, gateway-target, policy-engine,
   policy)
-- `remove` - Remove resources (agent, memory, identity, evaluator, online-eval, gateway, gateway-target, policy-engine,
-  policy, all)
+- `remove` - Remove resources (agent, memory, credential, evaluator, online-eval, gateway, gateway-target,
+  policy-engine, policy, all)
 - `deploy` - Deploy infrastructure to AWS
 - `status` - Check deployment status
 - `dev` - Local development server (CodeZip: uvicorn with hot-reload; Container: Docker build + run with volume mount)
@@ -68,10 +68,10 @@ These options are available on all commands:
 
 ## Primitives Architecture
 
-All resource types (agent, memory, identity, evaluator, online-eval, gateway, gateway-target, policy-engine, policy) are
-modeled as **primitives** -- self-contained classes in `src/cli/primitives/` that own the full add/remove lifecycle for
-their resource type. Resources support config-driven tagging via `agentcore.json` and `mcp.json`, with tags flowing
-through to deployed CloudFormation resources.
+All resource types (agent, memory, credential, evaluator, online-eval, gateway, gateway-target, policy-engine, policy)
+are modeled as **primitives** -- self-contained classes in `src/cli/primitives/` that own the full add/remove lifecycle
+for their resource type. Resources support config-driven tagging via `agentcore.json`, with tags flowing through to
+deployed CloudFormation resources.
 
 Each primitive extends `BasePrimitive` and implements: `add()`, `remove()`, `previewRemove()`, `getRemovable()`,
 `registerCommands()`, and `addScreen()`.
@@ -80,7 +80,7 @@ Current primitives:
 
 - `AgentPrimitive` — agent creation (template + BYO), removal, credential resolution
 - `MemoryPrimitive` — memory creation with strategies, removal
-- `CredentialPrimitive` — credential/identity creation, .env management, removal
+- `CredentialPrimitive` — credential creation, .env management, removal
 - `EvaluatorPrimitive` — custom evaluator creation/removal with cross-reference validation
 - `OnlineEvalConfigPrimitive` — online eval config creation/removal
 - `GatewayPrimitive` — gateway creation/removal

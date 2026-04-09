@@ -9,7 +9,7 @@ The `dev` command runs your agent locally for testing before deployment.
 agentcore dev
 
 # Specify agent
-agentcore dev --agent MyAgent
+agentcore dev --runtime MyAgent
 
 # Custom port
 agentcore dev --port 3000
@@ -29,7 +29,7 @@ agentcore dev --logs
 # Terminal 2: send prompts
 agentcore dev "What can you do?"
 agentcore dev "Tell me a story" --stream
-agentcore dev "Hello" --agent MyAgent
+agentcore dev "Hello" --runtime MyAgent
 ```
 
 ## Environment Setup
@@ -114,7 +114,7 @@ Memory requires deployment to test fully. For local testing, you can mock these 
 When you have deployed gateways, `agentcore dev` automatically injects gateway environment variables into your local
 agent process. This lets your local agent connect to real deployed gateways during development.
 
-The dev server reads `deployed-state.json` and `mcp.json` to generate:
+The dev server reads `deployed-state.json` and `agentcore.json` to generate:
 
 ```bash
 AGENTCORE_GATEWAY_{NAME}_URL=https://{gateway-id}.gateway.agentcore.{region}.amazonaws.com
