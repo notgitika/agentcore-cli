@@ -23,6 +23,7 @@ import {
   waitForPort,
 } from '../../operations/dev';
 import { getGatewayEnvVars } from '../../operations/dev/gateway-env.js';
+import { getMemoryEnvVars } from '../../operations/dev/memory-env.js';
 import { formatMcpToolList } from '../../operations/dev/utils';
 import { spawn } from 'child_process';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -60,6 +61,7 @@ export function useDevServer(options: {
   const [configRoot, setConfigRoot] = useState<string | undefined>(undefined);
   const [envVars, setEnvVars] = useState<Record<string, string>>({});
   const [configLoaded, setConfigLoaded] = useState(false);
+  const [hasUndeployedMemory, setHasUndeployedMemory] = useState(false);
   const [targetPort] = useState(options.port);
   const [actualPort, setActualPort] = useState(targetPort);
   const actualPortRef = useRef(targetPort);
@@ -105,9 +107,17 @@ export function useDevServer(options: {
       if (root) {
         const vars = await readEnvFile(root);
         const gatewayEnvVars = await getGatewayEnvVars();
-        // Gateway env vars go first, .env.local overrides take precedence
-        const mergedEnvVars = { ...gatewayEnvVars, ...vars };
+        const memoryEnvVars = await getMemoryEnvVars();
+        // Deployed-state env vars go first, .env.local overrides take precedence
+        const mergedEnvVars = { ...gatewayEnvVars, ...memoryEnvVars, ...vars };
         setEnvVars(mergedEnvVars);
+
+        // Show warning only when some configured memories aren't deployed yet
+        const configuredMemories = cfg?.memories ?? [];
+        if (configuredMemories.length > 0) {
+          const deployedCount = Object.keys(memoryEnvVars).length;
+          setHasUndeployedMemory(deployedCount < configuredMemories.length);
+        }
       }
 
       setConfigLoaded(true);
@@ -529,7 +539,7 @@ export function useDevServer(options: {
     restart,
     stop,
     logFilePath: loggerRef.current?.getRelativeLogPath(),
-    hasMemory: (project?.memories?.length ?? 0) > 0,
+    hasUndeployedMemory,
     hasVpc: project?.runtimes.find(a => a.name === config?.agentName)?.networkMode === 'VPC',
     protocol,
     mcpTools,

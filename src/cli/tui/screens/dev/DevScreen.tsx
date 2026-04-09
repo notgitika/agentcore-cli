@@ -191,7 +191,7 @@ export function DevScreen(props: DevScreenProps) {
     restart,
     stop,
     logFilePath,
-    hasMemory,
+    hasUndeployedMemory,
     hasVpc,
     protocol,
     mcpTools,
@@ -527,9 +527,10 @@ export function DevScreen(props: DevScreenProps) {
         </Box>
       )}
       {logFilePath && <LogLink filePath={logFilePath} />}
-      {protocol !== 'MCP' && hasMemory && (
+      {protocol !== 'MCP' && hasUndeployedMemory && (
         <Text color="yellow">
-          AgentCore memory is not available when running locally. To test memory, deploy and use invoke.
+          AgentCore memory must be deployed before it can be used. To test memory, run `agentcore deploy` and restart
+          dev.
         </Text>
       )}
       {hasVpc && (

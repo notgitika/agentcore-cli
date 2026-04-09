@@ -17,6 +17,7 @@ import {
   loadProjectConfig,
 } from '../../operations/dev';
 import { getGatewayEnvVars } from '../../operations/dev/gateway-env.js';
+import { getMemoryEnvVars } from '../../operations/dev/memory-env.js';
 import { FatalError } from '../../tui/components';
 import { LayoutProvider } from '../../tui/context';
 import { COMMAND_DESCRIPTIONS } from '../../tui/copy';
@@ -292,8 +293,9 @@ export const registerDev = (program: Command) => {
           const configRoot = findConfigRoot(workingDir);
           const envVars = configRoot ? await readEnvFile(configRoot) : {};
           const gatewayEnvVars = await getGatewayEnvVars();
-          // Gateway env vars go first, .env.local overrides take precedence
-          const mergedEnvVars = { ...gatewayEnvVars, ...envVars };
+          const memoryEnvVars = await getMemoryEnvVars();
+          // Deployed-state env vars go first, .env.local overrides take precedence
+          const mergedEnvVars = { ...gatewayEnvVars, ...memoryEnvVars, ...envVars };
           const config = getDevConfig(workingDir, project, configRoot ?? undefined, agentName);
 
           if (!config) {
