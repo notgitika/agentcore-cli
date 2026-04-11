@@ -134,31 +134,45 @@ export class ConfigIO {
   }
 
   /**
-   * Read AWS deployment targets with region overrides from environment/profile.
-   * Region precedence: AWS_REGION > AWS_DEFAULT_REGION > profile config > saved value.
+   * Read AWS deployment targets with region fallback from environment/profile.
+   * Region precedence: saved value > AWS_REGION > AWS_DEFAULT_REGION > profile config.
+   * Environment/profile region is only used as a fallback when no region is saved in aws-targets.json.
    */
   async resolveAWSDeploymentTargets(): Promise<AwsDeploymentTarget[]> {
     const targets = await this.readAWSDeploymentTargets();
 
-    // Override region from env vars
-    const envRegion = process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION;
-    if (envRegion && AgentCoreRegionSchema.safeParse(envRegion).success) {
-      return targets.map(t => ({ ...t, region: envRegion as AwsDeploymentTarget['region'] }));
+    // Only resolve region for targets that don't already have one saved
+    const fallbackRegion = await this.resolveRegionFallback();
+    if (!fallbackRegion) {
+      return targets;
     }
 
-    // Check profile config for region
+    return targets.map(t => (t.region ? t : { ...t, region: fallbackRegion as AwsDeploymentTarget['region'] }));
+  }
+
+  /**
+   * Resolve a fallback region from environment variables or AWS profile config.
+   */
+  private async resolveRegionFallback(): Promise<string | undefined> {
+    // Check env vars first
+    const envRegion = process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION;
+    if (envRegion && AgentCoreRegionSchema.safeParse(envRegion).success) {
+      return envRegion;
+    }
+
+    // Check profile config
     try {
       const profile = process.env.AWS_PROFILE ?? 'default';
       const config = await loadSharedConfigFiles();
       const profileRegion = config.configFile?.[profile]?.region;
       if (profileRegion && AgentCoreRegionSchema.safeParse(profileRegion).success) {
-        return targets.map(t => ({ ...t, region: profileRegion as AwsDeploymentTarget['region'] }));
+        return profileRegion;
       }
     } catch {
-      // Config file not available - use current targets
+      // Config file not available
     }
 
-    return targets;
+    return undefined;
   }
 
   /**
