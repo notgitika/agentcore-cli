@@ -30,10 +30,9 @@ const CFN_IAM_ROLE = 'AWS::IAM::Role';
 // ─── Test project directory ──────────────────────────────────────────────────
 // AgentCoreApplication calls findConfigRoot() which walks up from cwd looking
 // for agentcore/agentcore.json. We use setSessionProjectRoot() to point it at
-// our temp directory.
+// our temp directory instead of mutating process.cwd().
 
 let tmpDir: string;
-let originalCwd: string;
 
 beforeAll(() => {
   tmpDir = mkdtempSync(join(tmpdir(), 'agentcore-cdk-synth-test-'));
@@ -60,14 +59,11 @@ beforeAll(() => {
     writeFileSync(join(tmpDir, 'agents', dir, 'pyproject.toml'), minimalPyproject);
     writeFileSync(join(tmpDir, 'agents', dir, 'Dockerfile'), 'FROM python:3.12-slim\n');
   }
-  // Tell the CDK L3 construct where the project root is so findConfigRoot() succeeds
+  // Tell the CDK L3 construct where the project root is
   setSessionProjectRoot(tmpDir);
-  originalCwd = process.cwd();
-  process.chdir(tmpDir);
 });
 
 afterAll(() => {
-  process.chdir(originalCwd);
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -75,13 +71,13 @@ afterAll(() => {
 
 function synthStack(
   spec: AgentCoreProjectSpec,
-  mcpSpec?: unknown,
+  mcpSpec?: AgentCoreProjectSpec['agentCoreGateways'],
   credentials?: Record<string, { credentialProviderArn: string; clientSecretArn?: string }>
 ): Template {
   const app = new cdk.App();
   const stack = new AgentCoreStack(app, `TestStack${Date.now()}`, {
     spec,
-    mcpSpec: mcpSpec as never,
+    mcpSpec: mcpSpec ? { agentCoreGateways: mcpSpec } : undefined,
     credentials,
     env: { account: '123456789012', region: 'us-east-1' },
   });
@@ -92,19 +88,23 @@ function baseSpec(overrides: Partial<AgentCoreProjectSpec> = {}): AgentCoreProje
   return {
     name: 'testproject',
     version: 1,
-    agents: [],
+    managedBy: 'CDK',
+    runtimes: [],
     memories: [],
     credentials: [],
     evaluators: [],
     onlineEvalConfigs: [],
     policyEngines: [],
+    agentCoreGateways: [],
     ...overrides,
-  } as AgentCoreProjectSpec;
+  };
 }
 
-function makeAgent(name: string, overrides: Record<string, unknown> = {}) {
+function makeRuntime(
+  name: string,
+  overrides: Partial<AgentCoreProjectSpec['runtimes'][number]> = {}
+): AgentCoreProjectSpec['runtimes'][number] {
   return {
-    type: 'AgentEnvironment',
     name,
     build: 'CodeZip',
     entrypoint: 'main.py',
@@ -114,22 +114,22 @@ function makeAgent(name: string, overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeMemory(name: string, strategies: unknown[] = []) {
+function makeMemory(
+  name: string,
+  strategies: AgentCoreProjectSpec['memories'][number]['strategies'] = []
+): AgentCoreProjectSpec['memories'][number] {
   return {
-    type: 'AgentCoreMemory',
     name,
     eventExpiryDuration: 30,
     strategies,
   };
 }
 
-function makeEvaluator(name: string) {
+function makeEvaluator(name: string): AgentCoreProjectSpec['evaluators'][number] {
   return {
-    type: 'CustomEvaluator',
     name,
     level: 'SESSION',
     config: {
-      type: 'LlmAsAJudge',
       llmAsAJudge: {
         model: 'anthropic.claude-3-haiku-20240307-v1:0',
         instructions: 'Rate the response quality based on helpfulness and accuracy.',
@@ -145,9 +145,12 @@ function makeEvaluator(name: string) {
   };
 }
 
-function makeOnlineEvalConfig(name: string, agent: string, evaluators: string[]) {
+function makeOnlineEvalConfig(
+  name: string,
+  agent: string,
+  evaluators: string[]
+): AgentCoreProjectSpec['onlineEvalConfigs'][number] {
   return {
-    type: 'OnlineEvaluationConfig',
     name,
     agent,
     evaluators,
@@ -157,26 +160,24 @@ function makeOnlineEvalConfig(name: string, agent: string, evaluators: string[])
 
 function makeCredential(
   name: string,
-  type: 'ApiKeyCredentialProvider' | 'OAuthCredentialProvider' = 'ApiKeyCredentialProvider'
-) {
-  if (type === 'OAuthCredentialProvider') {
+  authorizerType: 'ApiKeyCredentialProvider' | 'OAuthCredentialProvider' = 'ApiKeyCredentialProvider'
+): AgentCoreProjectSpec['credentials'][number] {
+  if (authorizerType === 'OAuthCredentialProvider') {
     return {
-      type,
+      authorizerType,
       name,
       discoveryUrl: 'https://example.com/.well-known/openid-configuration',
       scopes: ['openid'],
     };
   }
-  return { type, name };
+  return { authorizerType, name };
 }
 
-function makePolicyEngine(name: string) {
+function makePolicyEngine(name: string): AgentCoreProjectSpec['policyEngines'][number] {
   return {
-    type: 'PolicyEngine',
     name,
     policies: [
       {
-        type: 'Policy',
         name: `${name}Policy`,
         statement: 'permit(principal, action, resource);',
       },
@@ -201,16 +202,14 @@ describe('CDK Synthesis Validation', () => {
   it('synthesizes a single CodeZip agent', () => {
     const template = synthStack(
       baseSpec({
-        agents: [makeAgent('myagent')] as never,
+        runtimes: [makeRuntime('myagent')],
       })
     );
 
-    // Should create an AgentCore Runtime resource
     template.hasResourceProperties(CFN_RUNTIME, {
       AgentRuntimeName: Match.stringLikeRegexp('myagent'),
     });
 
-    // Should create an IAM role for the agent
     template.hasResourceProperties(CFN_IAM_ROLE, {
       AssumeRolePolicyDocument: Match.objectLike({
         Statement: Match.arrayWith([
@@ -228,25 +227,28 @@ describe('CDK Synthesis Validation', () => {
   it('synthesizes a Container agent with ECR and CodeBuild', () => {
     const template = synthStack(
       baseSpec({
-        agents: [makeAgent('containeragent', { build: 'Container' })] as never,
+        runtimes: [makeRuntime('containeragent', { build: 'Container' })],
       })
     );
 
-    // Should create an ECR repository
-    template.hasResourceProperties(CFN_ECR_REPO, Match.anyValue());
+    template.hasResourceProperties(CFN_ECR_REPO, {
+      RepositoryName: Match.stringLikeRegexp('containeragent'),
+    });
 
-    // Should create a CodeBuild project for building the container
-    template.hasResourceProperties(CFN_CODEBUILD, Match.anyValue());
+    template.hasResourceProperties(CFN_CODEBUILD, {
+      Source: Match.objectLike({
+        Type: Match.anyValue(),
+      }),
+    });
   });
 
   it('synthesizes multiple agents', () => {
     const template = synthStack(
       baseSpec({
-        agents: [makeAgent('agent1'), makeAgent('agent2')] as never,
+        runtimes: [makeRuntime('agent1'), makeRuntime('agent2')],
       })
     );
 
-    // Should create 2 runtimes
     template.resourceCountIs(CFN_RUNTIME, 2);
   });
 
@@ -255,12 +257,14 @@ describe('CDK Synthesis Validation', () => {
   it('synthesizes agent with short-term memory (no strategies)', () => {
     const template = synthStack(
       baseSpec({
-        agents: [makeAgent('myagent')] as never,
-        memories: [makeMemory('ShortTermMem')] as never,
+        runtimes: [makeRuntime('myagent')],
+        memories: [makeMemory('ShortTermMem')],
       })
     );
 
-    template.hasResourceProperties(CFN_RUNTIME, Match.anyValue());
+    template.hasResourceProperties(CFN_RUNTIME, {
+      AgentRuntimeName: Match.stringLikeRegexp('myagent'),
+    });
     template.hasResourceProperties(CFN_MEMORY, {
       Name: Match.stringLikeRegexp('ShortTermMem'),
     });
@@ -269,10 +273,10 @@ describe('CDK Synthesis Validation', () => {
   it('synthesizes agent with long-term memory strategies', () => {
     const template = synthStack(
       baseSpec({
-        agents: [makeAgent('myagent')] as never,
+        runtimes: [makeRuntime('myagent')],
         memories: [
           makeMemory('LongTermMem', [{ type: 'SEMANTIC' }, { type: 'SUMMARIZATION' }, { type: 'USER_PREFERENCE' }]),
-        ] as never,
+        ],
       })
     );
 
@@ -286,24 +290,27 @@ describe('CDK Synthesis Validation', () => {
   it('synthesizes agent with API key credential', () => {
     const template = synthStack(
       baseSpec({
-        agents: [makeAgent('myagent')] as never,
-        credentials: [makeCredential('MyApiKey')] as never,
+        runtimes: [makeRuntime('myagent')],
+        credentials: [makeCredential('MyApiKey')],
       })
     );
 
-    // Agent runtime should exist — credential wiring happens at deploy time
-    template.hasResourceProperties(CFN_RUNTIME, Match.anyValue());
+    template.hasResourceProperties(CFN_RUNTIME, {
+      AgentRuntimeName: Match.stringLikeRegexp('myagent'),
+    });
   });
 
   it('synthesizes agent with OAuth credential', () => {
     const template = synthStack(
       baseSpec({
-        agents: [makeAgent('myagent')] as never,
-        credentials: [makeCredential('MyOAuth', 'OAuthCredentialProvider')] as never,
+        runtimes: [makeRuntime('myagent')],
+        credentials: [makeCredential('MyOAuth', 'OAuthCredentialProvider')],
       })
     );
 
-    template.hasResourceProperties(CFN_RUNTIME, Match.anyValue());
+    template.hasResourceProperties(CFN_RUNTIME, {
+      AgentRuntimeName: Match.stringLikeRegexp('myagent'),
+    });
   });
 
   // ─── Evaluator specs ──────────────────────────────────────────────────────
@@ -311,8 +318,8 @@ describe('CDK Synthesis Validation', () => {
   it('synthesizes custom evaluator', () => {
     const template = synthStack(
       baseSpec({
-        agents: [makeAgent('myagent')] as never,
-        evaluators: [makeEvaluator('QualityCheck')] as never,
+        runtimes: [makeRuntime('myagent')],
+        evaluators: [makeEvaluator('QualityCheck')],
       })
     );
 
@@ -326,24 +333,28 @@ describe('CDK Synthesis Validation', () => {
   it('synthesizes online eval config referencing project agent', () => {
     const template = synthStack(
       baseSpec({
-        agents: [makeAgent('myagent')] as never,
-        evaluators: [makeEvaluator('QualityCheck')] as never,
-        onlineEvalConfigs: [makeOnlineEvalConfig('MonitorQuality', 'myagent', ['QualityCheck'])] as never,
+        runtimes: [makeRuntime('myagent')],
+        evaluators: [makeEvaluator('QualityCheck')],
+        onlineEvalConfigs: [makeOnlineEvalConfig('MonitorQuality', 'myagent', ['QualityCheck'])],
       })
     );
 
-    template.hasResourceProperties(CFN_EVALUATOR, Match.anyValue());
+    template.hasResourceProperties(CFN_EVALUATOR, {
+      EvaluatorName: Match.stringLikeRegexp('QualityCheck'),
+    });
   });
 
   it('synthesizes online eval config with builtin evaluator', () => {
     const template = synthStack(
       baseSpec({
-        agents: [makeAgent('myagent')] as never,
-        onlineEvalConfigs: [makeOnlineEvalConfig('BuiltinMonitor', 'myagent', ['Builtin.GoalSuccessRate'])] as never,
+        runtimes: [makeRuntime('myagent')],
+        onlineEvalConfigs: [makeOnlineEvalConfig('BuiltinMonitor', 'myagent', ['Builtin.GoalSuccessRate'])],
       })
     );
 
-    template.hasResourceProperties(CFN_RUNTIME, Match.anyValue());
+    template.hasResourceProperties(CFN_RUNTIME, {
+      AgentRuntimeName: Match.stringLikeRegexp('myagent'),
+    });
   });
 
   // ─── Policy engine specs ──────────────────────────────────────────────────
@@ -351,16 +362,18 @@ describe('CDK Synthesis Validation', () => {
   it('synthesizes policy engine', () => {
     const template = synthStack(
       baseSpec({
-        agents: [makeAgent('myagent')] as never,
-        policyEngines: [makePolicyEngine('SafetyGuard')] as never,
+        runtimes: [makeRuntime('myagent')],
+        policyEngines: [makePolicyEngine('SafetyGuard')],
       })
     );
 
-    template.hasResourceProperties(CFN_POLICY_ENGINE, Match.anyValue());
+    template.hasResourceProperties(CFN_POLICY_ENGINE, {
+      Name: Match.stringLikeRegexp('SafetyGuard'),
+    });
     template.hasResourceProperties(CFN_POLICY, {
       Definition: Match.objectLike({
         Cedar: Match.objectLike({
-          Statement: Match.anyValue(),
+          Statement: Match.stringLikeRegexp('permit'),
         }),
       }),
     });
@@ -371,25 +384,27 @@ describe('CDK Synthesis Validation', () => {
   it('synthesizes a complete project with all resource types', () => {
     const template = synthStack(
       baseSpec({
-        agents: [makeAgent('primaryagent'), makeAgent('secondaryagent')] as never,
-        memories: [makeMemory('ProjectMemory', [{ type: 'SEMANTIC' }])] as never,
-        credentials: [
-          makeCredential('ProdApiKey'),
-          makeCredential('OAuthProvider', 'OAuthCredentialProvider'),
-        ] as never,
-        evaluators: [makeEvaluator('ResponseQuality')] as never,
+        runtimes: [makeRuntime('primaryagent'), makeRuntime('secondaryagent')],
+        memories: [makeMemory('ProjectMemory', [{ type: 'SEMANTIC' }])],
+        credentials: [makeCredential('ProdApiKey'), makeCredential('OAuthProvider', 'OAuthCredentialProvider')],
+        evaluators: [makeEvaluator('ResponseQuality')],
         onlineEvalConfigs: [
           makeOnlineEvalConfig('LiveMonitor', 'primaryagent', ['Builtin.GoalSuccessRate', 'ResponseQuality']),
-        ] as never,
-        policyEngines: [makePolicyEngine('ContentFilter')] as never,
+        ],
+        policyEngines: [makePolicyEngine('ContentFilter')],
       })
     );
 
-    // Verify resource counts
     template.resourceCountIs(CFN_RUNTIME, 2);
-    template.hasResourceProperties(CFN_MEMORY, Match.anyValue());
-    template.hasResourceProperties(CFN_EVALUATOR, Match.anyValue());
-    template.hasResourceProperties(CFN_POLICY_ENGINE, Match.anyValue());
+    template.hasResourceProperties(CFN_MEMORY, {
+      Name: Match.stringLikeRegexp('ProjectMemory'),
+    });
+    template.hasResourceProperties(CFN_EVALUATOR, {
+      EvaluatorName: Match.stringLikeRegexp('ResponseQuality'),
+    });
+    template.hasResourceProperties(CFN_POLICY_ENGINE, {
+      Name: Match.stringLikeRegexp('ContentFilter'),
+    });
   });
 
   // ─── Agent configuration variants ─────────────────────────────────────────
@@ -397,14 +412,14 @@ describe('CDK Synthesis Validation', () => {
   it('synthesizes agent with custom environment variables', () => {
     const template = synthStack(
       baseSpec({
-        agents: [
-          makeAgent('myagent', {
+        runtimes: [
+          makeRuntime('myagent', {
             envVars: [
               { name: 'MODEL_ID', value: 'anthropic.claude-3-haiku-20240307-v1:0' },
               { name: 'TEMPERATURE', value: '0.7' },
             ],
           }),
-        ] as never,
+        ],
       })
     );
 
@@ -416,7 +431,7 @@ describe('CDK Synthesis Validation', () => {
   it('synthesizes agent with MCP protocol', () => {
     const template = synthStack(
       baseSpec({
-        agents: [makeAgent('mcpagent', { protocol: 'MCP' })] as never,
+        runtimes: [makeRuntime('mcpagent', { protocol: 'MCP' })],
       })
     );
 
@@ -428,7 +443,7 @@ describe('CDK Synthesis Validation', () => {
   it('synthesizes agent with A2A protocol', () => {
     const template = synthStack(
       baseSpec({
-        agents: [makeAgent('a2aagent', { protocol: 'A2A' })] as never,
+        runtimes: [makeRuntime('a2aagent', { protocol: 'A2A' })],
       })
     );
 
@@ -440,41 +455,47 @@ describe('CDK Synthesis Validation', () => {
   // ─── Edge cases ───────────────────────────────────────────────────────────
 
   it('synthesizes with memories but no agents', () => {
-    // Valid scenario: user may add memory before adding agents
     const template = synthStack(
       baseSpec({
-        memories: [makeMemory('StandaloneMemory')] as never,
+        memories: [makeMemory('StandaloneMemory')],
       })
     );
 
-    template.hasResourceProperties(CFN_MEMORY, Match.anyValue());
+    template.hasResourceProperties(CFN_MEMORY, {
+      Name: Match.stringLikeRegexp('StandaloneMemory'),
+    });
     template.resourceCountIs(CFN_RUNTIME, 0);
   });
 
   it('synthesizes with evaluators but no online eval configs', () => {
     const template = synthStack(
       baseSpec({
-        agents: [makeAgent('myagent')] as never,
-        evaluators: [makeEvaluator('UnusedEval')] as never,
+        runtimes: [makeRuntime('myagent')],
+        evaluators: [makeEvaluator('UnusedEval')],
       })
     );
 
-    template.hasResourceProperties(CFN_EVALUATOR, Match.anyValue());
+    template.hasResourceProperties(CFN_EVALUATOR, {
+      EvaluatorName: Match.stringLikeRegexp('UnusedEval'),
+    });
   });
 
   it('synthesizes spec with maximum name lengths', () => {
-    // Agent name max is 48 chars, memory name max is 48 chars
     const longAgentName = 'a'.repeat(48);
     const longMemoryName = 'M'.repeat(48);
 
     const template = synthStack(
       baseSpec({
-        agents: [makeAgent(longAgentName)] as never,
-        memories: [makeMemory(longMemoryName)] as never,
+        runtimes: [makeRuntime(longAgentName)],
+        memories: [makeMemory(longMemoryName)],
       })
     );
 
-    template.hasResourceProperties(CFN_RUNTIME, Match.anyValue());
-    template.hasResourceProperties(CFN_MEMORY, Match.anyValue());
+    template.hasResourceProperties(CFN_RUNTIME, {
+      AgentRuntimeName: Match.stringLikeRegexp(longAgentName),
+    });
+    template.hasResourceProperties(CFN_MEMORY, {
+      Name: Match.stringLikeRegexp(longMemoryName),
+    });
   });
 });
