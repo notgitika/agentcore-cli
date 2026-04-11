@@ -1,7 +1,0 @@
-{
-  "tool_name": "Read",
-  "tool_input_preview": "{\"file_path\":\"/Users/gitikavj/.claude/projects/-Volumes-workplace-agentcore-agentcore-gh/00abd583-2ef0-45e8-9134-f395ce6d5bbe/tool-results/b4w8ow5ys.txt\"}",
-  "error": "File content (31694 tokens) exceeds maximum allowed tokens (25000). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.",
-  "timestamp": "2026-04-11T02:44:45.598Z",
-  "retry_count": 4
-}
