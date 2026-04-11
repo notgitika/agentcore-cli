@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { mkdir, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('ConfigIO', () => {
   let testDir: string;
@@ -283,6 +283,76 @@ describe('ConfigIO', () => {
 
       const readBack = await configIO.readMcpDefs();
       expect(readBack.tools).toEqual({});
+    });
+  });
+
+  describe('resolveAWSDeploymentTargets region handling (issue #772)', () => {
+    let projectDir: string;
+    let agentcoreDir: string;
+    let configIO: ConfigIO;
+    let savedEnv: Record<string, string | undefined>;
+
+    const validTarget = {
+      name: 'my-target',
+      account: '123456789012',
+      region: 'us-west-2',
+    };
+
+    beforeEach(() => {
+      projectDir = join(testDir, `resolve-targets-${randomUUID()}`);
+      agentcoreDir = join(projectDir, 'agentcore');
+      mkdirSync(agentcoreDir, { recursive: true });
+
+      // Save and clear env vars that affect region resolution
+      savedEnv = {
+        AWS_REGION: process.env.AWS_REGION,
+        AWS_DEFAULT_REGION: process.env.AWS_DEFAULT_REGION,
+        AWS_PROFILE: process.env.AWS_PROFILE,
+      };
+      delete process.env.AWS_REGION;
+      delete process.env.AWS_DEFAULT_REGION;
+      delete process.env.AWS_PROFILE;
+
+      writeFileSync(join(agentcoreDir, 'aws-targets.json'), JSON.stringify([validTarget]));
+      changeWorkingDir(projectDir);
+      configIO = new ConfigIO({ baseDir: agentcoreDir });
+    });
+
+    afterEach(() => {
+      // Restore env vars
+      for (const [key, value] of Object.entries(savedEnv)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+      vi.restoreAllMocks();
+    });
+
+    it('preserves saved region when AWS_REGION env var is set', async () => {
+      process.env.AWS_REGION = 'us-east-1';
+
+      const targets = await configIO.resolveAWSDeploymentTargets();
+
+      expect(targets).toHaveLength(1);
+      expect(targets[0]!.region).toBe('us-west-2');
+    });
+
+    it('preserves saved region when AWS_DEFAULT_REGION env var is set', async () => {
+      process.env.AWS_DEFAULT_REGION = 'eu-west-1';
+
+      const targets = await configIO.resolveAWSDeploymentTargets();
+
+      expect(targets).toHaveLength(1);
+      expect(targets[0]!.region).toBe('us-west-2');
+    });
+
+    it('returns saved region when no env vars are set', async () => {
+      const targets = await configIO.resolveAWSDeploymentTargets();
+
+      expect(targets).toHaveLength(1);
+      expect(targets[0]!.region).toBe('us-west-2');
     });
   });
 });
