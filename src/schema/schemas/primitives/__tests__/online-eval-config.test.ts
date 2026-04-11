@@ -118,13 +118,13 @@ describe('OnlineEvalConfigSchema', () => {
     expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(true);
   });
 
-  it('accepts config with both agent and custom log source fields', () => {
+  it('rejects config with both agent and custom log source fields', () => {
     const config = {
       ...validConfig,
       customLogGroupName: '/custom/log-group',
       customServiceName: 'custom-service',
     };
-    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(true);
+    expect(OnlineEvalConfigSchema.safeParse(config).success).toBe(false);
   });
 
   it('rejects config with neither agent nor custom log source fields', () => {

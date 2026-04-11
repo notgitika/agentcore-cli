@@ -50,24 +50,25 @@ export const OnlineEvalConfigSchema = z
   })
   .refine(
     data => {
-      const hasAgent = data.agent !== undefined;
-      const hasCustom = data.customLogGroupName !== undefined && data.customServiceName !== undefined;
-      return hasAgent || hasCustom;
-    },
-    {
-      message:
-        'Either "agent" must be provided (for project agents) or both "customLogGroupName" and "customServiceName" (for external agents)',
-    }
-  )
-  .refine(
-    data => {
-      // If one custom field is set, the other must also be set
+      // Custom fields must be provided together
       const hasLogGroup = data.customLogGroupName !== undefined;
       const hasServiceName = data.customServiceName !== undefined;
       return hasLogGroup === hasServiceName;
     },
     {
       message: 'Both "customLogGroupName" and "customServiceName" must be provided together',
+    }
+  )
+  .refine(
+    data => {
+      const hasAgent = data.agent !== undefined;
+      const hasCustom = data.customLogGroupName !== undefined && data.customServiceName !== undefined;
+      // Exactly one source must be specified, not both
+      return (hasAgent || hasCustom) && !(hasAgent && hasCustom);
+    },
+    {
+      message:
+        'Specify either "agent" (for project agents) or both "customLogGroupName" and "customServiceName" (for external agents), but not both',
     }
   );
 
