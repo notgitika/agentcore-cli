@@ -16,6 +16,7 @@ import {
   matchEnumValue,
 } from '../../../schema';
 import { ARN_VALIDATION_MESSAGE, isValidArn } from '../shared/arn-utils';
+import { validateHeaderAllowlist } from '../shared/header-utils';
 import { parseAndValidateLifecycleOptions } from '../shared/lifecycle-utils';
 import { validateVpcOptions } from '../shared/vpc-utils';
 import { validateJwtAuthorizerOptions } from './auth-options';
@@ -249,6 +250,14 @@ export function validateAddAgentOptions(options: AddAgentOptions): ValidationRes
         valid: false,
         error: `Invalid memory option: ${options.memory}. Use none, shortTerm, or longAndShortTerm`,
       };
+    }
+  }
+
+  // Validate request header allowlist
+  if (options.requestHeaderAllowlist) {
+    const headerResult = validateHeaderAllowlist(options.requestHeaderAllowlist);
+    if (!headerResult.success) {
+      return { valid: false, error: headerResult.error };
     }
   }
 
