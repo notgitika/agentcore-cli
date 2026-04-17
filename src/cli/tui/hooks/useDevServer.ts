@@ -1,4 +1,4 @@
-import { findConfigRoot, readEnvFile } from '../../../lib';
+import { findConfigRoot } from '../../../lib';
 import type { AgentCoreProjectSpec, ProtocolMode } from '../../../schema';
 import { detectContainerRuntime } from '../../external-requirements';
 import { DevLogger } from '../../logging/dev-logger';
@@ -19,11 +19,10 @@ import {
   invokeA2AStreaming,
   invokeAgentStreaming,
   listMcpTools,
+  loadDevEnv,
   loadProjectConfig,
   waitForPort,
 } from '../../operations/dev';
-import { getGatewayEnvVars } from '../../operations/dev/gateway-env.js';
-import { getMemoryEnvVars } from '../../operations/dev/memory-env.js';
 import { formatMcpToolList } from '../../operations/dev/utils';
 import { spawn } from 'child_process';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -103,20 +102,15 @@ export function useDevServer(options: {
       const cfg = await loadProjectConfig(options.workingDir);
       setProject(cfg);
 
-      // Load env vars from agentcore/.env
+      // Load env vars from deployed state + agentcore/.env
       if (root) {
-        const vars = await readEnvFile(root);
-        const gatewayEnvVars = await getGatewayEnvVars();
-        const memoryEnvVars = await getMemoryEnvVars();
-        // Deployed-state env vars go first, .env.local overrides take precedence
-        const mergedEnvVars = { ...gatewayEnvVars, ...memoryEnvVars, ...vars };
-        setEnvVars(mergedEnvVars);
+        const devEnv = await loadDevEnv(options.workingDir);
+        setEnvVars(devEnv.envVars);
 
         // Show warning only when some configured memories aren't deployed yet
         const configuredMemories = cfg?.memories ?? [];
         if (configuredMemories.length > 0) {
-          const deployedCount = Object.keys(memoryEnvVars).length;
-          setHasUndeployedMemory(deployedCount < configuredMemories.length);
+          setHasUndeployedMemory(devEnv.deployedMemoryCount < configuredMemories.length);
         }
       }
 
