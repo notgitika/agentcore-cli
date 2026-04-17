@@ -179,7 +179,7 @@ describe('integration: add and remove evaluators and online eval configs', () =>
 
     it('rejects online eval with missing required flags', async () => {
       const json = await runFailure(['add', 'online-eval', '--name', 'SomeConfig', '--json'], project.projectPath);
-      expect(json.error).toContain('--runtime');
+      expect(json.error).toContain('--evaluator');
     });
 
     it('rejects online eval with invalid sampling rate', async () => {
