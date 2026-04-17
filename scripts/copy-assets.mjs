@@ -53,9 +53,10 @@ try {
     copyDir(inspectorSrcDir, inspectorDestDir);
     console.log('@aws/agent-inspector assets copied successfully!');
   } else {
-    console.warn(
-      'Warning: @aws/agent-inspector dist-assets/ not found — skipping. Run "npm run build" in the agent-inspector package.'
+    console.error(
+      'Error: @aws/agent-inspector dist-assets/ not found. Run "npm install" to ensure the package is available.'
     );
+    process.exit(1);
   }
 } catch (error) {
   console.error('Error copying assets:', error);

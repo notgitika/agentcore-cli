@@ -61,6 +61,7 @@ export function useDevServer(options: {
   const [envVars, setEnvVars] = useState<Record<string, string>>({});
   const [configLoaded, setConfigLoaded] = useState(false);
   const [hasUndeployedMemory, setHasUndeployedMemory] = useState(false);
+  const [logFilePath, setLogFilePath] = useState<string | undefined>(undefined);
   const [targetPort] = useState(options.port);
   const [actualPort, setActualPort] = useState(targetPort);
   const actualPortRef = useRef(targetPort);
@@ -78,7 +79,9 @@ export function useDevServer(options: {
   const loggerRef = useRef<DevLogger | null>(null);
   const logsRef = useRef<LogEntry[]>([]);
   const onReadyRef = useRef(options.onReady);
-  onReadyRef.current = options.onReady;
+  useEffect(() => {
+    onReadyRef.current = options.onReady;
+  }, [options.onReady]);
   // Track instance ID to ignore callbacks from stale server instances
   const instanceIdRef = useRef(0);
   // Track if we're intentionally restarting to ignore exit callbacks
@@ -142,6 +145,7 @@ export function useDevServer(options: {
         baseDir: options.workingDir,
         agentName: config.agentName,
       });
+      setLogFilePath(loggerRef.current.getRelativeLogPath());
 
       // A2A servers always use port 9000, MCP servers use port 8000 (framework defaults, not configurable via env)
       const isA2A = config.protocol === 'A2A';
@@ -532,7 +536,7 @@ export function useDevServer(options: {
     clearConversation,
     restart,
     stop,
-    logFilePath: loggerRef.current?.getRelativeLogPath(),
+    logFilePath,
     hasUndeployedMemory,
     hasVpc: project?.runtimes.find(a => a.name === config?.agentName)?.networkMode === 'VPC',
     protocol,

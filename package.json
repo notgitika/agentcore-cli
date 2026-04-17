@@ -86,6 +86,7 @@
     "@aws-sdk/client-sts": "^3.893.0",
     "@aws-sdk/client-xray": "^3.1003.0",
     "@aws-sdk/credential-providers": "^3.893.0",
+    "@aws/agent-inspector": "0.1.0",
     "@commander-js/extra-typings": "^14.0.0",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/otlp-transformer": "^0.213.0",
@@ -100,7 +101,6 @@
     "js-yaml": "^4.1.1",
     "react": "^19.2.3",
     "yaml": "^2.8.3",
-    "@aws/agent-inspector": "0.1.0",
     "zod": "^4.3.5"
   },
   "peerDependencies": {
