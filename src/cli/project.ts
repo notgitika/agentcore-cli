@@ -18,7 +18,7 @@ export function createDefaultProjectSpec(projectName: string): AgentCoreProjectS
     onlineEvalConfigs: [],
     agentCoreGateways: [],
     policyEngines: [],
-
+    harnesses: [],
     tags: {
       'agentcore:created-by': 'agentcore-cli',
       'agentcore:project-name': projectName,

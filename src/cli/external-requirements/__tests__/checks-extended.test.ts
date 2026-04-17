@@ -53,6 +53,7 @@ describe('requiresUv', () => {
       onlineEvalConfigs: [],
       agentCoreGateways: [],
       policyEngines: [],
+      harnesses: [],
     };
     expect(requiresUv(project)).toBe(true);
   });
@@ -78,6 +79,7 @@ describe('requiresUv', () => {
       onlineEvalConfigs: [],
       agentCoreGateways: [],
       policyEngines: [],
+      harnesses: [],
     };
     expect(requiresUv(project)).toBe(false);
   });
@@ -94,6 +96,7 @@ describe('requiresUv', () => {
       onlineEvalConfigs: [],
       agentCoreGateways: [],
       policyEngines: [],
+      harnesses: [],
     };
     expect(requiresUv(project)).toBe(false);
   });
@@ -121,6 +124,7 @@ describe('requiresContainerRuntime', () => {
       onlineEvalConfigs: [],
       agentCoreGateways: [],
       policyEngines: [],
+      harnesses: [],
     };
     expect(requiresContainerRuntime(project)).toBe(true);
   });
@@ -146,6 +150,7 @@ describe('requiresContainerRuntime', () => {
       onlineEvalConfigs: [],
       agentCoreGateways: [],
       policyEngines: [],
+      harnesses: [],
     };
     expect(requiresContainerRuntime(project)).toBe(false);
   });
@@ -162,6 +167,7 @@ describe('requiresContainerRuntime', () => {
       onlineEvalConfigs: [],
       agentCoreGateways: [],
       policyEngines: [],
+      harnesses: [],
     };
     expect(requiresContainerRuntime(project)).toBe(false);
   });
@@ -195,6 +201,7 @@ describe('requiresContainerRuntime', () => {
       onlineEvalConfigs: [],
       agentCoreGateways: [],
       policyEngines: [],
+      harnesses: [],
     };
     expect(requiresContainerRuntime(project)).toBe(true);
   });
@@ -262,6 +269,7 @@ describe('checkDependencyVersions', () => {
       onlineEvalConfigs: [],
       agentCoreGateways: [],
       policyEngines: [],
+      harnesses: [],
     };
 
     const result = await checkDependencyVersions(project);
@@ -282,6 +290,7 @@ describe('checkDependencyVersions', () => {
       onlineEvalConfigs: [],
       agentCoreGateways: [],
       policyEngines: [],
+      harnesses: [],
     };
 
     const result = await checkDependencyVersions(project);
@@ -310,6 +319,7 @@ describe('checkDependencyVersions', () => {
       onlineEvalConfigs: [],
       agentCoreGateways: [],
       policyEngines: [],
+      harnesses: [],
     };
 
     const result = await checkDependencyVersions(project);

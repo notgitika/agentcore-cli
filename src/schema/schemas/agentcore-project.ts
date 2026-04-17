@@ -334,20 +334,13 @@ export const AgentCoreProjectSpecSchema = z
 
     harnesses: z
       .array(HarnessRegistryEntrySchema)
-      .optional()
-      .superRefine((harnesses, ctx) => {
-        if (!harnesses) return;
-        const seen = new Set<string>();
-        for (const harness of harnesses) {
-          if (seen.has(harness.name)) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              message: `Duplicate harness name: ${harness.name}`,
-            });
-          }
-          seen.add(harness.name);
-        }
-      }),
+      .default([])
+      .superRefine(
+        uniqueBy(
+          harness => harness.name,
+          name => `Duplicate harness name: ${name}`
+        )
+      ),
   })
   .strict()
   .superRefine((spec, ctx) => {
