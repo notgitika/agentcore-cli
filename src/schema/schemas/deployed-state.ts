@@ -142,6 +142,7 @@ export const HarnessDeployedStateSchema = z.object({
   harnessArn: z.string().min(1),
   roleArn: z.string().min(1),
   status: z.string().min(1),
+  agentRuntimeArn: z.string().optional(),
   memoryArn: z.string().optional(),
 });
 

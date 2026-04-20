@@ -61,4 +61,24 @@ describe('validateInvokeOptions', () => {
   it('returns valid with exec and prompt', () => {
     expect(validateInvokeOptions({ exec: true, prompt: 'ls -la' })).toEqual({ valid: true });
   });
+
+  it('returns invalid when --harness and --runtime are both specified', () => {
+    const result = validateInvokeOptions({ harnessName: 'h1', agentName: 'a1', prompt: 'hi' });
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('cannot be used together');
+  });
+
+  it('returns invalid when --verbose is used without --harness', () => {
+    const result = validateInvokeOptions({ verbose: true, prompt: 'hi' });
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('only supported with --harness');
+  });
+
+  it('returns valid with --harness and prompt', () => {
+    expect(validateInvokeOptions({ harnessName: 'h1', prompt: 'hi' })).toEqual({ valid: true });
+  });
+
+  it('returns valid with --harness and --verbose', () => {
+    expect(validateInvokeOptions({ harnessName: 'h1', verbose: true, prompt: 'hi' })).toEqual({ valid: true });
+  });
 });

@@ -16,7 +16,7 @@ interface InvokeScreenProps {
   initialBearerToken?: string;
 }
 
-type Mode = 'select-agent' | 'chat' | 'input' | 'token-input';
+type Mode = 'select-agent' | 'chat' | 'input' | 'token-input' | 'tool-approval';
 
 interface ColoredLine {
   text: string;
@@ -42,6 +42,8 @@ function formatConversation(
       lines.push({ text: `> ${msg.content}`, color: 'blue' });
     } else if (msg.isExec) {
       lines.push({ text: msg.content });
+    } else if (msg.isHint) {
+      lines.push({ text: msg.content, color: 'gray' });
     } else {
       lines.push({ text: msg.content, color: 'green' });
     }
@@ -128,15 +130,18 @@ export function InvokeScreen({
     bearerToken,
     tokenFetchState,
     mcpToolsFetched,
+    pendingToolApproval,
     selectAgent,
     setBearerToken,
     fetchBearerToken,
     invoke,
     execCommand,
+    respondToTool,
     newSession,
     fetchMcpTools,
   } = useInvokeFlow({ initialSessionId, initialUserId, headers: initialHeaders, initialBearerToken });
   const [mode, setMode] = useState<Mode>('select-agent');
+  const [toolApprovalIndex, setToolApprovalIndex] = useState(0);
   const [isExecInput, setIsExecInput] = useState(false);
   const [execInputEmpty, setExecInputEmpty] = useState(true);
   const [scrollOffset, setScrollOffset] = useState(0);
@@ -149,13 +154,15 @@ export function InvokeScreen({
   const currentAgent = config?.runtimes[selectedAgent];
   const isCustomJwt = currentAgent?.authorizerType === 'CUSTOM_JWT';
 
-  // Handle initial prompt - skip agent selection if only one agent
+  // Handle initial prompt - skip agent selection if only one invokable
+  const totalInvokables = (config?.runtimes.length ?? 0) + (config?.harnesses.length ?? 0);
   useEffect(() => {
     if (config && phase === 'ready') {
-      if (config.runtimes.length === 1 && mode === 'select-agent') {
+      if (totalInvokables === 1 && mode === 'select-agent') {
         const agent = config.runtimes[0];
-        const needsTokenScreen = agent?.authorizerType === 'CUSTOM_JWT' && !bearerToken && !initialBearerToken;
-        // Defer setState to avoid cascading renders within effect
+        const isHarness = config.runtimes.length === 0;
+        const needsTokenScreen =
+          !isHarness && agent?.authorizerType === 'CUSTOM_JWT' && !bearerToken && !initialBearerToken;
         queueMicrotask(() => {
           setMode(needsTokenScreen ? 'token-input' : 'input');
         });
@@ -164,7 +171,7 @@ export function InvokeScreen({
         }
       }
     }
-  }, [config, phase, initialPrompt, messages.length, invoke, mode, bearerToken, initialBearerToken]);
+  }, [config, phase, initialPrompt, messages.length, invoke, mode, bearerToken, initialBearerToken, totalInvokables]);
 
   // Auto-exit when prompt was provided upfront and response completes
   useEffect(() => {
@@ -182,11 +189,17 @@ export function InvokeScreen({
     }
   }, [config, selectedAgent, phase, mode, fetchMcpTools]);
 
-  // Return to input mode after invoke completes
+  // Return to input mode after invoke completes, or show tool approval
   const prevPhaseRef = useRef(phase);
   useEffect(() => {
     if (prevPhaseRef.current === 'invoking' && phase === 'ready' && !initialPrompt) {
       queueMicrotask(() => setMode('input'));
+    }
+    if (phase === 'tool-approval') {
+      queueMicrotask(() => {
+        setToolApprovalIndex(0);
+        setMode('tool-approval');
+      });
     }
     prevPhaseRef.current = phase;
   }, [phase, initialPrompt]);
@@ -251,12 +264,16 @@ export function InvokeScreen({
           onExit();
           return;
         }
-        if (key.upArrow) selectAgent((selectedAgent - 1 + config.runtimes.length) % config.runtimes.length);
-        if (key.downArrow) selectAgent((selectedAgent + 1) % config.runtimes.length);
+        if (key.upArrow) selectAgent((selectedAgent - 1 + totalInvokables) % totalInvokables);
+        if (key.downArrow) selectAgent((selectedAgent + 1) % totalInvokables);
         if (key.return) {
-          const chosen = config.runtimes[selectedAgent];
-          const needsTokenScreen = chosen?.authorizerType === 'CUSTOM_JWT' && !bearerToken && !initialBearerToken;
-          setMode(needsTokenScreen ? 'token-input' : 'input');
+          if (selectedAgent >= config.runtimes.length) {
+            setMode('input');
+          } else {
+            const chosen = config.runtimes[selectedAgent];
+            const needsTokenScreen = chosen?.authorizerType === 'CUSTOM_JWT' && !bearerToken && !initialBearerToken;
+            setMode(needsTokenScreen ? 'token-input' : 'input');
+          }
         }
         return;
       }
@@ -268,7 +285,7 @@ export function InvokeScreen({
             justCancelledRef.current = false;
             return;
           }
-          if (config.runtimes.length > 1) {
+          if (totalInvokables > 1) {
             setMode('select-agent');
             return;
           }
@@ -284,8 +301,8 @@ export function InvokeScreen({
           return;
         }
 
-        // New session
-        if (input === 'n' && phase === 'ready') {
+        // New session (Ctrl+N)
+        if (key.ctrl && input === 'n' && phase === 'ready') {
           newSession();
           setScrollOffset(0);
           setUserScrolled(false);
@@ -300,6 +317,26 @@ export function InvokeScreen({
       }
     },
     { isActive: mode === 'chat' || mode === 'select-agent' }
+  );
+
+  const TOOL_APPROVAL_OPTIONS = ['Yes', 'No', 'Custom response'] as const;
+
+  useInput(
+    (input, key) => {
+      if (key.upArrow) setToolApprovalIndex(prev => Math.max(0, prev - 1));
+      if (key.downArrow) setToolApprovalIndex(prev => Math.min(TOOL_APPROVAL_OPTIONS.length - 1, prev + 1));
+      if (key.return) {
+        const choice = TOOL_APPROVAL_OPTIONS[toolApprovalIndex];
+        if (choice === 'Yes') {
+          void respondToTool(true, 'Approved');
+        } else if (choice === 'No') {
+          void respondToTool(false, 'Denied by user');
+        } else {
+          setMode('input');
+        }
+      }
+    },
+    { isActive: mode === 'tool-approval' }
   );
 
   // Auto-fetch bearer token to pre-populate the token screen
@@ -332,7 +369,10 @@ export function InvokeScreen({
     return null;
   }
 
-  const agent = config.runtimes[selectedAgent];
+  const isHarnessSelected = selectedAgent >= config.runtimes.length;
+  const agent = isHarnessSelected ? undefined : config.runtimes[selectedAgent];
+  const selectedHarness = isHarnessSelected ? config.harnesses[selectedAgent - config.runtimes.length] : undefined;
+  const selectedName = agent?.name ?? selectedHarness?.name;
   const traceUrl =
     mode !== 'select-agent' && agent
       ? buildTraceConsoleUrl({
@@ -342,36 +382,45 @@ export function InvokeScreen({
           agentName: agent.name,
         })
       : undefined;
-  const agentProtocol = agent?.protocol ?? 'HTTP';
+  const agentProtocol = isHarnessSelected ? undefined : (agent?.protocol ?? 'HTTP');
 
-  const agentItems = config.runtimes.map((a, i) => ({
-    id: String(i),
-    title: a.name,
-    description: `${a.protocol && a.protocol !== 'HTTP' ? `${a.protocol} · ` : ''}Runtime: ${a.state.runtimeId}`,
-  }));
+  const agentItems = [
+    ...config.runtimes.map((a, i) => ({
+      id: String(i),
+      title: a.name,
+      description: `${a.protocol && a.protocol !== 'HTTP' ? `${a.protocol} · ` : ''}Agent Runtime`,
+    })),
+    ...config.harnesses.map((h, i) => ({
+      id: String(config.runtimes.length + i),
+      title: h.name,
+      description: 'Harness (managed loop)',
+    })),
+  ];
 
-  const isMcp = agentProtocol === 'MCP';
+  const isMcp = !isHarnessSelected && agentProtocol === 'MCP';
 
   // Dynamic help text
-  const backOrQuit = config.runtimes.length > 1 ? 'Esc back' : 'Esc quit';
+  const backOrQuit = totalInvokables > 1 ? 'Esc back' : 'Esc quit';
   const helpText =
     mode === 'select-agent'
       ? '↑↓ select · Enter confirm · Esc quit'
-      : mode === 'token-input'
-        ? 'Enter confirm · Esc skip'
-        : mode === 'input'
-          ? isExecInput
-            ? 'Enter run · Esc cancel · Backspace to exit exec mode'
-            : isMcp
-              ? 'Enter send · Esc cancel · "list" to refresh tools · ! exec mode'
-              : 'Enter send · Esc cancel · ! exec mode'
-          : phase === 'invoking'
-            ? '↑↓ scroll'
-            : messages.length > 0
-              ? `↑↓ scroll · Enter invoke · N new session · ${backOrQuit}`
+      : mode === 'tool-approval'
+        ? '↑↓ navigate · Enter select'
+        : mode === 'token-input'
+          ? 'Enter confirm · Esc skip'
+          : mode === 'input'
+            ? isExecInput
+              ? 'Enter run · Esc cancel · Backspace to exit exec mode'
               : isMcp
-                ? `Enter to call a tool · N new session · ${backOrQuit}`
-                : `Enter to send a message · ${backOrQuit}`;
+                ? 'Enter send · Esc cancel · "list" to refresh tools · ! exec mode'
+                : 'Enter send · Esc cancel · ! exec mode'
+            : phase === 'invoking'
+              ? '↑↓ scroll'
+              : messages.length > 0
+                ? `↑↓ scroll · Enter invoke · Ctrl+N new session · ${backOrQuit}`
+                : isMcp
+                  ? `Enter to call a tool · Ctrl+N new session · ${backOrQuit}`
+                  : `Enter to send a message · ${backOrQuit}`;
 
   const headerContent = (
     <Box flexDirection="column">
@@ -381,11 +430,11 @@ export function InvokeScreen({
       </Box>
       {mode !== 'select-agent' && (
         <Box>
-          <Text>Agent: </Text>
-          <Text color="cyan">{agent?.name}</Text>
+          <Text>{isHarnessSelected ? 'Harness: ' : 'Agent: '}</Text>
+          <Text color="cyan">{selectedName}</Text>
         </Box>
       )}
-      {mode !== 'select-agent' && agentProtocol !== 'HTTP' && (
+      {mode !== 'select-agent' && !isHarnessSelected && agentProtocol && agentProtocol !== 'HTTP' && (
         <Box>
           <Text>Protocol: </Text>
           <Text color="cyan">{agentProtocol}</Text>
@@ -422,7 +471,7 @@ export function InvokeScreen({
         </Text>
       )}
       {traceUrl && <Text dimColor>Note: Traces may take 2-3 minutes to appear in CloudWatch</Text>}
-      {mode !== 'select-agent' && agent?.networkMode === 'VPC' && (
+      {mode !== 'select-agent' && !isHarnessSelected && agent?.networkMode === 'VPC' && (
         <Text color="yellow">
           This agent uses VPC network mode. Ensure your VPC endpoints are configured for invocation.
         </Text>
@@ -473,7 +522,9 @@ export function InvokeScreen({
         {/* Scroll indicator */}
         {needsScroll && (
           <Text dimColor>
-            [{effectiveOffset + 1}-{Math.min(effectiveOffset + displayHeight, totalLines)} of {totalLines}]
+            {effectiveOffset > 0 ? '▲ ' : '  '}
+            ↑↓ scroll
+            {effectiveOffset < maxScroll ? ' ▼' : '  '}
           </Text>
         )}
 
@@ -515,7 +566,26 @@ export function InvokeScreen({
             )}
           </Box>
         )}
-        {mode === 'input' && phase === 'ready' && (
+        {mode === 'tool-approval' && pendingToolApproval && (
+          <Box flexDirection="column" marginTop={1}>
+            <Panel title={`⏸ ${pendingToolApproval.toolName}`} fullWidth>
+              <Box flexDirection="column">
+                {Object.keys(pendingToolApproval.input).length > 0 && (
+                  <Text dimColor>Input: {JSON.stringify(pendingToolApproval.input, null, 2)}</Text>
+                )}
+                <Box marginTop={1} flexDirection="column">
+                  {TOOL_APPROVAL_OPTIONS.map((opt, idx) => (
+                    <Text key={opt} color={idx === toolApprovalIndex ? 'cyan' : undefined}>
+                      {idx === toolApprovalIndex ? '❯ ' : '  '}
+                      {opt}
+                    </Text>
+                  ))}
+                </Box>
+              </Box>
+            </Panel>
+          </Box>
+        )}
+        {mode === 'input' && (phase === 'ready' || phase === 'tool-approval') && (
           <>
             <Box>
               <Text color={isExecInput ? 'magenta' : 'blue'}>{isExecInput ? '! ' : '> '}</Text>
@@ -547,11 +617,15 @@ export function InvokeScreen({
                   if (trimmed) {
                     setMode('chat');
                     setUserScrolled(false);
-                    if (isExecInput) {
+                    if (pendingToolApproval) {
+                      void respondToTool(true, trimmed);
+                    } else if (isExecInput) {
                       void execCommand(trimmed);
                     } else {
                       void invoke(text);
                     }
+                  } else if (pendingToolApproval) {
+                    setMode('tool-approval');
                   } else if (!isExecInput) {
                     setMode('chat');
                   }
@@ -559,6 +633,8 @@ export function InvokeScreen({
                 onCancel={() => {
                   if (isExecInput) {
                     setIsExecInput(false);
+                  } else if (pendingToolApproval) {
+                    setMode('tool-approval');
                   } else {
                     justCancelledRef.current = true;
                     setMode('chat');

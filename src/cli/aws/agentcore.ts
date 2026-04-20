@@ -14,10 +14,19 @@ import type { DocumentType } from '@smithy/types';
 /**
  * Create a BedrockAgentCoreClient with optional custom header injection middleware.
  */
+function resolveDataPlaneEndpoint(region: string): string | undefined {
+  const stage = process.env.AGENTCORE_STAGE?.toLowerCase();
+  if (stage === 'beta') return `https://beta.${region}.elcapdp.genesis-primitives.aws.dev`;
+  if (stage === 'gamma') return `https://gamma.${region}.elcapdp.genesis-primitives.aws.dev`;
+  return undefined;
+}
+
 function createAgentCoreClient(region: string, headers?: Record<string, string>): BedrockAgentCoreClient {
+  const endpoint = resolveDataPlaneEndpoint(region);
   const client = new BedrockAgentCoreClient({
     region,
     credentials: getCredentialProvider(),
+    ...(endpoint && { endpoint }),
   });
 
   if (headers && Object.keys(headers).length > 0) {

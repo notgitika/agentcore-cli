@@ -408,102 +408,159 @@ export async function* invokeHarness(options: InvokeHarnessOptions): AsyncGenera
 }
 
 async function* parseEventStream(body: ReadableStream<Uint8Array>): AsyncGenerator<HarnessStreamEvent> {
+  const { EventStreamCodec } = await import('@smithy/eventstream-codec');
+  const codec = new EventStreamCodec(toUtf8, fromUtf8);
   const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
+  let buffer: Uint8Array<ArrayBuffer> = new Uint8Array(0);
 
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
+      buffer = concatBuffers(buffer, new Uint8Array(value));
 
-      for (const line of lines) {
-        const event = parseLine(line);
-        if (event) yield event;
+      while (buffer.length >= 4) {
+        const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+        const totalLength = view.getUint32(0);
+        if (buffer.length < totalLength) break;
+
+        const frame = buffer.slice(0, totalLength);
+        buffer = buffer.slice(totalLength);
+
+        try {
+          const message = codec.decode(frame);
+          const headers: Record<string, string> = {};
+          for (const [key, val] of Object.entries(message.headers)) {
+            headers[key] = String(val.value);
+          }
+
+          if (headers[':message-type'] === 'error') {
+            yield {
+              type: 'error',
+              errorType: headers[':error-code'] ?? 'unknown',
+              message: headers[':error-message'] ?? 'Unknown error',
+            };
+            continue;
+          }
+
+          if (headers[':message-type'] === 'exception') {
+            const exBody = new TextDecoder().decode(message.body);
+            let msg = exBody;
+            try {
+              const parsed = JSON.parse(exBody) as { message?: string };
+              msg = parsed.message ?? exBody;
+            } catch {
+              // use raw body
+            }
+            yield {
+              type: 'error',
+              errorType: headers[':exception-type'] ?? 'exception',
+              message: msg,
+            };
+            continue;
+          }
+
+          const eventType = headers[':event-type'];
+          if (!eventType) continue;
+
+          const bodyText = new TextDecoder().decode(message.body);
+          if (!bodyText) continue;
+
+          const event = parseEventPayload(eventType, bodyText);
+          if (event) yield event;
+        } catch {
+          // skip malformed frames
+        }
       }
-    }
-
-    if (buffer.trim()) {
-      const event = parseLine(buffer);
-      if (event) yield event;
     }
   } finally {
     reader.releaseLock();
   }
 }
 
-function parseLine(line: string): HarnessStreamEvent | null {
-  const trimmed = line.trim();
-  if (!trimmed || trimmed.startsWith(':')) return null;
+function toUtf8(input: Uint8Array): string {
+  return new TextDecoder().decode(input);
+}
 
+function fromUtf8(input: string): Uint8Array {
+  return new TextEncoder().encode(input);
+}
+
+function concatBuffers(a: Uint8Array<ArrayBuffer>, b: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
+  const result = new Uint8Array(a.length + b.length);
+  result.set(a, 0);
+  result.set(b, a.length);
+  return result;
+}
+
+function parseEventPayload(eventType: string, bodyText: string): HarnessStreamEvent | null {
   let payload: Record<string, unknown>;
-  const dataPrefix = 'data: ';
-  const raw = trimmed.startsWith(dataPrefix) ? trimmed.slice(dataPrefix.length) : trimmed;
-
   try {
-    payload = JSON.parse(raw) as Record<string, unknown>;
+    payload = JSON.parse(bodyText) as Record<string, unknown>;
   } catch {
     return null;
   }
 
-  if ('messageStart' in payload) {
-    const ms = payload.messageStart as { role: string };
-    return { type: 'messageStart', role: ms.role };
-  }
+  switch (eventType) {
+    case 'messageStart':
+      return { type: 'messageStart', role: (payload.role as string) ?? 'assistant' };
 
-  if ('contentBlockStart' in payload) {
-    const cbs = payload.contentBlockStart as { contentBlockIndex: number; start: Record<string, unknown> };
-    return {
-      type: 'contentBlockStart',
-      contentBlockIndex: cbs.contentBlockIndex,
-      start: parseContentBlockStart(cbs.start),
-    };
-  }
+    case 'contentBlockStart': {
+      const start = (payload.start as Record<string, unknown>) ?? payload;
+      return {
+        type: 'contentBlockStart',
+        contentBlockIndex: (payload.contentBlockIndex as number) ?? 0,
+        start: parseContentBlockStart(start),
+      };
+    }
 
-  if ('contentBlockDelta' in payload) {
-    const cbd = payload.contentBlockDelta as { contentBlockIndex: number; delta: Record<string, unknown> };
-    return {
-      type: 'contentBlockDelta',
-      contentBlockIndex: cbd.contentBlockIndex,
-      delta: parseContentBlockDelta(cbd.delta),
-    };
-  }
+    case 'contentBlockDelta': {
+      const delta = (payload.delta as Record<string, unknown>) ?? payload;
+      return {
+        type: 'contentBlockDelta',
+        contentBlockIndex: (payload.contentBlockIndex as number) ?? 0,
+        delta: parseContentBlockDelta(delta),
+      };
+    }
 
-  if ('contentBlockStop' in payload) {
-    const stop = payload.contentBlockStop as { contentBlockIndex: number };
-    return { type: 'contentBlockStop', contentBlockIndex: stop.contentBlockIndex };
-  }
+    case 'contentBlockStop':
+      return { type: 'contentBlockStop', contentBlockIndex: (payload.contentBlockIndex as number) ?? 0 };
 
-  if ('messageStop' in payload) {
-    const ms = payload.messageStop as { stopReason: HarnessStopReason };
-    return { type: 'messageStop', stopReason: ms.stopReason };
-  }
+    case 'messageStop':
+      return { type: 'messageStop', stopReason: (payload.stopReason as HarnessStopReason) ?? 'end_turn' };
 
-  if ('metadata' in payload) {
-    const md = payload.metadata as { usage: TokenUsage; metrics: StreamMetrics };
-    return { type: 'metadata', usage: md.usage, metrics: md.metrics };
-  }
+    case 'metadata':
+      return {
+        type: 'metadata',
+        usage: (payload.usage as TokenUsage) ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        metrics: (payload.metrics as StreamMetrics) ?? { latencyMs: 0 },
+      };
 
-  if ('internalServerException' in payload) {
-    const ex = payload.internalServerException as { message?: string };
-    return { type: 'error', errorType: 'internalServerException', message: ex.message ?? 'Internal server error' };
-  }
+    case 'internalServerException':
+      return {
+        type: 'error',
+        errorType: 'internalServerException',
+        message: (payload.message as string) ?? 'Internal server error',
+      };
 
-  if ('validationException' in payload) {
-    const ex = payload.validationException as { message?: string };
-    return { type: 'error', errorType: 'validationException', message: ex.message ?? 'Validation error' };
-  }
+    case 'validationException':
+      return {
+        type: 'error',
+        errorType: 'validationException',
+        message: (payload.message as string) ?? 'Validation error',
+      };
 
-  if ('runtimeClientError' in payload) {
-    const ex = payload.runtimeClientError as { message?: string };
-    return { type: 'error', errorType: 'runtimeClientError', message: ex.message ?? 'Runtime client error' };
-  }
+    case 'runtimeClientError':
+      return {
+        type: 'error',
+        errorType: 'runtimeClientError',
+        message: (payload.message as string) ?? 'Runtime client error',
+      };
 
-  return null;
+    default:
+      return null;
+  }
 }
 
 function parseContentBlockStart(start: Record<string, unknown>): ContentBlockStart {

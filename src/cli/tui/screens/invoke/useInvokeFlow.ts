@@ -2,6 +2,7 @@ import { ConfigIO } from '../../../../lib';
 import type {
   AgentCoreDeployedState,
   AwsDeploymentTarget,
+  HarnessDeployedState,
   ModelProvider,
   NetworkMode,
   ProtocolMode,
@@ -17,6 +18,7 @@ import {
   mcpCallTool,
   mcpListTools,
 } from '../../../aws';
+import { invokeHarness } from '../../../aws/agentcore-harness';
 import { getErrorMessage } from '../../../errors';
 import { InvokeLogger } from '../../../logging';
 import { formatMcpToolList } from '../../../operations/dev/utils';
@@ -33,6 +35,10 @@ export interface InvokeConfig {
     protocol?: ProtocolMode;
     authorizerType?: RuntimeAuthorizerType;
   }[];
+  harnesses: {
+    name: string;
+    state: HarnessDeployedState;
+  }[];
   target: AwsDeploymentTarget;
   targetName: string;
   projectName: string;
@@ -48,8 +54,16 @@ export interface InvokeFlowOptions {
 
 export type TokenFetchState = 'idle' | 'fetching' | 'fetched' | 'error';
 
+export interface PendingToolApproval {
+  toolUseId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  harnessArn: string;
+  sessionId: string;
+}
+
 export interface InvokeFlowState {
-  phase: 'loading' | 'ready' | 'invoking' | 'error';
+  phase: 'loading' | 'ready' | 'invoking' | 'tool-approval' | 'error';
   config: InvokeConfig | null;
   selectedAgent: number;
   messages: { role: 'user' | 'assistant'; content: string; isHint?: boolean }[];
@@ -63,19 +77,22 @@ export interface InvokeFlowState {
   tokenExpiresIn: number | undefined;
   mcpTools: McpToolDef[];
   mcpToolsFetched: boolean;
+  pendingToolApproval: PendingToolApproval | null;
   selectAgent: (index: number) => void;
   setUserId: (id: string) => void;
   setBearerToken: (token: string) => void;
   fetchBearerToken: () => Promise<void>;
   invoke: (prompt: string) => Promise<void>;
   execCommand: (command: string) => Promise<void>;
+  respondToTool: (approved: boolean, response: string) => Promise<void>;
   newSession: () => void;
   fetchMcpTools: () => Promise<void>;
 }
 
 export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState {
   const { initialSessionId, initialUserId, headers, initialBearerToken } = options;
-  const [phase, setPhase] = useState<'loading' | 'ready' | 'invoking' | 'error'>('loading');
+  const [phase, setPhase] = useState<'loading' | 'ready' | 'invoking' | 'tool-approval' | 'error'>('loading');
+  const [pendingToolApproval, setPendingToolApproval] = useState<PendingToolApproval | null>(null);
   const [config, setConfig] = useState<InvokeConfig | null>(null);
   const [selectedAgent, setSelectedAgent] = useState(0);
   const [messages, setMessages] = useState<
@@ -139,13 +156,20 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
           });
         }
 
-        if (runtimes.length === 0) {
-          setError('No deployed agents found. Run `agentcore deploy` first.');
+        const harnesses: InvokeConfig['harnesses'] = [];
+        for (const harness of project.harnesses ?? []) {
+          const state = targetState?.resources?.harnesses?.[harness.name];
+          if (!state) continue;
+          harnesses.push({ name: harness.name, state });
+        }
+
+        if (runtimes.length === 0 && harnesses.length === 0) {
+          setError('No deployed agents or harnesses found. Run `agentcore deploy` first.');
           setPhase('error');
           return;
         }
 
-        setConfig({ runtimes, target: targetConfig, targetName, projectName: project.name });
+        setConfig({ runtimes, harnesses, target: targetConfig, targetName, projectName: project.name });
 
         // Initialize session ID - always generate fresh unless explicitly provided
         if (initialSessionId) {
@@ -231,20 +255,135 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
   // Track current streaming content to avoid stale closure issues
   const streamingContentRef = useRef('');
 
+  const streamHarnessInvoke = useCallback(
+    async (
+      region: string,
+      harnessArn: string,
+      runtimeSessionId: string,
+      harnessMessages: { role: string; content: Record<string, unknown>[] }[]
+    ) => {
+      let pendingToolUseId: string | undefined;
+      let pendingToolName: string | undefined;
+      let pendingToolInput = '';
+
+      try {
+        const stream = invokeHarness({
+          region,
+          harnessArn,
+          runtimeSessionId,
+          messages: harnessMessages,
+        });
+
+        for await (const event of stream) {
+          switch (event.type) {
+            case 'contentBlockDelta':
+              if (event.delta.type === 'text') {
+                streamingContentRef.current += event.delta.text;
+                const currentContent = streamingContentRef.current;
+                setMessages(prev => {
+                  const updated = [...prev];
+                  const lastIdx = updated.length - 1;
+                  if (lastIdx >= 0 && updated[lastIdx]?.role === 'assistant') {
+                    updated[lastIdx] = { role: 'assistant', content: currentContent };
+                  }
+                  return updated;
+                });
+              } else if (event.delta.type === 'toolUse') {
+                pendingToolInput += event.delta.input;
+              }
+              break;
+            case 'contentBlockStart':
+              if (event.start.type === 'toolUse') {
+                pendingToolUseId = event.start.toolUse.toolUseId;
+                pendingToolName = event.start.toolUse.name;
+                pendingToolInput = '';
+                const serverName = event.start.toolUse.serverName;
+                const label = serverName ? `${serverName}/${pendingToolName}` : pendingToolName;
+                streamingContentRef.current += `\n🔧 Tool: ${label}\n`;
+                const currentContent = streamingContentRef.current;
+                setMessages(prev => {
+                  const updated = [...prev];
+                  const lastIdx = updated.length - 1;
+                  if (lastIdx >= 0 && updated[lastIdx]?.role === 'assistant') {
+                    updated[lastIdx] = { role: 'assistant', content: currentContent };
+                  }
+                  return updated;
+                });
+              }
+              break;
+            case 'messageStop':
+              if (event.stopReason === 'tool_use' && pendingToolUseId) {
+                let inputObj: Record<string, unknown> = {};
+                try {
+                  inputObj = JSON.parse(pendingToolInput) as Record<string, unknown>;
+                } catch {
+                  // use empty
+                }
+                setPendingToolApproval({
+                  toolUseId: pendingToolUseId,
+                  toolName: pendingToolName ?? 'unknown',
+                  input: inputObj,
+                  harnessArn,
+                  sessionId: runtimeSessionId,
+                });
+                setPhase('tool-approval');
+                return;
+              }
+              break;
+            case 'metadata': {
+              const { inputTokens, outputTokens } = event.usage;
+              const latency = (event.metrics.latencyMs / 1000).toFixed(1);
+              const metaLine = `⚡ ${inputTokens} in · ${outputTokens} out · ${latency}s`;
+              setMessages(prev => [...prev, { role: 'assistant', content: metaLine, isHint: true }]);
+              break;
+            }
+            case 'error':
+              streamingContentRef.current += `\nError: ${event.message}`;
+              setMessages(prev => {
+                const updated = [...prev];
+                const lastIdx = updated.length - 1;
+                if (lastIdx >= 0 && updated[lastIdx]?.role === 'assistant') {
+                  updated[lastIdx] = { role: 'assistant', content: streamingContentRef.current };
+                }
+                return updated;
+              });
+              break;
+          }
+        }
+
+        setPhase('ready');
+      } catch (err) {
+        const errMsg = getErrorMessage(err);
+        setMessages(prev => {
+          const updated = [...prev];
+          const lastIdx = updated.length - 1;
+          if (lastIdx >= 0 && updated[lastIdx]?.role === 'assistant') {
+            updated[lastIdx] = { role: 'assistant', content: `Error: ${errMsg}` };
+          }
+          return updated;
+        });
+        setPhase('ready');
+      }
+    },
+    []
+  );
+
   const invoke = useCallback(
     async (prompt: string) => {
       if (!config || phase === 'invoking') return;
 
+      const isHarness = selectedAgent >= config.runtimes.length;
       const agent = config.runtimes[selectedAgent];
-      if (!agent) return;
+      if (!agent && !isHarness) return;
 
-      const isMcp = agent.protocol === 'MCP';
+      const isMcp = !isHarness && agent?.protocol === 'MCP';
 
       // Create logger on first invoke or if agent changed
       if (!loggerRef.current) {
+        const harnessForLog = isHarness ? config.harnesses[selectedAgent - config.runtimes.length] : undefined;
         loggerRef.current = new InvokeLogger({
-          agentName: agent.name,
-          runtimeArn: agent.state.runtimeArn,
+          agentName: agent?.name ?? harnessForLog?.name ?? 'harness',
+          runtimeArn: agent?.state.runtimeArn ?? harnessForLog?.state.harnessArn ?? '',
           region: config.target.region,
           sessionId: sessionId ?? undefined,
         });
@@ -313,7 +452,23 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
         return;
       }
 
-      // HTTP / A2A: streaming invoke
+      if (isHarness) {
+        const harnessIdx = selectedAgent - config.runtimes.length;
+        const harness = config.harnesses[harnessIdx];
+        if (!harness) return;
+
+        setMessages(prev => [...prev, { role: 'user', content: prompt }, { role: 'assistant', content: '' }]);
+        setPhase('invoking');
+        streamingContentRef.current = '';
+
+        await streamHarnessInvoke(config.target.region, harness.state.harnessArn, sessionId ?? generateSessionId(), [
+          { role: 'user', content: [{ text: prompt }] },
+        ]);
+        return;
+      }
+
+      // HTTP / A2A: streaming invoke (agent is guaranteed defined here — harness path returned above)
+      if (!agent) return;
       const isA2A = agent.protocol === 'A2A';
       setMessages(prev => [...prev, { role: 'user', content: prompt }, { role: 'assistant', content: '' }]);
       setPhase('invoking');
@@ -374,21 +529,59 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
         setPhase('ready');
       }
     },
-    [config, selectedAgent, phase, sessionId, userId, headers, bearerToken, fetchMcpTools, getMcpInvokeOptions]
+    [
+      config,
+      selectedAgent,
+      phase,
+      sessionId,
+      userId,
+      headers,
+      bearerToken,
+      fetchMcpTools,
+      getMcpInvokeOptions,
+      streamHarnessInvoke,
+    ]
   );
 
   const execCommand = useCallback(
     async (command: string) => {
       if (!config || phase === 'invoking') return;
 
-      const agent = config.runtimes[selectedAgent];
-      if (!agent) return;
+      const isHarnessExec = selectedAgent >= config.runtimes.length;
+      const agent = isHarnessExec ? undefined : config.runtimes[selectedAgent];
+      if (!agent && !isHarnessExec) return;
 
-      // Create logger on first invoke or if agent changed
+      // For harness exec, we need the underlying agentRuntimeArn
+      let execRuntimeArn: string | undefined;
+      let execName: string;
+      if (isHarnessExec) {
+        const harnessIdx = selectedAgent - config.runtimes.length;
+        const harness = config.harnesses[harnessIdx];
+        if (!harness) return;
+        execRuntimeArn = harness.state.agentRuntimeArn;
+        execName = harness.name;
+        if (!execRuntimeArn) {
+          setMessages(prev => [
+            ...prev,
+            { role: 'user', content: `! ${command}`, isExec: true },
+            {
+              role: 'assistant',
+              content: 'Exec requires agentRuntimeArn in deployed state. Re-deploy to populate it.',
+              isExec: true,
+            },
+          ]);
+          return;
+        }
+      } else {
+        execRuntimeArn = agent!.state.runtimeArn;
+        execName = agent!.name;
+      }
+
+      // Create logger on first exec or if agent changed
       if (!loggerRef.current) {
         loggerRef.current = new InvokeLogger({
-          agentName: agent.name,
-          runtimeArn: agent.state.runtimeArn,
+          agentName: execName,
+          runtimeArn: execRuntimeArn,
           region: config.target.region,
           sessionId: sessionId ?? undefined,
         });
@@ -410,7 +603,7 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
       try {
         const result = await executeBashCommand({
           region: config.target.region,
-          runtimeArn: agent.state.runtimeArn,
+          runtimeArn: execRuntimeArn,
           command,
           sessionId: sessionId ?? undefined,
           headers,
@@ -466,10 +659,54 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
     [config, selectedAgent, phase, sessionId, userId, headers, bearerToken]
   );
 
+  const respondToTool = useCallback(
+    async (approved: boolean, response: string) => {
+      if (!pendingToolApproval || !config) return;
+
+      const { toolUseId, harnessArn, sessionId: runtimeSessionId } = pendingToolApproval;
+
+      const statusIcon = approved ? '✅' : '❌';
+      setMessages(prev => [...prev, { role: 'assistant', content: `${statusIcon} ${response}`, isHint: true }]);
+      setPendingToolApproval(null);
+      setPhase('invoking');
+      streamingContentRef.current = '';
+      setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+
+      await streamHarnessInvoke(config.target.region, harnessArn, runtimeSessionId, [
+        {
+          role: 'assistant',
+          content: [
+            {
+              toolUse: {
+                toolUseId,
+                name: pendingToolApproval.toolName,
+                input: pendingToolApproval.input,
+              },
+            },
+          ],
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              toolResult: {
+                toolUseId,
+                content: [{ text: response }],
+                status: approved ? 'success' : 'error',
+              },
+            },
+          ],
+        },
+      ]);
+    },
+    [config, pendingToolApproval, streamHarnessInvoke]
+  );
+
   const newSession = useCallback(() => {
     const newId = generateSessionId();
     setSessionId(newId);
     setMessages([]);
+    setPendingToolApproval(null);
     // Reset MCP session
     mcpSessionIdRef.current = undefined;
     setMcpTools([]);
@@ -492,12 +729,14 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
     tokenExpiresIn,
     mcpTools,
     mcpToolsFetched,
+    pendingToolApproval,
     selectAgent: setSelectedAgent,
     setUserId,
     setBearerToken,
     fetchBearerToken,
     invoke,
     execCommand,
+    respondToTool,
     newSession,
     fetchMcpTools,
   };

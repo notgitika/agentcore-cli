@@ -1,5 +1,6 @@
 export interface InvokeOptions {
   agentName?: string;
+  harnessName?: string;
   targetName?: string;
   prompt?: string;
   sessionId?: string;
@@ -18,6 +19,26 @@ export interface InvokeOptions {
   headers?: Record<string, string>;
   /** Bearer token for CUSTOM_JWT auth (bypasses SigV4) */
   bearerToken?: string;
+  /** Print verbose streaming JSON events instead of formatted text (harness only) */
+  verbose?: boolean;
+  /** Override model ID for this invocation (harness only) */
+  modelId?: string;
+  /** Override tools for this invocation (harness only, comma-separated) */
+  tools?: string;
+  /** Override max iterations (harness only) */
+  maxIterations?: number;
+  /** Override timeout seconds (harness only) */
+  harnessTimeout?: number;
+  /** Override max tokens (harness only) */
+  maxTokens?: number;
+  /** Skills to use (harness only, comma-separated paths) */
+  skills?: string;
+  /** Override system prompt (harness only) */
+  systemPrompt?: string;
+  /** Override allowed tools (harness only, comma-separated) */
+  allowedTools?: string;
+  /** Override memory actor ID (harness only) */
+  actorId?: string;
 }
 
 export interface InvokeResult {

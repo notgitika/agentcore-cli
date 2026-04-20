@@ -6,6 +6,12 @@ export interface ValidationResult {
 }
 
 export function validateInvokeOptions(options: InvokeOptions): ValidationResult {
+  if (options.harnessName && options.agentName) {
+    return { valid: false, error: '--harness and --runtime cannot be used together' };
+  }
+  if (options.verbose && !options.harnessName) {
+    return { valid: false, error: '--verbose is only supported with --harness' };
+  }
   if (options.exec && !options.prompt) {
     return { valid: false, error: 'A command is required with --exec. Usage: agentcore invoke --exec "ls -la"' };
   }

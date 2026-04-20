@@ -43,7 +43,11 @@ async function handleInvokeCLI(options: InvokeOptions): Promise<void> {
     const context = await loadInvokeConfig();
 
     // Show spinner for non-streaming, non-json, non-exec invocations
-    if (!options.stream && !options.json && !options.exec) {
+    // Harness invoke always streams directly to stdout, so skip spinner for harness
+    const isHarness =
+      options.harnessName != null ||
+      ((context.project.harnesses ?? []).length > 0 && context.project.runtimes.length === 0);
+    if (!options.stream && !options.json && !options.exec && !isHarness) {
       spinner = startSpinner('Invoking agent...');
     }
 
@@ -110,6 +114,17 @@ export const registerInvoke = (program: Command) => {
       [] as string[]
     )
     .option('--bearer-token <token>', 'Bearer token for CUSTOM_JWT auth (bypasses SigV4) [non-interactive]')
+    .option('--harness <name>', 'Select specific harness to invoke [non-interactive]')
+    .option('--verbose', 'Print verbose streaming JSON events (harness only) [non-interactive]')
+    .option('--model-id <id>', 'Override model for this invocation (harness only) [non-interactive]')
+    .option('--tools <tools>', 'Override tools, comma-separated (harness only) [non-interactive]')
+    .option('--max-iterations <n>', 'Override max iterations (harness only) [non-interactive]', parseInt)
+    .option('--max-tokens <n>', 'Override max tokens (harness only) [non-interactive]', parseInt)
+    .option('--harness-timeout <seconds>', 'Override timeout seconds (harness only) [non-interactive]', parseInt)
+    .option('--skills <paths>', 'Skills to use, comma-separated paths (harness only) [non-interactive]')
+    .option('--system-prompt <text>', 'Override system prompt (harness only) [non-interactive]')
+    .option('--allowed-tools <tools>', 'Override allowed tools, comma-separated (harness only) [non-interactive]')
+    .option('--actor-id <id>', 'Override memory actor ID (harness only) [non-interactive]')
     .action(
       async (
         positionalPrompt: string | undefined,
@@ -127,6 +142,17 @@ export const registerInvoke = (program: Command) => {
           timeout?: number;
           header?: string[];
           bearerToken?: string;
+          harness?: string;
+          verbose?: boolean;
+          modelId?: string;
+          tools?: string;
+          maxIterations?: number;
+          maxTokens?: number;
+          harnessTimeout?: number;
+          skills?: string;
+          systemPrompt?: string;
+          allowedTools?: string;
+          actorId?: string;
         }
       ) => {
         try {
@@ -149,11 +175,14 @@ export const registerInvoke = (program: Command) => {
             cliOptions.runtime ||
             cliOptions.tool ||
             cliOptions.exec ||
-            cliOptions.bearerToken
+            cliOptions.bearerToken ||
+            cliOptions.harness ||
+            cliOptions.verbose
           ) {
             await handleInvokeCLI({
               prompt,
               agentName: cliOptions.runtime,
+              harnessName: cliOptions.harness,
               targetName: cliOptions.target ?? 'default',
               sessionId: cliOptions.sessionId,
               userId: cliOptions.userId,
@@ -165,13 +194,37 @@ export const registerInvoke = (program: Command) => {
               timeout: cliOptions.timeout,
               headers,
               bearerToken: cliOptions.bearerToken,
+              verbose: cliOptions.verbose,
+              modelId: cliOptions.modelId,
+              tools: cliOptions.tools,
+              maxIterations: cliOptions.maxIterations,
+              maxTokens: cliOptions.maxTokens,
+              harnessTimeout: cliOptions.harnessTimeout,
+              skills: cliOptions.skills,
+              systemPrompt: cliOptions.systemPrompt,
+              allowedTools: cliOptions.allowedTools,
+              actorId: cliOptions.actorId,
             });
           } else {
             // No CLI options - interactive TUI mode (headers still passed if provided)
+            const ENTER_ALT_SCREEN = '\x1B[?1049h\x1B[H';
+            const EXIT_ALT_SCREEN = '\x1B[?1049l';
+            const SHOW_CURSOR = '\x1B[?25h';
+
+            process.stdout.write(ENTER_ALT_SCREEN);
+
+            const exitAltScreen = () => {
+              process.stdout.write(EXIT_ALT_SCREEN);
+              process.stdout.write(SHOW_CURSOR);
+            };
+
             const { waitUntilExit } = render(
               <InvokeScreen
                 isInteractive={true}
-                onExit={() => process.exit(0)}
+                onExit={() => {
+                  exitAltScreen();
+                  process.exit(0);
+                }}
                 initialSessionId={cliOptions.sessionId}
                 initialUserId={cliOptions.userId}
                 initialHeaders={headers}

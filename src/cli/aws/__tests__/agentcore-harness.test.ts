@@ -7,6 +7,7 @@ import {
   listHarnesses,
   updateHarness,
 } from '../agentcore-harness.js';
+import { EventStreamCodec } from '@smithy/eventstream-codec';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockRequest, mockRequestRaw } = vi.hoisted(() => ({
@@ -207,11 +208,33 @@ describe('invokeHarness (streaming)', () => {
     vi.clearAllMocks();
   });
 
-  function makeStreamResponse(events: string[]): Response {
-    const text = events.join('\n') + '\n';
+  const toUtf8 = (input: Uint8Array) => new TextDecoder().decode(input);
+  const fromUtf8 = (input: string) => new TextEncoder().encode(input);
+  const codec = new EventStreamCodec(toUtf8, fromUtf8);
+
+  function encodeEvent(eventType: string, payload: Record<string, unknown>): Uint8Array {
+    return codec.encode({
+      headers: {
+        ':event-type': { type: 'string', value: eventType },
+        ':content-type': { type: 'string', value: 'application/json' },
+        ':message-type': { type: 'string', value: 'event' },
+      },
+      body: fromUtf8(JSON.stringify(payload)),
+    });
+  }
+
+  function makeStreamResponse(frames: Uint8Array[]): Response {
+    let totalLen = 0;
+    for (const f of frames) totalLen += f.length;
+    const combined = new Uint8Array(totalLen);
+    let off = 0;
+    for (const f of frames) {
+      combined.set(f, off);
+      off += f.length;
+    }
     const stream = new ReadableStream({
       start(controller) {
-        controller.enqueue(new TextEncoder().encode(text));
+        controller.enqueue(combined);
         controller.close();
       },
     });
@@ -219,7 +242,7 @@ describe('invokeHarness (streaming)', () => {
   }
 
   it('yields messageStart events', async () => {
-    mockRequestRaw.mockResolvedValue(makeStreamResponse([JSON.stringify({ messageStart: { role: 'assistant' } })]));
+    mockRequestRaw.mockResolvedValue(makeStreamResponse([encodeEvent('messageStart', { role: 'assistant' })]));
 
     const events = [];
     for await (const event of invokeHarness({
@@ -238,8 +261,8 @@ describe('invokeHarness (streaming)', () => {
   it('yields text deltas', async () => {
     mockRequestRaw.mockResolvedValue(
       makeStreamResponse([
-        JSON.stringify({ contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'Hello' } } }),
-        JSON.stringify({ contentBlockDelta: { contentBlockIndex: 0, delta: { text: ' world' } } }),
+        encodeEvent('contentBlockDelta', { contentBlockIndex: 0, delta: { text: 'Hello' } }),
+        encodeEvent('contentBlockDelta', { contentBlockIndex: 0, delta: { text: ' world' } }),
       ])
     );
 
@@ -269,11 +292,9 @@ describe('invokeHarness (streaming)', () => {
   it('yields tool use start events', async () => {
     mockRequestRaw.mockResolvedValue(
       makeStreamResponse([
-        JSON.stringify({
-          contentBlockStart: {
-            contentBlockIndex: 1,
-            start: { toolUse: { toolUseId: 'tu-1', name: 'exa_search', type: 'remote_mcp', serverName: 'exa' } },
-          },
+        encodeEvent('contentBlockStart', {
+          contentBlockIndex: 1,
+          start: { toolUse: { toolUseId: 'tu-1', name: 'exa_search', type: 'remote_mcp', serverName: 'exa' } },
         }),
       ])
     );
@@ -300,7 +321,7 @@ describe('invokeHarness (streaming)', () => {
   });
 
   it('yields messageStop with stopReason', async () => {
-    mockRequestRaw.mockResolvedValue(makeStreamResponse([JSON.stringify({ messageStop: { stopReason: 'end_turn' } })]));
+    mockRequestRaw.mockResolvedValue(makeStreamResponse([encodeEvent('messageStop', { stopReason: 'end_turn' })]));
 
     const events = [];
     for await (const event of invokeHarness({
@@ -318,11 +339,9 @@ describe('invokeHarness (streaming)', () => {
   it('yields metadata with token usage', async () => {
     mockRequestRaw.mockResolvedValue(
       makeStreamResponse([
-        JSON.stringify({
-          metadata: {
-            usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
-            metrics: { latencyMs: 1200 },
-          },
+        encodeEvent('metadata', {
+          usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+          metrics: { latencyMs: 1200 },
         }),
       ])
     );
@@ -344,9 +363,9 @@ describe('invokeHarness (streaming)', () => {
     });
   });
 
-  it('yields error events for server exceptions', async () => {
+  it('yields error events for exception event types', async () => {
     mockRequestRaw.mockResolvedValue(
-      makeStreamResponse([JSON.stringify({ internalServerException: { message: 'Something broke' } })])
+      makeStreamResponse([encodeEvent('internalServerException', { message: 'Something broke' })])
     );
 
     const events = [];
@@ -396,13 +415,17 @@ describe('invokeHarness (streaming)', () => {
     );
   });
 
-  it('skips unparseable lines gracefully', async () => {
+  it('handles multiple event types in sequence', async () => {
     mockRequestRaw.mockResolvedValue(
       makeStreamResponse([
-        'not json at all',
-        '',
-        ': comment',
-        JSON.stringify({ messageStop: { stopReason: 'end_turn' } }),
+        encodeEvent('messageStart', { role: 'assistant' }),
+        encodeEvent('contentBlockDelta', { contentBlockIndex: 0, delta: { text: 'Hi' } }),
+        encodeEvent('contentBlockStop', { contentBlockIndex: 0 }),
+        encodeEvent('messageStop', { stopReason: 'end_turn' }),
+        encodeEvent('metadata', {
+          usage: { inputTokens: 10, outputTokens: 1, totalTokens: 11 },
+          metrics: { latencyMs: 100 },
+        }),
       ])
     );
 
@@ -416,7 +439,13 @@ describe('invokeHarness (streaming)', () => {
       events.push(event);
     }
 
-    expect(events).toHaveLength(1);
-    expect(events[0]!.type).toBe('messageStop');
+    expect(events).toHaveLength(5);
+    expect(events.map(e => e.type)).toEqual([
+      'messageStart',
+      'contentBlockDelta',
+      'contentBlockStop',
+      'messageStop',
+      'metadata',
+    ]);
   });
 });
