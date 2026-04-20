@@ -13,14 +13,14 @@ export type { ResourceDeploymentState };
 export interface ResourceStatusEntry {
   resourceType:
     | 'agent'
+    | 'harness'
     | 'memory'
     | 'credential'
     | 'gateway'
     | 'evaluator'
     | 'online-eval'
     | 'policy-engine'
-    | 'policy'
-    | 'harness';
+    | 'policy';
   name: string;
   deploymentState: ResourceDeploymentState;
   identifier?: string;
@@ -129,6 +129,13 @@ export function computeResourceStatuses(
     getIdentifier: deployed => deployed.runtimeArn,
   });
 
+  const harnesses = diffResourceSet({
+    resourceType: 'harness',
+    localItems: project.harnesses ?? [],
+    deployedRecord: resources?.harnesses ?? {},
+    getIdentifier: deployed => deployed.harnessArn,
+  });
+
   const credentials = diffResourceSet({
     resourceType: 'credential',
     localItems: project.credentials,
@@ -204,15 +211,9 @@ export function computeResourceStatuses(
     getDeployedKey: item => `${item.engineName}/${item.name}`,
   });
 
-  const harnesses = diffResourceSet({
-    resourceType: 'harness',
-    localItems: (project.harnesses ?? []).map(h => ({ name: h.name })),
-    deployedRecord: resources?.harnesses ?? {},
-    getIdentifier: deployed => deployed.harnessArn,
-  });
-
   return [
     ...agents,
+    ...harnesses,
     ...credentials,
     ...memories,
     ...gateways,
@@ -319,6 +320,42 @@ export async function handleProjectStatus(
       logger.endStep(hasErrors ? 'error' : 'success');
     }
 
+    // Enrich deployed harnesses with live status
+    const harnessStates = targetResources?.harnesses ?? {};
+    const deployedHarnesses = resources.filter(
+      e => e.resourceType === 'harness' && e.deploymentState === 'deployed' && harnessStates[e.name]
+    );
+
+    if (deployedHarnesses.length > 0) {
+      logger.startStep(
+        `Fetch harness status (${deployedHarnesses.length} harness${deployedHarnesses.length !== 1 ? 'es' : ''})`
+      );
+
+      await Promise.all(
+        resources.map(async (entry, i) => {
+          if (entry.resourceType !== 'harness' || entry.deploymentState !== 'deployed') return;
+
+          const harnessState = harnessStates[entry.name];
+          if (!harnessState) return;
+
+          try {
+            const result = await getHarness({ region: targetConfig.region, harnessId: harnessState.harnessId });
+            const runtimeArn = result.harness.environment?.agentCoreRuntimeEnvironment?.agentRuntimeArn;
+            const detail = runtimeArn ? `${result.harness.status} · Runtime: ${runtimeArn}` : result.harness.status;
+            resources[i] = { ...entry, detail };
+            logger.log(`  ${entry.name}: ${result.harness.status} (${harnessState.harnessId})`);
+          } catch (error) {
+            const errorMsg = getErrorMessage(error);
+            resources[i] = { ...entry, error: errorMsg };
+            logger.log(`  ${entry.name}: ERROR - ${errorMsg}`, 'error');
+          }
+        })
+      );
+
+      const hasHarnessErrors = resources.some(r => r.resourceType === 'harness' && r.error);
+      logger.endStep(hasHarnessErrors ? 'error' : 'success');
+    }
+
     // Enrich deployed evaluators with live status
     const evaluatorStates = targetResources?.evaluators ?? {};
     const deployedEvaluators = resources.filter(
@@ -393,43 +430,6 @@ export async function handleProjectStatus(
 
       const hasOnlineEvalErrors = resources.some(r => r.resourceType === 'online-eval' && r.error);
       logger.endStep(hasOnlineEvalErrors ? 'error' : 'success');
-    }
-
-    // Enrich deployed harnesses with live status
-    const harnessStates = targetResources?.harnesses ?? {};
-    const deployedHarnesses = resources.filter(
-      e => e.resourceType === 'harness' && e.deploymentState === 'deployed' && harnessStates[e.name]
-    );
-
-    if (deployedHarnesses.length > 0) {
-      logger.startStep(
-        `Fetch harness status (${deployedHarnesses.length} harness${deployedHarnesses.length !== 1 ? 'es' : ''})`
-      );
-
-      await Promise.all(
-        resources.map(async (entry, i) => {
-          if (entry.resourceType !== 'harness' || entry.deploymentState !== 'deployed') return;
-
-          const harnessState = harnessStates[entry.name];
-          if (!harnessState) return;
-
-          try {
-            const harnessResult = await getHarness({
-              region: targetConfig.region,
-              harnessId: harnessState.harnessId,
-            });
-            resources[i] = { ...entry, detail: harnessResult.harness.status };
-            logger.log(`  ${entry.name}: ${harnessResult.harness.status} (${harnessState.harnessId})`);
-          } catch (error) {
-            const errorMsg = getErrorMessage(error);
-            resources[i] = { ...entry, error: errorMsg };
-            logger.log(`  ${entry.name}: ERROR - ${errorMsg}`, 'error');
-          }
-        })
-      );
-
-      const hasHarnessErrors = resources.some(r => r.resourceType === 'harness' && r.error);
-      logger.endStep(hasHarnessErrors ? 'error' : 'success');
     }
   }
 

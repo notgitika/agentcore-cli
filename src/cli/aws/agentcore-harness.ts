@@ -52,6 +52,9 @@ export interface HarnessEnvironmentArtifact {
 }
 
 export interface HarnessAgentCoreRuntimeEnvironment {
+  agentRuntimeArn?: string;
+  agentRuntimeId?: string;
+  agentRuntimeName?: string;
   lifecycleConfiguration?: Record<string, unknown>;
   networkConfiguration?: Record<string, unknown>;
   filesystemConfigurations?: Record<string, unknown>[];

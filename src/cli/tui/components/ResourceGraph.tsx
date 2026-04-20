@@ -11,6 +11,7 @@ import React, { useMemo } from 'react';
 
 const ICONS = {
   agent: '●',
+  harness: '◎',
   memory: '■',
   credential: '◇',
   gateway: '◆',
@@ -20,7 +21,6 @@ const ICONS = {
   'online-eval': '↻',
   'policy-engine': '▣',
   policy: '▢',
-  harness: '⊞',
 } as const;
 
 interface ResourceGraphProps {
@@ -121,6 +121,7 @@ export function getTargetDisplayText(target: AgentCoreGatewayTarget): string {
 export function ResourceGraph({ project, mcp, agentName, resourceStatuses }: ResourceGraphProps) {
   const allAgents = project.runtimes ?? [];
   const agents = agentName ? allAgents.filter(a => a.name === agentName) : allAgents;
+  const harnesses = project.harnesses ?? [];
   const memories = project.memories ?? [];
   const credentials = project.credentials ?? [];
   const evaluators = project.evaluators ?? [];
@@ -153,6 +154,7 @@ export function ResourceGraph({ project, mcp, agentName, resourceStatuses }: Res
 
   const hasContent =
     agents.length > 0 ||
+    harnesses.length > 0 ||
     memories.length > 0 ||
     credentials.length > 0 ||
     evaluators.length > 0 ||
@@ -191,6 +193,31 @@ export function ResourceGraph({ project, mcp, agentName, resourceStatuses }: Res
                 deploymentState={rsEntry?.deploymentState}
                 identifier={rsEntry?.identifier}
                 invocationUrl={rsEntry?.invocationUrl}
+              />
+            );
+          })}
+        </Box>
+      )}
+
+      {/* Harnesses */}
+      {harnesses.length > 0 && (
+        <Box flexDirection="column">
+          <SectionHeader>Harnesses</SectionHeader>
+          {harnesses.map(harness => {
+            const rsEntry = statusMap.get(`harness:${harness.name}`);
+            const harnessStatus = rsEntry?.error ? 'error' : rsEntry?.detail;
+            const harnessStatusColor = rsEntry?.error ? 'red' : getStatusColor(harnessStatus);
+            return (
+              <ResourceRow
+                key={harness.name}
+                icon={ICONS.harness}
+                color="cyan"
+                name={harness.name}
+                detail="managed loop"
+                status={harnessStatus}
+                statusColor={harnessStatusColor}
+                deploymentState={rsEntry?.deploymentState}
+                identifier={rsEntry?.identifier}
               />
             );
           })}
@@ -414,6 +441,7 @@ export function ResourceGraph({ project, mcp, agentName, resourceStatuses }: Res
         <Text color="gray">{'─'.repeat(50)}</Text>
         <Text>
           <Text color="green">{ICONS.agent}</Text> agent{'  '}
+          <Text color="cyan">{ICONS.harness}</Text> harness{'  '}
           <Text color="blue">{ICONS.memory}</Text> memory{'  '}
           <Text color="yellow">{ICONS.credential}</Text> credential{'  '}
           <Text color="cyan">{ICONS.evaluator}</Text> evaluator{'  '}
