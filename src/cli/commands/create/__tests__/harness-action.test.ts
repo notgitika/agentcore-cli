@@ -23,7 +23,7 @@ describe('createProjectWithHarness', () => {
       name,
       cwd: testDir,
       modelProvider: 'bedrock',
-      modelId: 'us.anthropic.claude-sonnet-4-5-20250514-v1:0',
+      modelId: 'global.anthropic.claude-sonnet-4-6',
       skipGit: true,
       skipInstall: true,
     });
@@ -33,7 +33,7 @@ describe('createProjectWithHarness', () => {
 
     const projectPath = result.projectPath!;
     const configDir = join(projectPath, 'agentcore');
-    const harnessDir = join(configDir, 'harnesses', name);
+    const harnessDir = join(projectPath, 'app', name);
 
     await expect(exists(projectPath)).resolves.toBe(true);
     await expect(exists(configDir)).resolves.toBe(true);
@@ -63,7 +63,7 @@ describe('createProjectWithHarness', () => {
     expect(result.success, `Error: ${result.error}`).toBe(true);
     expect(result.projectPath).toBeTruthy();
 
-    const harnessJsonPath = join(result.projectPath!, 'agentcore', 'harnesses', name, 'harness.json');
+    const harnessJsonPath = join(result.projectPath!, 'app', name, 'harness.json');
     await expect(exists(harnessJsonPath)).resolves.toBe(true);
   });
 
@@ -75,7 +75,7 @@ describe('createProjectWithHarness', () => {
       name,
       cwd: testDir,
       modelProvider: 'bedrock',
-      modelId: 'us.anthropic.claude-sonnet-4-5-20250514-v1:0',
+      modelId: 'global.anthropic.claude-sonnet-4-6',
       skipGit: true,
       skipInstall: true,
       onProgress: (step, status) => {
@@ -95,7 +95,7 @@ describe('createProjectWithHarness', () => {
       name,
       cwd: testDir,
       modelProvider: 'bedrock',
-      modelId: 'us.anthropic.claude-sonnet-4-5-20250514-v1:0',
+      modelId: 'global.anthropic.claude-sonnet-4-6',
       skipGit: true,
       skipInstall: true,
     });

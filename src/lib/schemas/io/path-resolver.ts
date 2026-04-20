@@ -1,4 +1,4 @@
-import { CLI_LOGS_DIR, CLI_SYSTEM_DIR, CONFIG_DIR, CONFIG_FILES as _CONFIG_FILES, HARNESS_DIR } from '../../constants';
+import { APP_DIR, CLI_LOGS_DIR, CLI_SYSTEM_DIR, CONFIG_DIR, CONFIG_FILES as _CONFIG_FILES, HARNESS_DIR } from '../../constants';
 import { existsSync } from 'fs';
 import { dirname, join } from 'path';
 
@@ -203,24 +203,24 @@ export class PathResolver {
   }
 
   /**
-   * Get the path to the harnesses directory (agentcore/harnesses/)
+   * Get the path to the harnesses directory (app/)
    */
   getHarnessesDir(): string {
-    return join(this.config.baseDir, HARNESS_DIR);
+    return join(this.getProjectRoot(), APP_DIR);
   }
 
   /**
-   * Get the path to a specific harness directory (agentcore/harnesses/<harnessName>/)
+   * Get the path to a specific harness directory (app/<harnessName>/)
    */
   getHarnessDir(harnessName: string): string {
-    return join(this.config.baseDir, HARNESS_DIR, harnessName);
+    return join(this.getProjectRoot(), APP_DIR, harnessName);
   }
 
   /**
-   * Get the path to a specific harness config file (agentcore/harnesses/<harnessName>/harness.json)
+   * Get the path to a specific harness config file (app/<harnessName>/harness.json)
    */
   getHarnessConfigPath(harnessName: string): string {
-    return join(this.config.baseDir, HARNESS_DIR, harnessName, 'harness.json');
+    return join(this.getProjectRoot(), APP_DIR, harnessName, 'harness.json');
   }
 
   /**

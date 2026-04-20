@@ -51,6 +51,7 @@ export function AddHarnessFlow({ isInteractive = true, onExit, onBack, onDev, on
         modelProvider: config.modelProvider,
         modelId: config.modelId,
         apiKeyArn: config.apiKeyArn,
+        skipMemory: config.skipMemory,
         containerUri: config.containerUri,
         dockerfilePath: config.dockerfilePath,
         maxIterations: config.maxIterations,
@@ -68,23 +69,6 @@ export function AddHarnessFlow({ isInteractive = true, onExit, onBack, onDev, on
         return;
       }
 
-      // Deploy harness to AWS
-      setFlow({
-        name: 'create-success',
-        harnessName: config.name,
-        loading: true,
-        loadingMessage: 'Deploying harness to AWS...',
-      });
-      try {
-        const { handleDeploy } = await import('../../../commands/deploy/actions');
-        const deployResult = await handleDeploy({ target: 'default', autoConfirm: true });
-        if (!deployResult.success) {
-          setFlow({ name: 'create-success', harnessName: config.name });
-          return;
-        }
-      } catch {
-        // Deploy failure is non-fatal for add
-      }
       setFlow({ name: 'create-success', harnessName: config.name });
     } catch (err) {
       const { getErrorMessage } = await import('../../../errors');
@@ -107,7 +91,7 @@ export function AddHarnessFlow({ isInteractive = true, onExit, onBack, onDev, on
       <AddSuccessScreen
         isInteractive={isInteractive}
         message={`Added harness: ${flow.harnessName}`}
-        detail="Harness config written to agentcore/harnesses/. Deploy with `agentcore deploy`."
+        detail="Harness config written to app/. Deploy with `agentcore deploy`."
         loading={flow.loading}
         loadingMessage={flow.loadingMessage}
         onAddAnother={onBack}

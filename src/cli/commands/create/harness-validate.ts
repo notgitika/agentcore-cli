@@ -69,7 +69,12 @@ export function validateCreateHarnessOptions(options: CreateHarnessCliOptions, c
   }
   options.modelProvider ??= 'bedrock';
 
-  options.modelId ??= 'us.anthropic.claude-sonnet-4-5-20250514-v1:0';
+  const defaultModelIds: Record<string, string> = {
+    bedrock: 'global.anthropic.claude-sonnet-4-6',
+    open_ai: 'gpt-5',
+    gemini: 'gemini-2.5-flash',
+  };
+  options.modelId ??= defaultModelIds[options.modelProvider] ?? 'global.anthropic.claude-sonnet-4-6';
 
   if (options.modelProvider !== 'bedrock' && !options.apiKeyArn) {
     return { valid: false, error: `--api-key-arn is required for ${options.modelProvider} provider` };

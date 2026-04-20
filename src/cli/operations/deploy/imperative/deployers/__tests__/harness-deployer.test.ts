@@ -5,7 +5,7 @@ import type { ImperativeDeployContext } from '../../types';
 import { HarnessDeployer } from '../harness-deployer';
 import * as harnessMapper from '../harness-mapper';
 import { readFile } from 'fs/promises';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('fs/promises', () => ({
   readFile: vi.fn(),
@@ -15,6 +15,7 @@ vi.mock('../../../../../aws/agentcore-harness', () => ({
   createHarness: vi.fn(),
   updateHarness: vi.fn(),
   deleteHarness: vi.fn(),
+  getHarness: vi.fn(),
 }));
 
 vi.mock('../harness-mapper', () => ({
@@ -25,6 +26,7 @@ const mockedReadFile = vi.mocked(readFile);
 const mockedCreateHarness = vi.mocked(harnessApi.createHarness);
 const mockedUpdateHarness = vi.mocked(harnessApi.updateHarness);
 const mockedDeleteHarness = vi.mocked(harnessApi.deleteHarness);
+const mockedGetHarness = vi.mocked(harnessApi.getHarness);
 const mockedMapHarness = vi.mocked(harnessMapper.mapHarnessSpecToCreateOptions);
 
 const REGION = 'us-east-1';
@@ -90,7 +92,12 @@ describe('HarnessDeployer', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useFakeTimers();
     deployer = new HarnessDeployer();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   describe('metadata', () => {
@@ -158,6 +165,22 @@ describe('HarnessDeployer', () => {
           updatedAt: '2024-01-01T00:00:00Z',
         },
       });
+      mockedGetHarness.mockResolvedValueOnce({
+        harness: {
+          harnessId: 'h-new',
+          harnessName: 'my_harness',
+          arn: 'arn:aws:bedrock-agentcore:us-east-1:123456789012:harness/h-new',
+          status: 'READY',
+          executionRoleArn: 'arn:aws:iam::123456789012:role/HarnessRole',
+          environment: {
+            agentCoreRuntimeEnvironment: {
+              agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/rt-new',
+            },
+          },
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+        },
+      });
 
       const ctx = createContext({
         harnesses: [{ name: 'my_harness', path: 'harnesses/my_harness' }],
@@ -166,7 +189,9 @@ describe('HarnessDeployer', () => {
         },
       });
 
-      const result = await deployer.deploy(ctx);
+      const resultPromise = deployer.deploy(ctx);
+      await vi.advanceTimersByTimeAsync(5_000);
+      const result = await resultPromise;
 
       expect(result.success).toBe(true);
       expect(result.state).toEqual({
@@ -174,7 +199,8 @@ describe('HarnessDeployer', () => {
           harnessId: 'h-new',
           harnessArn: 'arn:aws:bedrock-agentcore:us-east-1:123456789012:harness/h-new',
           roleArn: 'arn:aws:iam::123456789012:role/HarnessRole',
-          status: 'CREATING',
+          status: 'READY',
+          agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/rt-new',
           memoryArn: undefined,
         },
       });
@@ -203,6 +229,22 @@ describe('HarnessDeployer', () => {
           updatedAt: '2024-01-02T00:00:00Z',
         },
       });
+      mockedGetHarness.mockResolvedValueOnce({
+        harness: {
+          harnessId: 'h-existing',
+          harnessName: 'my_harness',
+          arn: 'arn:aws:bedrock-agentcore:us-east-1:123456789012:harness/h-existing',
+          status: 'READY',
+          executionRoleArn: 'arn:aws:iam::123456789012:role/HarnessRole',
+          environment: {
+            agentCoreRuntimeEnvironment: {
+              agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/rt-existing',
+            },
+          },
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-02T00:00:00Z',
+        },
+      });
 
       const ctx = createContext({
         harnesses: [{ name: 'my_harness', path: 'harnesses/my_harness' }],
@@ -221,7 +263,9 @@ describe('HarnessDeployer', () => {
         },
       });
 
-      const result = await deployer.deploy(ctx);
+      const resultPromise = deployer.deploy(ctx);
+      await vi.advanceTimersByTimeAsync(5_000);
+      const result = await resultPromise;
 
       expect(result.success).toBe(true);
       expect(mockedUpdateHarness).toHaveBeenCalledWith(

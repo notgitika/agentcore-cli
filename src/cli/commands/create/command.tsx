@@ -111,8 +111,8 @@ function printCreateHarnessSummary(projectName: string): void {
   // Created summary
   console.log(`${dim}Created:${reset}`);
   console.log(`  ${projectName}/`);
-  console.log(`    agentcore/                         ${dim}Config and CDK project${reset}`);
-  console.log(`    agentcore/harnesses/${projectName}/  ${dim}Harness config${reset}`);
+  console.log(`    agentcore/              ${dim}Config and CDK project${reset}`);
+  console.log(`    app/${projectName}/  ${dim}Harness config${reset}`);
   console.log('');
 
   // Success and next steps
@@ -159,7 +159,12 @@ async function handleCreateHarnessCLI(options: CreateOptions): Promise<void> {
   const provider = (
     options.modelProvider ? normalizeHarnessModelProvider(options.modelProvider) : 'bedrock'
   ) as HarnessModelProvider;
-  const modelId = options.modelId ?? 'us.anthropic.claude-sonnet-4-5-20250514-v1:0';
+  const defaultModelIds: Record<string, string> = {
+    bedrock: 'global.anthropic.claude-sonnet-4-6',
+    open_ai: 'gpt-5',
+    gemini: 'gemini-2.5-flash',
+  };
+  const modelId = options.modelId ?? defaultModelIds[provider] ?? 'global.anthropic.claude-sonnet-4-6';
 
   const containerOption = harnessPrimitive.parseContainerFlag(options.container);
 

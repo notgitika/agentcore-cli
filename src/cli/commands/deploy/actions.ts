@@ -456,14 +456,14 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     if (imperativeManager.hasDeployersForPhase('post-cdk', imperativeContext)) {
       startStep('Deploy harnesses');
       const postCdkResult = await imperativeManager.runPhase('post-cdk', imperativeContext);
+      const harnessResult = postCdkResult.results.get('harness');
+      if (harnessResult?.state) {
+        deployedHarnesses = harnessResult.state as Record<string, HarnessDeployedState>;
+      }
       if (!postCdkResult.success) {
         endStep('error', postCdkResult.error);
         harnessDeployError = postCdkResult.error;
       } else {
-        const harnessResult = postCdkResult.results.get('harness');
-        if (harnessResult?.state) {
-          deployedHarnesses = harnessResult.state as Record<string, HarnessDeployedState>;
-        }
         endStep('success');
       }
     }
@@ -513,7 +513,9 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     endStep('success');
 
     // Post-deploy: Enable CloudWatch Transaction Search (non-blocking, silent)
-    const nextSteps = agentNames.length > 0 ? [...AGENT_NEXT_STEPS] : [...MEMORY_ONLY_NEXT_STEPS];
+    const hasHarnesses = (context.projectSpec.harnesses ?? []).length > 0;
+    const hasInvokable = agentNames.length > 0 || hasHarnesses;
+    const nextSteps = hasInvokable ? [...AGENT_NEXT_STEPS] : [...MEMORY_ONLY_NEXT_STEPS];
     const notes: string[] = [];
     if (agentNames.length > 0 || hasGateways) {
       try {

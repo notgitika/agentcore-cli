@@ -106,7 +106,7 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
       const pathResolver = configIO.getPathResolver();
       const harnessDir = pathResolver.getHarnessDir(options.name);
       const systemPromptPath = join(harnessDir, 'system-prompt.md');
-      const systemPromptContent = options.systemPrompt ?? '# System Prompt\n\nEnter your system prompt here.\n';
+      const systemPromptContent = options.systemPrompt ?? 'You are a helpful assistant';
       await writeFile(systemPromptPath, systemPromptContent, 'utf-8');
 
       if (memoryName) {
@@ -121,7 +121,7 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
         ...harnesses,
         {
           name: options.name,
-          path: `./harnesses/${options.name}`,
+          path: `app/${options.name}`,
         },
       ];
 
@@ -196,7 +196,7 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
     }
 
     const summary: string[] = [`Removing harness: ${harnessName}`];
-    const directoriesToDelete: string[] = [`harnesses/${harnessName}`];
+    const directoriesToDelete: string[] = [`app/${harnessName}`];
     const schemaChanges: SchemaChange[] = [];
 
     const afterSpec = {
@@ -269,8 +269,8 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
             }
 
             if (cliOptions.name || cliOptions.json) {
-              if (!cliOptions.name || !cliOptions.modelProvider || !cliOptions.modelId) {
-                const error = '--name, --model-provider, and --model-id are required';
+              if (!cliOptions.name) {
+                const error = '--name is required';
                 if (cliOptions.json) {
                   console.log(JSON.stringify({ success: false, error }));
                 } else {
@@ -279,12 +279,16 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
                 process.exit(1);
               }
 
+              const { DEFAULT_MODEL_IDS } = await import('../tui/screens/harness/types');
+              const provider = (cliOptions.modelProvider ?? 'bedrock') as HarnessModelProvider;
+              const modelId = cliOptions.modelId ?? DEFAULT_MODEL_IDS[provider];
+
               const containerOption = this.parseContainerFlag(cliOptions.container);
 
               const result = await this.add({
                 name: cliOptions.name,
-                modelProvider: cliOptions.modelProvider as HarnessModelProvider,
-                modelId: cliOptions.modelId,
+                modelProvider: provider,
+                modelId,
                 apiKeyArn: cliOptions.apiKeyArn,
                 containerUri: containerOption.containerUri,
                 dockerfilePath: containerOption.dockerfilePath,

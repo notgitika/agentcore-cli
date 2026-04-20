@@ -102,6 +102,8 @@ async function main() {
   // Read harness configs for role creation.
   // Harness fields may not yet be on the AgentCoreProjectSpec type from @aws/agentcore-cdk,
   // so we read them dynamically via specAny (same pattern as gateways above).
+  // Harness paths in agentcore.json are relative to the project root (parent of agentcore/).
+  const projectRoot = path.resolve(configRoot, '..');
   const harnessConfigs: {
     name: string;
     executionRoleArn?: string;
@@ -110,7 +112,7 @@ async function main() {
     hasDockerfile?: boolean;
   }[] = [];
   for (const entry of specAny.harnesses ?? []) {
-    const harnessPath = path.resolve(configRoot, entry.path, 'harness.json');
+    const harnessPath = path.resolve(projectRoot, entry.path, 'harness.json');
     try {
       const harnessSpec = JSON.parse(fs.readFileSync(harnessPath, 'utf-8'));
       harnessConfigs.push({

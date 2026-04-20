@@ -126,6 +126,7 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
 
   const [publishAssetsStep, setPublishAssetsStep] = useState<Step>({ label: 'Publish assets', status: 'pending' });
   const [deployStep, setDeployStep] = useState<Step>({ label: 'Deploy to AWS', status: 'pending' });
+  const [postCdkStep, setPostCdkStep] = useState<Step | null>(null);
   const [diffStep, setDiffStep] = useState<Step>({ label: 'Run CDK diff', status: 'pending' });
   const [diffSummaries, setDiffSummaries] = useState<StackDiffSummary[]>([]);
   const [numStacksWithChanges, setNumStacksWithChanges] = useState<number | undefined>();
@@ -148,6 +149,7 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
   const startDeploy = useCallback(() => {
     setPublishAssetsStep({ label: 'Publish assets', status: 'pending' });
     setDeployStep({ label: 'Deploy to AWS', status: 'pending' });
+    setPostCdkStep(null);
     setDeployOutput(null);
     setHasTokenExpiredError(false); // Reset token expired state when retrying
     setHasStartedCfn(false);
@@ -305,18 +307,22 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
       },
     };
 
+    let harnessDeployError: string | undefined;
     if (imperativeManager.hasDeployersForPhase('post-cdk', imperativeContext)) {
+      setPostCdkStep({ label: 'Deploy harnesses', status: 'running' });
       logger.startStep('Deploy harnesses');
       const postCdkResult = await imperativeManager.runPhase('post-cdk', imperativeContext);
+      const harnessResult = postCdkResult.results.get('harness');
+      if (harnessResult?.state) {
+        deployedHarnesses = harnessResult.state as Record<string, HarnessDeployedState>;
+      }
       if (!postCdkResult.success) {
         logger.endStep('error', postCdkResult.error);
-        logger.log(`Harness deployment failed (CDK state will still be persisted): ${postCdkResult.error}`, 'warn');
+        setPostCdkStep({ label: 'Deploy harnesses', status: 'error', error: postCdkResult.error });
+        harnessDeployError = postCdkResult.error;
       } else {
-        const harnessResult = postCdkResult.results.get('harness');
-        if (harnessResult?.state) {
-          deployedHarnesses = harnessResult.state as Record<string, HarnessDeployedState>;
-        }
         logger.endStep('success');
+        setPostCdkStep({ label: 'Deploy harnesses', status: 'success' });
       }
     }
 
@@ -336,6 +342,10 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
       harnesses: deployedHarnesses,
     });
     await configIO.writeDeployedState(deployedState);
+
+    if (harnessDeployError) {
+      throw new Error(`Harness deployment failed: ${harnessDeployError}`);
+    }
 
     // Query gateway target sync statuses (non-blocking)
     const allStatuses: { name: string; status: string }[] = [];
@@ -630,20 +640,27 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     if (diffMode) {
       return skipPreflight ? [diffStep] : [...preflight.steps, diffStep];
     }
-    return skipPreflight ? [publishAssetsStep, deployStep] : [...preflight.steps, publishAssetsStep, deployStep];
-  }, [preflight.steps, publishAssetsStep, deployStep, diffStep, skipPreflight, diffMode]);
+    const deploySteps = skipPreflight
+      ? [publishAssetsStep, deployStep]
+      : [...preflight.steps, publishAssetsStep, deployStep];
+    if (postCdkStep) {
+      deploySteps.push(postCdkStep);
+    }
+    return deploySteps;
+  }, [preflight.steps, publishAssetsStep, deployStep, diffStep, skipPreflight, diffMode, postCdkStep]);
 
   const phase: DeployPhase = useMemo(() => {
     const activeStep = diffMode ? diffStep : deployStep;
+    const finalStep = postCdkStep ?? activeStep;
 
     if (skipPreflight) {
       if (!shouldStartDeploy && activeStep.status === 'pending') {
         return 'idle';
       }
-      if (activeStep.status === 'error') {
+      if (finalStep.status === 'error') {
         return 'error';
       }
-      if (activeStep.status === 'success') {
+      if (finalStep.status === 'success') {
         return 'complete';
       }
       return 'deploying';
@@ -667,14 +684,14 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     if (preflight.phase === 'running' || preflight.phase === 'bootstrapping' || preflight.phase === 'identity-setup') {
       return 'running';
     }
-    if (activeStep.status === 'error') {
+    if (finalStep.status === 'error') {
       return 'error';
     }
-    if (activeStep.status === 'success') {
+    if (finalStep.status === 'success') {
       return 'complete';
     }
     return 'deploying';
-  }, [preflight.phase, deployStep, diffStep, skipPreflight, shouldStartDeploy, diffMode]);
+  }, [preflight.phase, deployStep, diffStep, skipPreflight, shouldStartDeploy, diffMode, postCdkStep]);
 
   const hasError = hasStepError(steps);
   const isComplete = areStepsComplete(steps);
