@@ -1,5 +1,5 @@
 import { ConfigIO, SecureCredentials } from '../../../lib';
-import type { AgentCoreMcpSpec, DeployedState } from '../../../schema';
+import type { AgentCoreMcpSpec, DeployedState, HarnessDeployedState } from '../../../schema';
 import { validateAwsCredentials } from '../../aws/account';
 import { createSwitchableIoHost } from '../../cdk/toolkit-lib';
 import {
@@ -31,6 +31,7 @@ import {
   validateProject,
 } from '../../operations/deploy';
 import { formatTargetStatus, getGatewayTargetStatuses } from '../../operations/deploy/gateway-status';
+import { createDeploymentManager } from '../../operations/deploy/imperative';
 import type { DeployResult } from './types';
 
 export interface ValidatedDeployOptions {
@@ -336,6 +337,34 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     endStep('success');
 
     if (context.isTeardownDeploy) {
+      // Teardown imperative resources before CDK stack destroy
+      const imperativeManager = createDeploymentManager();
+      const existingTeardownState = await configIO.readDeployedState().catch(() => ({ targets: {} }) as DeployedState);
+      const teardownContext = {
+        projectSpec: context.projectSpec,
+        target,
+        configIO,
+        deployedState: existingTeardownState,
+        onProgress: (step: string, status: 'start' | 'done' | 'error') => {
+          logger.log(`${step}: ${status}`);
+        },
+      };
+
+      if (imperativeManager.hasDeployersForPhase('post-cdk', teardownContext)) {
+        startStep('Tear down imperative resources');
+        const teardownResult = await imperativeManager.teardownAll(teardownContext);
+        if (!teardownResult.success) {
+          endStep('error', teardownResult.error);
+          logger.finalize(false);
+          return {
+            success: false,
+            error: `Imperative teardown failed: ${teardownResult.error}`,
+            logPath: logger.getRelativeLogPath(),
+          };
+        }
+        endStep('success');
+      }
+
       // After deploying the empty spec, destroy the stack entirely
       startStep('Tear down stack');
       const teardown = await performStackTeardown(target.name);
@@ -408,7 +437,40 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       ) ?? {};
     const gateways = parseGatewayOutputs(outputs, gatewaySpecs);
 
-    const existingState = await configIO.readDeployedState().catch(() => undefined);
+    // Post-CDK: deploy imperative resources (harness)
+    let deployedHarnesses: Record<string, HarnessDeployedState> | undefined;
+    const imperativeManager = createDeploymentManager();
+    const existingState = await configIO.readDeployedState().catch(() => ({ targets: {} }) as DeployedState);
+    const imperativeContext = {
+      projectSpec: context.projectSpec,
+      target,
+      configIO,
+      deployedState: existingState,
+      cdkOutputs: outputs,
+      onProgress: (step: string, status: 'start' | 'done' | 'error') => {
+        logger.log(`${step}: ${status}`);
+      },
+    };
+
+    if (imperativeManager.hasDeployersForPhase('post-cdk', imperativeContext)) {
+      startStep('Deploy harnesses');
+      const postCdkResult = await imperativeManager.runPhase('post-cdk', imperativeContext);
+      if (!postCdkResult.success) {
+        endStep('error', postCdkResult.error);
+        logger.finalize(false);
+        return {
+          success: false,
+          error: `Harness deployment failed: ${postCdkResult.error}`,
+          logPath: logger.getRelativeLogPath(),
+        };
+      }
+      const harnessResult = postCdkResult.results.get('harness');
+      if (harnessResult?.state) {
+        deployedHarnesses = harnessResult.state as Record<string, HarnessDeployedState>;
+      }
+      endStep('success');
+    }
+
     const deployedState = buildDeployedState({
       targetName: target.name,
       stackName,
@@ -422,6 +484,7 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       onlineEvalConfigs,
       policyEngines,
       policies,
+      harnesses: deployedHarnesses,
     });
     await configIO.writeDeployedState(deployedState);
 

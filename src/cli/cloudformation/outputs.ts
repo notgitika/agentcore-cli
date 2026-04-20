@@ -2,6 +2,7 @@ import type {
   AgentCoreDeployedState,
   DeployedState,
   EvaluatorDeployedState,
+  HarnessDeployedState,
   MemoryDeployedState,
   OnlineEvalDeployedState,
   PolicyDeployedState,
@@ -351,6 +352,7 @@ export interface BuildDeployedStateOptions {
   onlineEvalConfigs?: Record<string, OnlineEvalDeployedState>;
   policyEngines?: Record<string, PolicyEngineDeployedState>;
   policies?: Record<string, PolicyDeployedState>;
+  harnesses?: Record<string, HarnessDeployedState>;
 }
 
 /**
@@ -370,6 +372,7 @@ export function buildDeployedState(opts: BuildDeployedStateOptions): DeployedSta
     onlineEvalConfigs,
     policyEngines,
     policies,
+    harnesses,
   } = opts;
   const targetState: TargetDeployedState = {
     resources: {
@@ -402,6 +405,11 @@ export function buildDeployedState(opts: BuildDeployedStateOptions): DeployedSta
   // Add online eval config state if configs exist
   if (onlineEvalConfigs && Object.keys(onlineEvalConfigs).length > 0) {
     targetState.resources!.onlineEvalConfigs = onlineEvalConfigs;
+  }
+
+  // Add harness state if harnesses exist
+  if (harnesses && Object.keys(harnesses).length > 0) {
+    targetState.resources!.harnesses = harnesses;
   }
 
   return {

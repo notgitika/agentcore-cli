@@ -20,6 +20,7 @@ const ICONS = {
   'online-eval': '↻',
   'policy-engine': '▣',
   policy: '▢',
+  harness: '⊞',
 } as const;
 
 interface ResourceGraphProps {

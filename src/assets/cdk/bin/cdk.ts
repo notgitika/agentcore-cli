@@ -54,6 +54,26 @@ async function main() {
     throw new Error('No deployment targets configured. Please define targets in agentcore/aws-targets.json');
   }
 
+  // Read harness configs for role creation.
+  // Harness fields may not yet be on the AgentCoreProjectSpec type from @aws/agentcore-cdk,
+  // so we read them dynamically via specAny (same pattern as gateways above).
+  const harnessConfigs: { name: string; executionRoleArn?: string; memoryName?: string }[] = [];
+  for (const entry of specAny.harnesses ?? []) {
+    const harnessPath = path.resolve(configRoot, entry.path, 'harness.json');
+    try {
+      const harnessSpec = JSON.parse(fs.readFileSync(harnessPath, 'utf-8'));
+      harnessConfigs.push({
+        name: entry.name,
+        executionRoleArn: harnessSpec.executionRoleArn,
+        memoryName: harnessSpec.memory?.name,
+      });
+    } catch (err) {
+      throw new Error(
+        `Could not read harness.json for "${entry.name}" at ${harnessPath}: ${err instanceof Error ? err.message : err}`
+      );
+    }
+  }
+
   const app = new App();
 
   for (const target of targets) {
@@ -73,6 +93,7 @@ async function main() {
       spec,
       mcpSpec,
       credentials,
+      harnesses: harnessConfigs.length > 0 ? harnessConfigs : undefined,
       env,
       description: `AgentCore stack for ${spec.name} deployed to ${target.name} (${target.region})`,
       tags: {

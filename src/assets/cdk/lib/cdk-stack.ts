@@ -20,6 +20,10 @@ export interface AgentCoreStackProps extends StackProps {
    * Credential provider ARNs from deployed state, keyed by credential name.
    */
   credentials?: Record<string, { credentialProviderArn: string; clientSecretArn?: string }>;
+  /**
+   * Harness role configurations. Each entry creates an IAM execution role for a harness.
+   */
+  harnesses?: { name: string; executionRoleArn?: string; memoryName?: string }[];
 }
 
 /**
@@ -35,11 +39,12 @@ export class AgentCoreStack extends Stack {
   constructor(scope: Construct, id: string, props: AgentCoreStackProps) {
     super(scope, id, props);
 
-    const { spec, mcpSpec, credentials } = props;
+    const { spec, mcpSpec, credentials, harnesses } = props;
 
-    // Create AgentCoreApplication with all agents
+    // Create AgentCoreApplication with all agents and harness roles
     this.application = new AgentCoreApplication(this, 'Application', {
       spec,
+      harnesses,
     });
 
     // Create AgentCoreMcp if there are gateways configured

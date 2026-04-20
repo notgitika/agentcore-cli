@@ -88,7 +88,10 @@ export async function validateProject(): Promise<PreflightContext> {
   // Check for gateways in agentcore.json
   const hasGateways = projectSpec.agentCoreGateways && projectSpec.agentCoreGateways.length > 0;
 
-  if (!hasAgents && !hasGateways && !hasMemories && !hasEvaluators && !hasPolicyEngines) {
+  // Check for harnesses in agentcore.json
+  const hasHarnesses = projectSpec.harnesses && projectSpec.harnesses.length > 0;
+
+  if (!hasAgents && !hasGateways && !hasMemories && !hasEvaluators && !hasPolicyEngines && !hasHarnesses) {
     let hasExistingStack = false;
     try {
       const deployedState = await configIO.readDeployedState();
@@ -98,7 +101,7 @@ export async function validateProject(): Promise<PreflightContext> {
     }
     if (!hasExistingStack) {
       throw new Error(
-        'No resources defined in project. Add at least one resource (agent, memory, evaluator, or gateway) before deploying.'
+        'No resources defined in project. Add at least one resource (agent, memory, evaluator, gateway, or harness) before deploying.'
       );
     }
     isTeardownDeploy = true;
