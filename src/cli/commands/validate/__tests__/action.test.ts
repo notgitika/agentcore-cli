@@ -5,12 +5,14 @@ const {
   mockReadProjectSpec,
   mockReadAWSDeploymentTargets,
   mockReadDeployedState,
+  mockReadHarnessSpec,
   mockConfigExists,
   mockFindConfigRoot,
 } = vi.hoisted(() => ({
   mockReadProjectSpec: vi.fn(),
   mockReadAWSDeploymentTargets: vi.fn(),
   mockReadDeployedState: vi.fn(),
+  mockReadHarnessSpec: vi.fn(),
   mockConfigExists: vi.fn(),
   mockFindConfigRoot: vi.fn(),
 }));
@@ -54,6 +56,7 @@ vi.mock('../../../../lib/index.js', () => {
       readProjectSpec = mockReadProjectSpec;
       readAWSDeploymentTargets = mockReadAWSDeploymentTargets;
       readDeployedState = mockReadDeployedState;
+      readHarnessSpec = mockReadHarnessSpec;
       configExists = mockConfigExists;
     },
     ConfigValidationError,
@@ -203,5 +206,136 @@ describe('handleValidate', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe('string error');
+  });
+
+  describe('harness validation', () => {
+    const projectWithHarness = {
+      name: 'Test',
+      version: 1,
+      managedBy: 'CDK' as const,
+      runtimes: [],
+      memories: [{ name: 'myMemory', eventExpiryDuration: 30, strategies: [] }],
+      harnesses: [{ name: 'myHarness', path: './harnesses/myHarness' }],
+    };
+
+    const validHarnessSpec = {
+      name: 'myHarness',
+      model: { provider: 'bedrock', modelId: 'anthropic.claude-3-5-sonnet-20241022-v2:0' },
+      tools: [],
+      skills: [],
+    };
+
+    it('validates harness specs when project has harnesses', async () => {
+      mockFindConfigRoot.mockReturnValue('/project/agentcore');
+      mockReadProjectSpec.mockResolvedValue(projectWithHarness);
+      mockReadAWSDeploymentTargets.mockResolvedValue([]);
+      mockConfigExists.mockReturnValue(false);
+      mockReadHarnessSpec.mockResolvedValue(validHarnessSpec);
+
+      const result = await handleValidate({});
+
+      expect(result.success).toBe(true);
+      expect(mockReadHarnessSpec).toHaveBeenCalledWith('myHarness');
+    });
+
+    it('returns error when harness spec is invalid', async () => {
+      mockFindConfigRoot.mockReturnValue('/project/agentcore');
+      mockReadProjectSpec.mockResolvedValue(projectWithHarness);
+      mockReadAWSDeploymentTargets.mockResolvedValue([]);
+      mockConfigExists.mockReturnValue(false);
+      mockReadHarnessSpec.mockRejectedValue(new Error('invalid harness'));
+
+      const result = await handleValidate({});
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('invalid harness');
+    });
+
+    it('returns error when harness references non-existent memory', async () => {
+      mockFindConfigRoot.mockReturnValue('/project/agentcore');
+      mockReadProjectSpec.mockResolvedValue(projectWithHarness);
+      mockReadAWSDeploymentTargets.mockResolvedValue([]);
+      mockConfigExists.mockReturnValue(false);
+      mockReadHarnessSpec.mockResolvedValue({
+        ...validHarnessSpec,
+        memory: { name: 'nonExistent' },
+      });
+
+      const result = await handleValidate({});
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('references memory "nonExistent"');
+      expect(result.error).toContain('not defined in the project');
+    });
+
+    it('passes when harness references existing memory', async () => {
+      mockFindConfigRoot.mockReturnValue('/project/agentcore');
+      mockReadProjectSpec.mockResolvedValue(projectWithHarness);
+      mockReadAWSDeploymentTargets.mockResolvedValue([]);
+      mockConfigExists.mockReturnValue(false);
+      mockReadHarnessSpec.mockResolvedValue({
+        ...validHarnessSpec,
+        memory: { name: 'myMemory' },
+      });
+
+      const result = await handleValidate({});
+
+      expect(result.success).toBe(true);
+    });
+
+    it('passes when harness memory uses arn instead of name', async () => {
+      mockFindConfigRoot.mockReturnValue('/project/agentcore');
+      mockReadProjectSpec.mockResolvedValue(projectWithHarness);
+      mockReadAWSDeploymentTargets.mockResolvedValue([]);
+      mockConfigExists.mockReturnValue(false);
+      mockReadHarnessSpec.mockResolvedValue({
+        ...validHarnessSpec,
+        memory: { arn: 'arn:aws:bedrock:us-east-1:123456789012:memory/abc' },
+      });
+
+      const result = await handleValidate({});
+
+      expect(result.success).toBe(true);
+    });
+
+    it('skips harness validation when project has no harnesses', async () => {
+      mockFindConfigRoot.mockReturnValue('/project/agentcore');
+      mockReadProjectSpec.mockResolvedValue({
+        name: 'Test',
+        version: 1,
+        managedBy: 'CDK' as const,
+        runtimes: [],
+        memories: [],
+      });
+      mockReadAWSDeploymentTargets.mockResolvedValue([]);
+      mockConfigExists.mockReturnValue(false);
+
+      const result = await handleValidate({});
+
+      expect(result.success).toBe(true);
+      expect(mockReadHarnessSpec).not.toHaveBeenCalled();
+    });
+
+    it('validates multiple harnesses and fails on first error', async () => {
+      mockFindConfigRoot.mockReturnValue('/project/agentcore');
+      mockReadProjectSpec.mockResolvedValue({
+        ...projectWithHarness,
+        harnesses: [
+          { name: 'harness1', path: './harnesses/harness1' },
+          { name: 'harness2', path: './harnesses/harness2' },
+        ],
+      });
+      mockReadAWSDeploymentTargets.mockResolvedValue([]);
+      mockConfigExists.mockReturnValue(false);
+      mockReadHarnessSpec.mockImplementation((name: string) => {
+        if (name === 'harness1') return Promise.resolve(validHarnessSpec);
+        return Promise.reject(new Error('harness2 invalid'));
+      });
+
+      const result = await handleValidate({});
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('harness2 invalid');
+    });
   });
 });
