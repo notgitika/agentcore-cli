@@ -1,4 +1,5 @@
 import { registerAdd } from './commands/add';
+import { registerAddTool } from './commands/add/tool-command';
 import { registerCreate } from './commands/create';
 import { registerDeploy } from './commands/deploy';
 import { registerDev } from './commands/dev';
@@ -11,6 +12,7 @@ import { registerLogs } from './commands/logs';
 import { registerPackage } from './commands/package';
 import { registerPause } from './commands/pause';
 import { registerRemove } from './commands/remove';
+import { registerRemoveTool } from './commands/remove/tool-command';
 import { registerResume } from './commands/resume';
 import { registerRun } from './commands/run';
 import { registerStatus } from './commands/status';
@@ -193,6 +195,10 @@ export function registerCommands(program: Command) {
   for (const primitive of ALL_PRIMITIVES) {
     primitive.registerCommands(addCmd, removeCmd);
   }
+
+  // Register standalone add/remove subcommands
+  registerAddTool(addCmd);
+  registerRemoveTool(removeCmd);
 }
 
 export const main = async (argv: string[]) => {

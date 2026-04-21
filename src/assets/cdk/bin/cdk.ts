@@ -65,6 +65,7 @@ async function main() {
     memoryName?: string;
     containerUri?: string;
     hasDockerfile?: boolean;
+    tools?: { type: string; name: string }[];
   }[] = [];
   for (const entry of specAny.harnesses ?? []) {
     const harnessPath = path.resolve(projectRoot, entry.path, 'harness.json');
@@ -76,6 +77,7 @@ async function main() {
         memoryName: harnessSpec.memory?.name,
         containerUri: harnessSpec.containerUri,
         hasDockerfile: !!harnessSpec.dockerfile,
+        tools: harnessSpec.tools,
       });
     } catch (err) {
       throw new Error(

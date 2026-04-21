@@ -38,6 +38,7 @@ export interface InvokeConfig {
   harnesses: {
     name: string;
     state: HarnessDeployedState;
+    inlineFunctionTools: Set<string>;
   }[];
   target: AwsDeploymentTarget;
   targetName: string;
@@ -160,7 +161,14 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
         for (const harness of project.harnesses ?? []) {
           const state = targetState?.resources?.harnesses?.[harness.name];
           if (!state) continue;
-          harnesses.push({ name: harness.name, state });
+          let inlineFunctionTools = new Set<string>();
+          try {
+            const spec = await configIO.readHarnessSpec(harness.name);
+            inlineFunctionTools = new Set(spec.tools.filter(t => t.type === 'inline_function').map(t => t.name));
+          } catch {
+            // fall back to stream-end detection
+          }
+          harnesses.push({ name: harness.name, state, inlineFunctionTools });
         }
 
         if (runtimes.length === 0 && harnesses.length === 0) {
@@ -260,11 +268,15 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
       region: string,
       harnessArn: string,
       runtimeSessionId: string,
-      harnessMessages: { role: string; content: Record<string, unknown>[] }[]
+      harnessMessages: { role: string; content: Record<string, unknown>[] }[],
+      inlineFunctionTools?: Set<string>
     ) => {
+      const logger = loggerRef.current;
       let pendingToolUseId: string | undefined;
       let pendingToolName: string | undefined;
       let pendingToolInput = '';
+      let waitingForInlineToolResult = false;
+      let lastMetadata: { inputTokens: number; outputTokens: number; latencyMs: number } | null = null;
 
       try {
         const stream = invokeHarness({
@@ -299,7 +311,22 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
                 pendingToolInput = '';
                 const serverName = event.start.toolUse.serverName;
                 const label = serverName ? `${serverName}/${pendingToolName}` : pendingToolName;
-                streamingContentRef.current += `\n🔧 Tool: ${label}\n`;
+                logger?.logInfo(`Tool call: ${pendingToolName} (id: ${pendingToolUseId})`);
+                streamingContentRef.current += `\n\x1b[2m🔧 ${label}`;
+                const currentContent = streamingContentRef.current;
+                setMessages(prev => {
+                  const updated = [...prev];
+                  const lastIdx = updated.length - 1;
+                  if (lastIdx >= 0 && updated[lastIdx]?.role === 'assistant') {
+                    updated[lastIdx] = { role: 'assistant', content: currentContent };
+                  }
+                  return updated;
+                });
+              } else if (event.start.type === 'toolResult') {
+                const status = event.start.toolResult.status;
+                const icon = status === 'error' ? ' \x1b[31m✗\x1b[0m' : ' ✓\x1b[0m';
+                logger?.logInfo(`Tool result (${pendingToolName}): status=${status ?? 'success'}`);
+                streamingContentRef.current += `${icon}\n`;
                 const currentContent = streamingContentRef.current;
                 setMessages(prev => {
                   const updated = [...prev];
@@ -319,22 +346,34 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
                 } catch {
                   // use empty
                 }
-                setPendingToolApproval({
-                  toolUseId: pendingToolUseId,
-                  toolName: pendingToolName ?? 'unknown',
-                  input: inputObj,
-                  harnessArn,
-                  sessionId: runtimeSessionId,
-                });
-                setPhase('tool-approval');
-                return;
+                logger?.logInfo(`Tool input (${pendingToolName}): ${JSON.stringify(inputObj)}`);
+
+                const isInline = inlineFunctionTools?.has(pendingToolName ?? '');
+                if (isInline) {
+                  setPendingToolApproval({
+                    toolUseId: pendingToolUseId,
+                    toolName: pendingToolName ?? 'unknown',
+                    input: inputObj,
+                    harnessArn,
+                    sessionId: runtimeSessionId,
+                  });
+                  setPhase('tool-approval');
+                  return;
+                }
+                // Unknown tool type — fall back to stream-end detection
+                waitingForInlineToolResult = true;
+              } else if (event.stopReason === 'tool_result') {
+                waitingForInlineToolResult = false;
               }
               break;
+            case 'messageStart':
+              waitingForInlineToolResult = false;
+              break;
             case 'metadata': {
+              waitingForInlineToolResult = false;
               const { inputTokens, outputTokens } = event.usage;
-              const latency = (event.metrics.latencyMs / 1000).toFixed(1);
-              const metaLine = `⚡ ${inputTokens} in · ${outputTokens} out · ${latency}s`;
-              setMessages(prev => [...prev, { role: 'assistant', content: metaLine, isHint: true }]);
+              logger?.logInfo(`Tokens: ${inputTokens} in, ${outputTokens} out | Latency: ${event.metrics.latencyMs}ms`);
+              lastMetadata = { inputTokens, outputTokens, latencyMs: event.metrics.latencyMs };
               break;
             }
             case 'error':
@@ -349,6 +388,38 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
               });
               break;
           }
+        }
+
+        if (waitingForInlineToolResult && pendingToolUseId) {
+          let inputObj: Record<string, unknown> = {};
+          try {
+            inputObj = JSON.parse(pendingToolInput) as Record<string, unknown>;
+          } catch {
+            // use empty
+          }
+          setPendingToolApproval({
+            toolUseId: pendingToolUseId,
+            toolName: pendingToolName ?? 'unknown',
+            input: inputObj,
+            harnessArn,
+            sessionId: runtimeSessionId,
+          });
+          setPhase('tool-approval');
+          return;
+        }
+
+        if (lastMetadata) {
+          const latency = (lastMetadata.latencyMs / 1000).toFixed(1);
+          streamingContentRef.current += `\n\x1b[2m⚡ ${lastMetadata.inputTokens} in · ${lastMetadata.outputTokens} out · ${latency}s\x1b[0m`;
+          const currentContent = streamingContentRef.current;
+          setMessages(prev => {
+            const updated = [...prev];
+            const lastIdx = updated.length - 1;
+            if (lastIdx >= 0 && updated[lastIdx]?.role === 'assistant') {
+              updated[lastIdx] = { role: 'assistant', content: currentContent };
+            }
+            return updated;
+          });
         }
 
         setPhase('ready');
@@ -461,9 +532,15 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
         setPhase('invoking');
         streamingContentRef.current = '';
 
-        await streamHarnessInvoke(config.target.region, harness.state.harnessArn, sessionId ?? generateSessionId(), [
-          { role: 'user', content: [{ text: prompt }] },
-        ]);
+        logger.logPrompt(prompt, sessionId ?? undefined, userId);
+        await streamHarnessInvoke(
+          config.target.region,
+          harness.state.harnessArn,
+          sessionId ?? generateSessionId(),
+          [{ role: 'user', content: [{ text: prompt }] }],
+          harness.inlineFunctionTools
+        );
+        logger.logResponse(streamingContentRef.current);
         return;
       }
 
@@ -672,39 +749,52 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
 
       const { toolUseId, harnessArn, sessionId: runtimeSessionId } = pendingToolApproval;
 
-      const statusIcon = approved ? '✅' : '❌';
-      setMessages(prev => [...prev, { role: 'assistant', content: `${statusIcon} ${response}`, isHint: true }]);
+      const statusIcon = approved ? ' ✓\x1b[0m' : ' \x1b[31m✗\x1b[0m';
+      streamingContentRef.current += `${statusIcon}\n`;
+      setMessages(prev => {
+        const updated = [...prev];
+        const lastIdx = updated.length - 1;
+        if (lastIdx >= 0 && updated[lastIdx]?.role === 'assistant') {
+          updated[lastIdx] = { role: 'assistant', content: streamingContentRef.current };
+        }
+        return updated;
+      });
       setPendingToolApproval(null);
       setPhase('invoking');
-      streamingContentRef.current = '';
-      setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
 
-      await streamHarnessInvoke(config.target.region, harnessArn, runtimeSessionId, [
-        {
-          role: 'assistant',
-          content: [
-            {
-              toolUse: {
-                toolUseId,
-                name: pendingToolApproval.toolName,
-                input: pendingToolApproval.input,
+      const harness = config.harnesses.find(h => h.state.harnessArn === harnessArn);
+      await streamHarnessInvoke(
+        config.target.region,
+        harnessArn,
+        runtimeSessionId,
+        [
+          {
+            role: 'assistant',
+            content: [
+              {
+                toolUse: {
+                  toolUseId,
+                  name: pendingToolApproval.toolName,
+                  input: pendingToolApproval.input,
+                },
               },
-            },
-          ],
-        },
-        {
-          role: 'user',
-          content: [
-            {
-              toolResult: {
-                toolUseId,
-                content: [{ text: response }],
-                status: approved ? 'success' : 'error',
+            ],
+          },
+          {
+            role: 'user',
+            content: [
+              {
+                toolResult: {
+                  toolUseId,
+                  content: [{ text: response }],
+                  status: approved ? 'success' : 'error',
+                },
               },
-            },
-          ],
-        },
-      ]);
+            ],
+          },
+        ],
+        harness?.inlineFunctionTools
+      );
     },
     [config, pendingToolApproval, streamHarnessInvoke]
   );
