@@ -2,12 +2,14 @@ import { ConfigIO, findConfigRoot } from '../../../lib';
 import {
   AgentNameSchema,
   BuildTypeSchema,
+  GatewayAuthorizerTypeSchema,
   GatewayExceptionLevelSchema,
   GatewayNameSchema,
   ModelProviderSchema,
   ProtocolModeSchema,
   RuntimeAuthorizerTypeSchema,
   SDKFrameworkSchema,
+  SessionStorageSchema,
   StreamDeliveryResourcesSchema,
   TARGET_TYPE_AUTH_CONFIG,
   TargetLanguageSchema,
@@ -16,6 +18,7 @@ import {
   matchEnumValue,
 } from '../../../schema';
 import { ARN_VALIDATION_MESSAGE, isValidArn } from '../shared/arn-utils';
+import { validateHeaderAllowlist } from '../shared/header-utils';
 import { parseAndValidateLifecycleOptions } from '../shared/lifecycle-utils';
 import { validateVpcOptions } from '../shared/vpc-utils';
 import { validateJwtAuthorizerOptions } from './auth-options';
@@ -252,11 +255,27 @@ export function validateAddAgentOptions(options: AddAgentOptions): ValidationRes
     }
   }
 
+  // Validate request header allowlist
+  if (options.requestHeaderAllowlist) {
+    const headerResult = validateHeaderAllowlist(options.requestHeaderAllowlist);
+    if (!headerResult.success) {
+      return { valid: false, error: headerResult.error };
+    }
+  }
+
   // Parse and validate lifecycle configuration
   const lifecycleResult = parseAndValidateLifecycleOptions(options);
   if (!lifecycleResult.valid) return lifecycleResult;
   if (lifecycleResult.idleTimeout !== undefined) options.idleTimeout = lifecycleResult.idleTimeout;
   if (lifecycleResult.maxLifetime !== undefined) options.maxLifetime = lifecycleResult.maxLifetime;
+
+  // Validate session storage mount path
+  if (options.sessionStorageMountPath) {
+    const mountPathResult = SessionStorageSchema.shape.mountPath.safeParse(options.sessionStorageMountPath);
+    if (!mountPathResult.success) {
+      return { valid: false, error: `--session-storage-mount-path: ${mountPathResult.error.issues[0]?.message}` };
+    }
+  }
 
   // Validate VPC options
   const vpcResult = validateVpcOptions(options);
@@ -296,8 +315,12 @@ export function validateAddGatewayOptions(options: AddGatewayOptions): Validatio
     return { valid: false, error: nameResult.error.issues[0]?.message ?? 'Invalid gateway name' };
   }
 
-  if (options.authorizerType && !['NONE', 'CUSTOM_JWT'].includes(options.authorizerType)) {
-    return { valid: false, error: 'Invalid authorizer type. Use NONE or CUSTOM_JWT' };
+  if (options.authorizerType) {
+    const result = GatewayAuthorizerTypeSchema.safeParse(options.authorizerType);
+    if (!result.success) {
+      const valid = GatewayAuthorizerTypeSchema.options.join(', ');
+      return { valid: false, error: `Invalid authorizer type. Use ${valid}` };
+    }
   }
 
   if (options.authorizerType === 'CUSTOM_JWT') {

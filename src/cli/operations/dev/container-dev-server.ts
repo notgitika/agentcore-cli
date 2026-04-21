@@ -1,6 +1,6 @@
 import { CONTAINER_INTERNAL_PORT, DOCKERFILE_NAME, getDockerfilePath } from '../../../lib';
 import { getUvBuildArgs } from '../../../lib/packaging/build-args';
-import { detectContainerRuntime, getStartHint } from '../../external-requirements/detect';
+import { detectContainerRuntime } from '../../external-requirements/detect';
 import { DevServer, type LogLevel, type SpawnConfig } from './dev-server';
 import { waitForServerReady } from './utils';
 import { type ChildProcess, spawn, spawnSync } from 'child_process';
@@ -58,16 +58,9 @@ export class ContainerDevServer extends DevServer {
     const { onLog } = this.options.callbacks;
 
     // 1. Detect container runtime
-    const { runtime, notReadyRuntimes } = await detectContainerRuntime();
+    const { runtime } = await detectContainerRuntime();
     if (!runtime) {
-      if (notReadyRuntimes.length > 0) {
-        onLog(
-          'error',
-          `Found ${notReadyRuntimes.join(', ')} but not ready. Start a runtime:\n${getStartHint(notReadyRuntimes)}`
-        );
-      } else {
-        onLog('error', 'No container runtime found. Install Docker, Podman, or Finch.');
-      }
+      onLog('error', 'No container runtime found. Install Docker, Podman, or Finch.');
       return false;
     }
     this.runtimeBinary = runtime.binary;
@@ -163,15 +156,24 @@ export class ContainerDevServer extends DevServer {
       : {};
 
     // Environment variables: AWS creds + config paths + user env + container-specific overrides.
-    // Disable OpenTelemetry SDK — no collector is running locally, and the OTEL
-    // exporter connection errors would crash or pollute the dev server output.
+    // OTEL env vars (endpoint + protocol) are passed via envVars from the caller,
+    // pointing the agent's OTEL exporter at the local collector.
+    // Inside a container, 127.0.0.1 refers to the container itself — rewrite to
+    // host.docker.internal so the exporter can reach the host-side collector.
+    const containerEnvVars = { ...envVars };
+    if (containerEnvVars.OTEL_EXPORTER_OTLP_ENDPOINT) {
+      containerEnvVars.OTEL_EXPORTER_OTLP_ENDPOINT = containerEnvVars.OTEL_EXPORTER_OTLP_ENDPOINT.replace(
+        '127.0.0.1',
+        'host.docker.internal'
+      ).replace('localhost', 'host.docker.internal');
+    }
+
     const envArgs = Object.entries({
       ...awsEnvVars,
       ...awsConfigEnv,
-      ...envVars,
+      ...containerEnvVars,
       LOCAL_DEV: '1',
       PORT: String(CONTAINER_INTERNAL_PORT),
-      OTEL_SDK_DISABLED: 'true',
     }).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
 
     return {

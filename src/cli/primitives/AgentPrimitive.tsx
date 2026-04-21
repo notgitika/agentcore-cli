@@ -12,9 +12,16 @@ import type {
   SDKFramework,
   TargetLanguage,
 } from '../../schema';
-import { AgentEnvSpecSchema, CREDENTIAL_PROVIDERS, LIFECYCLE_TIMEOUT_MAX, LIFECYCLE_TIMEOUT_MIN } from '../../schema';
+import {
+  AgentEnvSpecSchema,
+  CREDENTIAL_PROVIDERS,
+  DEFAULT_PYTHON_VERSION,
+  LIFECYCLE_TIMEOUT_MAX,
+  LIFECYCLE_TIMEOUT_MIN,
+} from '../../schema';
 import type { AddAgentOptions as CLIAddAgentOptions } from '../commands/add/types';
 import { validateAddAgentOptions } from '../commands/add/validate';
+import { parseAndNormalizeHeaders } from '../commands/shared/header-utils';
 import type { VpcOptions } from '../commands/shared/vpc-utils';
 import { VPC_ENDPOINT_WARNING, parseCommaSeparatedList } from '../commands/shared/vpc-utils';
 import { getErrorMessage } from '../errors';
@@ -51,6 +58,7 @@ export interface AddAgentOptions extends VpcOptions {
   apiKey?: string;
   memory?: MemoryOption;
   protocol?: ProtocolMode;
+  requestHeaderAllowlist?: string[];
   codeLocation?: string;
   entrypoint?: string;
   bedrockAgentId?: string;
@@ -66,6 +74,7 @@ export interface AddAgentOptions extends VpcOptions {
   clientSecret?: string;
   idleTimeout?: number;
   maxLifetime?: number;
+  sessionStorageMountPath?: string;
 }
 
 /**
@@ -106,7 +115,10 @@ export class AgentPrimitive extends BasePrimitive<AddAgentOptions, RemovableReso
       const project = await configIO.readProjectSpec();
       const existingAgent = project.runtimes.find(agent => agent.name === options.name);
       if (existingAgent) {
-        return { success: false, error: `Agent "${options.name}" already exists in this project.` };
+        return {
+          success: false,
+          error: `Agent "${options.name}" already exists. To update its configuration, edit agentcore/agentcore.json directly.`,
+        };
       }
 
       if (options.type === 'import') {
@@ -225,12 +237,20 @@ export class AgentPrimitive extends BasePrimitive<AddAgentOptions, RemovableReso
       .option('--client-id <id>', 'OAuth client ID for agent bearer token [non-interactive]')
       .option('--client-secret <secret>', 'OAuth client secret [non-interactive]')
       .option(
+        '--request-header-allowlist <headers>',
+        'Comma-separated list of custom header names to allow (auto-prefixed with X-Amzn-Bedrock-AgentCore-Runtime-Custom-) [non-interactive]'
+      )
+      .option(
         '--idle-timeout <seconds>',
         `Idle session timeout in seconds (${LIFECYCLE_TIMEOUT_MIN}-${LIFECYCLE_TIMEOUT_MAX}) [non-interactive]`
       )
       .option(
         '--max-lifetime <seconds>',
         `Max instance lifetime in seconds (${LIFECYCLE_TIMEOUT_MIN}-${LIFECYCLE_TIMEOUT_MAX}) [non-interactive]`
+      )
+      .option(
+        '--session-storage-mount-path <path>',
+        'Absolute mount path for session filesystem storage (e.g. /mnt/session-storage) [non-interactive]'
       )
       .option('--json', 'Output as JSON [non-interactive]')
       .action(async options => {
@@ -258,6 +278,11 @@ export class AgentPrimitive extends BasePrimitive<AddAgentOptions, RemovableReso
             ? (JSON.parse(cliOptions.customClaims) as CustomClaimValidation[])
             : undefined;
 
+          // Parse request header allowlist if provided
+          const requestHeaderAllowlist = cliOptions.requestHeaderAllowlist
+            ? parseAndNormalizeHeaders(cliOptions.requestHeaderAllowlist)
+            : undefined;
+
           const result = await this.add({
             name: cliOptions.name!,
             type: cliOptions.type ?? 'create',
@@ -271,6 +296,7 @@ export class AgentPrimitive extends BasePrimitive<AddAgentOptions, RemovableReso
             networkMode: cliOptions.networkMode,
             subnets: cliOptions.subnets,
             securityGroups: cliOptions.securityGroups,
+            requestHeaderAllowlist,
             codeLocation: cliOptions.codeLocation,
             entrypoint: cliOptions.entrypoint,
             bedrockAgentId: cliOptions.agentId,
@@ -286,6 +312,7 @@ export class AgentPrimitive extends BasePrimitive<AddAgentOptions, RemovableReso
             clientSecret: cliOptions.clientSecret,
             idleTimeout: cliOptions.idleTimeout ? Number(cliOptions.idleTimeout) : undefined,
             maxLifetime: cliOptions.maxLifetime ? Number(cliOptions.maxLifetime) : undefined,
+            sessionStorageMountPath: cliOptions.sessionStorageMountPath,
           });
 
           if (cliOptions.json) {
@@ -378,8 +405,10 @@ export class AgentPrimitive extends BasePrimitive<AddAgentOptions, RemovableReso
             customClaims: options.customClaims,
           },
         }),
+      requestHeaderAllowlist: options.requestHeaderAllowlist,
       idleRuntimeSessionTimeout: options.idleTimeout,
       maxLifetime: options.maxLifetime,
+      sessionStorageMountPath: options.sessionStorageMountPath,
     };
 
     const agentPath = join(projectRoot, APP_DIR, options.name);
@@ -450,6 +479,7 @@ export class AgentPrimitive extends BasePrimitive<AddAgentOptions, RemovableReso
       configBaseDir,
       idleTimeout: options.idleTimeout,
       maxLifetime: options.maxLifetime,
+      sessionStorageMountPath: options.sessionStorageMountPath,
     });
   }
 
@@ -510,7 +540,7 @@ export class AgentPrimitive extends BasePrimitive<AddAgentOptions, RemovableReso
       build: options.buildType,
       entrypoint: (options.entrypoint ?? 'main.py') as FilePath,
       codeLocation: codeLocation as DirectoryPath,
-      runtimeVersion: 'PYTHON_3_13',
+      runtimeVersion: DEFAULT_PYTHON_VERSION,
       protocol,
       networkMode,
       ...(networkMode === 'VPC' &&
@@ -520,9 +550,15 @@ export class AgentPrimitive extends BasePrimitive<AddAgentOptions, RemovableReso
         }),
       // MCP uses mcp.run() which is incompatible with the opentelemetry-instrument wrapper
       ...(protocol === 'MCP' && { instrumentation: { enableOtel: false } }),
+      ...(options.requestHeaderAllowlist?.length && {
+        requestHeaderAllowlist: options.requestHeaderAllowlist,
+      }),
       ...(authorizerType && { authorizerType }),
       ...(authorizerConfiguration && { authorizerConfiguration }),
       ...(lifecycleConfiguration && { lifecycleConfiguration }),
+      ...(options.sessionStorageMountPath && {
+        filesystemConfigurations: [{ sessionStorage: { mountPath: options.sessionStorageMountPath } }],
+      }),
     };
 
     project.runtimes.push(agent);

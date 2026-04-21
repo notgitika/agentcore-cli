@@ -55,6 +55,11 @@ const validGatewayOptionsNone: AddGatewayOptions = {
   authorizerType: 'NONE',
 };
 
+const validGatewayOptionsIam: AddGatewayOptions = {
+  name: 'test-gateway',
+  authorizerType: 'AWS_IAM',
+};
+
 const validGatewayOptionsJwt: AddGatewayOptions = {
   name: 'test-gateway',
   authorizerType: 'CUSTOM_JWT',
@@ -343,6 +348,7 @@ describe('validate', () => {
     // AC14: Valid options pass
     it('passes for valid options', () => {
       expect(validateAddGatewayOptions(validGatewayOptionsNone)).toEqual({ valid: true });
+      expect(validateAddGatewayOptions(validGatewayOptionsIam)).toEqual({ valid: true });
       expect(validateAddGatewayOptions(validGatewayOptionsJwt)).toEqual({ valid: true });
     });
 
@@ -1518,5 +1524,50 @@ describe('validateAddAgentOptions - lifecycle configuration', () => {
     const result = validateAddAgentOptions(importOptions);
     expect(result.valid).toBe(false);
     expect(result.error).toContain('--idle-timeout');
+  });
+});
+
+describe('validateAddAgentOptions - session storage mount path', () => {
+  const baseOptions: AddAgentOptions = {
+    name: 'TestAgent',
+    type: 'byo',
+    language: 'Python',
+    framework: 'Strands',
+    modelProvider: 'Bedrock',
+    build: 'CodeZip',
+    codeLocation: './app/test/',
+  };
+
+  it('accepts valid mount path', () => {
+    const result = validateAddAgentOptions({ ...baseOptions, sessionStorageMountPath: '/mnt/data' });
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts mount path with hyphenated subdirectory', () => {
+    const result = validateAddAgentOptions({ ...baseOptions, sessionStorageMountPath: '/mnt/my-storage' });
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects path not under /mnt', () => {
+    const result = validateAddAgentOptions({ ...baseOptions, sessionStorageMountPath: '/data/storage' });
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('--session-storage-mount-path');
+  });
+
+  it('rejects path with more than one subdirectory level', () => {
+    const result = validateAddAgentOptions({ ...baseOptions, sessionStorageMountPath: '/mnt/data/subdir' });
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('--session-storage-mount-path');
+  });
+
+  it('rejects bare /mnt with no subdirectory', () => {
+    const result = validateAddAgentOptions({ ...baseOptions, sessionStorageMountPath: '/mnt/' });
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('--session-storage-mount-path');
+  });
+
+  it('accepts omitted mount path', () => {
+    const result = validateAddAgentOptions({ ...baseOptions });
+    expect(result.valid).toBe(true);
   });
 });
