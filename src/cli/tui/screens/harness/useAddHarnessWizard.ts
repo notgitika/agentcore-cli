@@ -5,8 +5,8 @@ import { DEFAULT_MODEL_IDS } from './types';
 import { useCallback, useMemo, useState } from 'react';
 
 const ADVANCED_SETTING_ORDER: AdvancedSetting[] = [
-  'tools',
   'memory',
+  'tools',
   'auth',
   'network',
   'lifecycle',
@@ -71,6 +71,10 @@ export function useAddHarnessWizard() {
 
     steps.push('advanced');
 
+    if (advancedSettings.includes('memory')) {
+      steps.push('memory');
+    }
+
     if (advancedSettings.includes('tools')) {
       steps.push('tools-select');
       if (config.selectedTools?.includes('remote_mcp')) {
@@ -79,10 +83,6 @@ export function useAddHarnessWizard() {
       if (config.selectedTools?.includes('agentcore_gateway')) {
         steps.push('gateway-arn');
       }
-    }
-
-    if (advancedSettings.includes('memory')) {
-      steps.push('memory');
     }
 
     if (advancedSettings.includes('auth')) {

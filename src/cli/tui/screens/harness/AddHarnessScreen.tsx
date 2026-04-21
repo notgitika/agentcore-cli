@@ -291,6 +291,10 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
       fields.push({ label: 'Truncation Strategy', value: wizard.config.truncationStrategy });
     }
 
+    if (wizard.config.sessionStoragePath) {
+      fields.push({ label: 'Session Storage', value: wizard.config.sessionStoragePath });
+    }
+
     return fields;
   }, [wizard.config]);
 
@@ -476,6 +480,7 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
           <TextInput
             key="subnets"
             prompt="Subnet IDs (comma-separated)"
+            description="VPC subnet IDs where the harness will be deployed"
             initialValue=""
             onSubmit={wizard.setSubnets}
             onCancel={() => wizard.goBack()}
@@ -489,6 +494,7 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
           <TextInput
             key="security-groups"
             prompt="Security Group IDs (comma-separated)"
+            description="Security groups to attach to the harness network interface"
             initialValue=""
             onSubmit={wizard.setSecurityGroups}
             onCancel={() => wizard.goBack()}
@@ -502,6 +508,7 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
           <TextInput
             key="idle-timeout"
             prompt="Idle timeout (seconds)"
+            description="Time before an inactive session is stopped (60-28800, default 900)"
             initialValue="900"
             onSubmit={wizard.setIdleTimeout}
             onCancel={() => wizard.goBack()}
@@ -516,6 +523,7 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
           <TextInput
             key="max-lifetime"
             prompt="Max lifetime (seconds)"
+            description="Maximum total duration for a session (60-28800, default 28800)"
             initialValue="28800"
             onSubmit={wizard.setMaxLifetime}
             onCancel={() => wizard.goBack()}
@@ -530,6 +538,7 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
           <TextInput
             key="max-iterations"
             prompt="Max iterations"
+            description="Maximum number of agent reasoning loops per turn (default 10)"
             initialValue="10"
             onSubmit={wizard.setMaxIterations}
             onCancel={() => wizard.goBack()}
@@ -544,6 +553,7 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
           <TextInput
             key="max-tokens"
             prompt="Max tokens"
+            description="Maximum tokens the model can generate per turn (default 4096)"
             initialValue="4096"
             onSubmit={wizard.setMaxTokens}
             onCancel={() => wizard.goBack()}
@@ -558,6 +568,7 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
           <TextInput
             key="timeout"
             prompt="Timeout (seconds)"
+            description="Maximum wall-clock time per agent turn (default 300)"
             initialValue="300"
             onSubmit={wizard.setTimeoutSeconds}
             onCancel={() => wizard.goBack()}
@@ -581,6 +592,7 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
           <TextInput
             key="session-storage-path"
             prompt="Session storage mount path (e.g., /mnt/data/)"
+            description="Absolute path where persistent storage is mounted inside the session"
             initialValue="/mnt/data/"
             onSubmit={wizard.setSessionStoragePath}
             onCancel={() => wizard.goBack()}
