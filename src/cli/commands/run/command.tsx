@@ -101,7 +101,7 @@ export const registerRun = (program: Command) => {
         json?: boolean;
       }) => {
         const isArnMode = !!(cliOptions.runtimeArn && cliOptions.evaluatorArn);
-        const isCustomMode = !!(cliOptions.customServiceName && cliOptions.customLogGroupName);
+        const isCustomMode = cliOptions.customServiceName !== undefined || cliOptions.customLogGroupName !== undefined;
         const isInputMode = !!cliOptions.inputPath;
         if (!isArnMode && !isCustomMode && !isInputMode) {
           requireProject();

@@ -605,7 +605,8 @@ export async function discoverSessions(opts: DiscoverSessionsOptions): Promise<S
 
   let agentFilter: string;
   if (opts.customServiceName) {
-    agentFilter = `filter resource.attributes.service.name = '${sanitizeQueryValue(opts.customServiceName)}'`;
+    agentFilter = `filter resource.attributes.service.name = '${sanitizeQueryValue(opts.customServiceName)}'
+     | filter ispresent(scope.name)`;
   } else {
     agentFilter = `parse resource.attributes.cloud.resource_id "runtime/*/" as parsedAgentId
      | filter parsedAgentId = '${sanitizeQueryValue(opts.runtimeId!)}'`;
@@ -670,7 +671,8 @@ async function fetchSessionSpans(opts: FetchSpansOptions): Promise<SessionSpans[
   let spanQuery: string;
   if (opts.customServiceName) {
     spanQuery = `fields @message, attributes.session.id as sessionId, traceId
-     | filter resource.attributes.service.name = '${sanitizeQueryValue(opts.customServiceName)}'`;
+     | filter resource.attributes.service.name = '${sanitizeQueryValue(opts.customServiceName)}'
+     | filter ispresent(scope.name)`;
   } else {
     spanQuery = `fields @message, attributes.session.id as sessionId, traceId
      | parse resource.attributes.cloud.resource_id "runtime/*/" as parsedAgentId
@@ -788,6 +790,16 @@ export interface RunEvalResult {
 }
 
 export async function handleRunEval(options: RunEvalOptions): Promise<RunEvalResult> {
+  const modeFlags = [
+    options.inputPath && '--input-path',
+    options.customServiceName && '--custom-service-name',
+    options.agentArn && '--agent-arn',
+  ].filter(Boolean);
+
+  if (modeFlags.length > 1) {
+    return { success: false, error: `Only one mode flag may be specified, but got: ${modeFlags.join(', ')}` };
+  }
+
   let resolution: ResolveResult;
 
   if (options.inputPath) {
