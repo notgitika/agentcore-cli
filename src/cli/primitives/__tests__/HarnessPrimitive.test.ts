@@ -1,6 +1,6 @@
 import type { AgentCoreProjectSpec, NetworkMode } from '../../../schema';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { HarnessPrimitive } from '../HarnessPrimitive';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockReadProjectSpec = vi.fn();
 const mockWriteProjectSpec = vi.fn();
@@ -8,6 +8,7 @@ const mockWriteHarnessSpec = vi.fn();
 const mockGetHarnessDir = vi.fn().mockReturnValue('/tmp/test/agentcore/harnesses/test');
 
 vi.mock('../../../lib', () => ({
+  APP_DIR: 'app',
   ConfigIO: class {
     readProjectSpec = mockReadProjectSpec;
     writeProjectSpec = mockWriteProjectSpec;
@@ -21,9 +22,11 @@ vi.mock('../../../lib', () => ({
 }));
 
 vi.mock('fs/promises', () => ({
+  access: vi.fn().mockResolvedValue(undefined),
   writeFile: vi.fn().mockResolvedValue(undefined),
   mkdir: vi.fn().mockResolvedValue(undefined),
   rm: vi.fn().mockResolvedValue(undefined),
+  copyFile: vi.fn().mockResolvedValue(undefined),
 }));
 
 const baseProject: AgentCoreProjectSpec = {
@@ -65,13 +68,16 @@ describe('HarnessPrimitive', () => {
         expect(result.harnessName).toBe('testHarness');
       }
 
-      expect(mockWriteHarnessSpec).toHaveBeenCalledWith('testHarness', expect.objectContaining({
-        name: 'testHarness',
-        model: {
-          provider: 'bedrock',
-          modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
-        },
-      }));
+      expect(mockWriteHarnessSpec).toHaveBeenCalledWith(
+        'testHarness',
+        expect.objectContaining({
+          name: 'testHarness',
+          model: {
+            provider: 'bedrock',
+            modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
+          },
+        })
+      );
 
       expect(mockWriteProjectSpec).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -101,9 +107,12 @@ describe('HarnessPrimitive', () => {
         })
       );
 
-      expect(mockWriteHarnessSpec).toHaveBeenCalledWith('testHarness', expect.objectContaining({
-        memory: { name: 'testHarnessMemory' },
-      }));
+      expect(mockWriteHarnessSpec).toHaveBeenCalledWith(
+        'testHarness',
+        expect.objectContaining({
+          memory: { name: 'testHarnessMemory' },
+        })
+      );
     });
 
     it('sets memory reference in harness spec', async () => {
@@ -115,9 +124,12 @@ describe('HarnessPrimitive', () => {
         modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
       });
 
-      expect(mockWriteHarnessSpec).toHaveBeenCalledWith('testHarness', expect.objectContaining({
-        memory: { name: 'testHarnessMemory' },
-      }));
+      expect(mockWriteHarnessSpec).toHaveBeenCalledWith(
+        'testHarness',
+        expect.objectContaining({
+          memory: { name: 'testHarnessMemory' },
+        })
+      );
     });
 
     it('rejects duplicate harness name', async () => {
@@ -170,11 +182,14 @@ describe('HarnessPrimitive', () => {
         timeoutSeconds: 300,
       });
 
-      expect(mockWriteHarnessSpec).toHaveBeenCalledWith('testHarness', expect.objectContaining({
-        maxIterations: 10,
-        maxTokens: 4096,
-        timeoutSeconds: 300,
-      }));
+      expect(mockWriteHarnessSpec).toHaveBeenCalledWith(
+        'testHarness',
+        expect.objectContaining({
+          maxIterations: 10,
+          maxTokens: 4096,
+          timeoutSeconds: 300,
+        })
+      );
     });
 
     it('includes truncation strategy in harness spec', async () => {
@@ -187,11 +202,14 @@ describe('HarnessPrimitive', () => {
         truncationStrategy: 'sliding_window',
       });
 
-      expect(mockWriteHarnessSpec).toHaveBeenCalledWith('testHarness', expect.objectContaining({
-        truncation: {
-          strategy: 'sliding_window',
-        },
-      }));
+      expect(mockWriteHarnessSpec).toHaveBeenCalledWith(
+        'testHarness',
+        expect.objectContaining({
+          truncation: {
+            strategy: 'sliding_window',
+          },
+        })
+      );
     });
 
     it('includes network config for VPC mode', async () => {
@@ -206,13 +224,16 @@ describe('HarnessPrimitive', () => {
         securityGroups: ['sg-789'],
       });
 
-      expect(mockWriteHarnessSpec).toHaveBeenCalledWith('testHarness', expect.objectContaining({
-        networkMode: 'VPC',
-        networkConfig: {
-          subnets: ['subnet-123', 'subnet-456'],
-          securityGroups: ['sg-789'],
-        },
-      }));
+      expect(mockWriteHarnessSpec).toHaveBeenCalledWith(
+        'testHarness',
+        expect.objectContaining({
+          networkMode: 'VPC',
+          networkConfig: {
+            subnets: ['subnet-123', 'subnet-456'],
+            securityGroups: ['sg-789'],
+          },
+        })
+      );
     });
 
     it('includes lifecycle config when provided', async () => {
@@ -226,12 +247,15 @@ describe('HarnessPrimitive', () => {
         maxLifetime: 3600,
       });
 
-      expect(mockWriteHarnessSpec).toHaveBeenCalledWith('testHarness', expect.objectContaining({
-        lifecycleConfig: {
-          idleRuntimeSessionTimeout: 600,
-          maxLifetime: 3600,
-        },
-      }));
+      expect(mockWriteHarnessSpec).toHaveBeenCalledWith(
+        'testHarness',
+        expect.objectContaining({
+          lifecycleConfig: {
+            idleRuntimeSessionTimeout: 600,
+            maxLifetime: 3600,
+          },
+        })
+      );
     });
 
     it('includes API key ARN for non-Bedrock providers', async () => {
@@ -244,13 +268,16 @@ describe('HarnessPrimitive', () => {
         apiKeyArn: 'arn:aws:secretsmanager:us-east-1:123456789012:secret:openai-key',
       });
 
-      expect(mockWriteHarnessSpec).toHaveBeenCalledWith('testHarness', expect.objectContaining({
-        model: {
-          provider: 'open_ai',
-          modelId: 'gpt-4',
-          apiKeyArn: 'arn:aws:secretsmanager:us-east-1:123456789012:secret:openai-key',
-        },
-      }));
+      expect(mockWriteHarnessSpec).toHaveBeenCalledWith(
+        'testHarness',
+        expect.objectContaining({
+          model: {
+            provider: 'open_ai',
+            modelId: 'gpt-4',
+            apiKeyArn: 'arn:aws:secretsmanager:us-east-1:123456789012:secret:openai-key',
+          },
+        })
+      );
     });
 
     it('includes system prompt when provided', async () => {
@@ -263,9 +290,101 @@ describe('HarnessPrimitive', () => {
         systemPrompt: 'You are a helpful assistant.',
       });
 
-      expect(mockWriteHarnessSpec).toHaveBeenCalledWith('testHarness', expect.objectContaining({
-        systemPrompt: 'You are a helpful assistant.',
-      }));
+      expect(mockWriteHarnessSpec).toHaveBeenCalledWith(
+        'testHarness',
+        expect.objectContaining({
+          systemPrompt: 'You are a helpful assistant.',
+        })
+      );
+    });
+
+    it('sets containerUri in harness spec', async () => {
+      mockReadProjectSpec.mockResolvedValue(JSON.parse(JSON.stringify(baseProject)));
+
+      await primitive.add({
+        name: 'testHarness',
+        modelProvider: 'bedrock',
+        modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
+        containerUri: '123456789012.dkr.ecr.us-west-2.amazonaws.com/my-harness:latest',
+      });
+
+      expect(mockWriteHarnessSpec).toHaveBeenCalledWith(
+        'testHarness',
+        expect.objectContaining({
+          containerUri: '123456789012.dkr.ecr.us-west-2.amazonaws.com/my-harness:latest',
+        })
+      );
+    });
+
+    it('copies Dockerfile and sets dockerfile field in harness spec', async () => {
+      const { copyFile, mkdir } = await import('fs/promises');
+      mockReadProjectSpec.mockResolvedValue(JSON.parse(JSON.stringify(baseProject)));
+
+      await primitive.add({
+        name: 'testHarness',
+        modelProvider: 'bedrock',
+        modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
+        dockerfilePath: '/some/path/Dockerfile',
+      });
+
+      expect(mkdir).toHaveBeenCalledWith(expect.stringContaining('app/testHarness'), { recursive: true });
+      expect(copyFile).toHaveBeenCalledWith(
+        '/some/path/Dockerfile',
+        expect.stringContaining('app/testHarness/Dockerfile')
+      );
+      expect(mockWriteHarnessSpec).toHaveBeenCalledWith(
+        'testHarness',
+        expect.objectContaining({
+          dockerfile: 'Dockerfile',
+        })
+      );
+    });
+
+    it('returns error when Dockerfile does not exist', async () => {
+      const { access } = await import('fs/promises');
+      vi.mocked(access).mockRejectedValueOnce(new Error('ENOENT'));
+      mockReadProjectSpec.mockResolvedValue(JSON.parse(JSON.stringify(baseProject)));
+
+      const result = await primitive.add({
+        name: 'testHarness',
+        modelProvider: 'bedrock',
+        modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
+        dockerfilePath: '/nonexistent/Dockerfile',
+      });
+
+      expect(result.success).toBe(false);
+      expect(!result.success && result.error).toContain('Dockerfile not found at');
+    });
+  });
+
+  describe('parseContainerFlag()', () => {
+    it('returns empty for undefined', () => {
+      expect(primitive.parseContainerFlag(undefined)).toEqual({});
+    });
+
+    it('detects Dockerfile paths ending with Dockerfile', () => {
+      expect(primitive.parseContainerFlag('./Dockerfile')).toEqual({ dockerfilePath: './Dockerfile' });
+      expect(primitive.parseContainerFlag('/abs/path/Dockerfile')).toEqual({ dockerfilePath: '/abs/path/Dockerfile' });
+    });
+
+    it('detects .dockerfile extension', () => {
+      expect(primitive.parseContainerFlag('custom.dockerfile')).toEqual({ dockerfilePath: 'custom.dockerfile' });
+    });
+
+    it('detects relative paths', () => {
+      expect(primitive.parseContainerFlag('./my-image/Dockerfile.prod')).toEqual({
+        dockerfilePath: './my-image/Dockerfile.prod',
+      });
+      expect(primitive.parseContainerFlag('../Dockerfile')).toEqual({ dockerfilePath: '../Dockerfile' });
+    });
+
+    it('treats ECR URIs as containerUri', () => {
+      const uri = '123456789012.dkr.ecr.us-west-2.amazonaws.com/my-harness:latest';
+      expect(primitive.parseContainerFlag(uri)).toEqual({ containerUri: uri });
+    });
+
+    it('treats non-path strings as containerUri', () => {
+      expect(primitive.parseContainerFlag('my-harness:latest')).toEqual({ containerUri: 'my-harness:latest' });
     });
   });
 

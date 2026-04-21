@@ -205,18 +205,18 @@ describe('PathResolver', () => {
   });
 
   it('getHarnessesDir returns harnesses directory path', () => {
-    const resolver = new PathResolver({ baseDir: '/base' });
-    expect(resolver.getHarnessesDir()).toBe(join('/base', 'harnesses'));
+    const resolver = new PathResolver({ baseDir: '/project/agentcore' });
+    expect(resolver.getHarnessesDir()).toBe(join('/project', 'app'));
   });
 
   it('getHarnessDir returns specific harness directory path', () => {
-    const resolver = new PathResolver({ baseDir: '/base' });
-    expect(resolver.getHarnessDir('myHarness')).toBe(join('/base', 'harnesses', 'myHarness'));
+    const resolver = new PathResolver({ baseDir: '/project/agentcore' });
+    expect(resolver.getHarnessDir('myHarness')).toBe(join('/project', 'app', 'myHarness'));
   });
 
   it('getHarnessConfigPath returns harness config file path', () => {
-    const resolver = new PathResolver({ baseDir: '/base' });
-    expect(resolver.getHarnessConfigPath('myHarness')).toBe(join('/base', 'harnesses', 'myHarness', 'harness.json'));
+    const resolver = new PathResolver({ baseDir: '/project/agentcore' });
+    expect(resolver.getHarnessConfigPath('myHarness')).toBe(join('/project', 'app', 'myHarness', 'harness.json'));
   });
 
   it('setBaseDir updates the base directory', () => {

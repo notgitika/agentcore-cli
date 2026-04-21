@@ -1,6 +1,6 @@
 import { parseTimeString } from '../../../lib/utils';
 import type { DeployedProjectConfig } from '../../operations/resolve-agent';
-import { resolveAgent } from '../../operations/resolve-agent';
+import { resolveAgentOrHarness } from '../../operations/resolve-agent';
 import { buildTraceConsoleUrl, getTrace, listTraces } from '../../operations/traces';
 import type { TracesGetOptions, TracesListOptions } from './types';
 
@@ -17,7 +17,7 @@ export async function handleTracesList(
   context: DeployedProjectConfig,
   options: TracesListOptions
 ): Promise<TracesListResult> {
-  const resolved = resolveAgent(context, options);
+  const resolved = await resolveAgentOrHarness(context, options);
   if (!resolved.success) {
     return { success: false, error: resolved.error };
   }
@@ -82,7 +82,7 @@ export async function handleTracesGet(
   traceId: string,
   options: TracesGetOptions
 ): Promise<TracesGetResult> {
-  const resolved = resolveAgent(context, options);
+  const resolved = await resolveAgentOrHarness(context, options);
   if (!resolved.success) {
     return { success: false, error: resolved.error };
   }

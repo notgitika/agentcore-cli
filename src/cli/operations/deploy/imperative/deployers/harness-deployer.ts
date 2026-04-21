@@ -7,13 +7,23 @@
  */
 import type { HarnessDeployedState, HarnessSpec } from '../../../../../schema';
 import { HarnessSpecSchema } from '../../../../../schema';
-import type { CreateHarnessResult, UpdateHarnessOptions, UpdateHarnessResult } from '../../../../aws/agentcore-harness';
-import { createHarness, deleteHarness, updateHarness } from '../../../../aws/agentcore-harness';
+import type {
+  CreateHarnessResult,
+  Harness,
+  UpdateHarnessOptions,
+  UpdateHarnessResult,
+} from '../../../../aws/agentcore-harness';
+import { createHarness, deleteHarness, getHarness, updateHarness } from '../../../../aws/agentcore-harness';
+import { AgentCoreApiError } from '../../../../aws/api-client';
 import { toPascalId } from '../../../../cloudformation/logical-ids';
 import type { DeployPhase, ImperativeDeployContext, ImperativeDeployResult, ImperativeDeployer } from '../types';
 import { mapHarnessSpecToCreateOptions } from './harness-mapper';
 import { readFile } from 'fs/promises';
 import { dirname, join } from 'path';
+
+const ROLE_VALIDATION_RETRY_DELAYS_MS = [5_000, 10_000, 15_000, 20_000, 30_000];
+const READY_POLL_INTERVAL_MS = 3_000;
+const READY_POLL_MAX_ATTEMPTS = 40; // 2 minutes max
 
 // ============================================================================
 // Types
@@ -133,16 +143,18 @@ export class HarnessDeployer implements ImperativeDeployer<HarnessDeployedStateM
           };
 
           const updateResult: UpdateHarnessResult = await updateHarness(updateOptions);
+          const finalHarness = await waitForReady(region, updateResult.harness);
           resultState[entry.name] = {
-            harnessId: updateResult.harness.harnessId,
-            harnessArn: updateResult.harness.arn,
+            harnessId: finalHarness.harnessId,
+            harnessArn: finalHarness.arn,
             roleArn: executionRoleArn,
-            status: updateResult.harness.status,
+            status: finalHarness.status,
+            agentRuntimeArn: extractRuntimeArn(finalHarness),
             memoryArn: createOptions.memory?.memoryArn,
           };
           notes.push(`Updated harness "${entry.name}"`);
         } else {
-          // Create new harness
+          // Create new harness (with retry for IAM role propagation delay)
           const createOptions = await mapHarnessSpecToCreateOptions({
             harnessSpec,
             harnessDir,
@@ -152,19 +164,21 @@ export class HarnessDeployer implements ImperativeDeployer<HarnessDeployedStateM
             cdkOutputs,
           });
 
-          const createResult: CreateHarnessResult = await createHarness(createOptions);
+          const createResult: CreateHarnessResult = await createWithRetry(createOptions);
+          const finalHarness = await waitForReady(region, createResult.harness);
           resultState[entry.name] = {
-            harnessId: createResult.harness.harnessId,
-            harnessArn: createResult.harness.arn,
+            harnessId: finalHarness.harnessId,
+            harnessArn: finalHarness.arn,
             roleArn: executionRoleArn,
-            status: createResult.harness.status,
+            status: finalHarness.status,
+            agentRuntimeArn: extractRuntimeArn(finalHarness),
             memoryArn: createOptions.memory?.memoryArn,
           };
           notes.push(`Created harness "${entry.name}"`);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        return { success: false, error: `Failed to deploy harness "${entry.name}": ${message}` };
+        return { success: false, error: `Failed to deploy harness "${entry.name}": ${message}`, state: resultState };
       }
     }
 
@@ -229,4 +243,44 @@ function resolveRoleArn(harnessName: string, cdkOutputs?: Record<string, string>
   }
 
   return undefined;
+}
+
+function isRoleValidationError(err: unknown): boolean {
+  return err instanceof AgentCoreApiError && err.statusCode === 400 && err.errorBody.includes('Role validation failed');
+}
+
+async function createWithRetry(options: Parameters<typeof createHarness>[0]): Promise<CreateHarnessResult> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= ROLE_VALIDATION_RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      return await createHarness(options);
+    } catch (err) {
+      if (!isRoleValidationError(err) || attempt === ROLE_VALIDATION_RETRY_DELAYS_MS.length) {
+        throw err;
+      }
+      lastError = err;
+      await sleep(ROLE_VALIDATION_RETRY_DELAYS_MS[attempt]!);
+    }
+  }
+  throw lastError;
+}
+
+async function waitForReady(region: string, harness: Harness): Promise<Harness> {
+  if (harness.status === 'READY' || harness.status === 'FAILED') return harness;
+
+  for (let i = 0; i < READY_POLL_MAX_ATTEMPTS; i++) {
+    await sleep(READY_POLL_INTERVAL_MS);
+    const result = await getHarness({ region, harnessId: harness.harnessId });
+    if (result.harness.status === 'READY' || result.harness.status === 'FAILED') return result.harness;
+  }
+
+  return harness;
+}
+
+function extractRuntimeArn(harness: Harness): string | undefined {
+  return harness.environment?.agentCoreRuntimeEnvironment?.agentRuntimeArn;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }

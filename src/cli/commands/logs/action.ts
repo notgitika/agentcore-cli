@@ -2,7 +2,7 @@ import { parseTimeString } from '../../../lib/utils';
 import { searchLogs, streamLogs } from '../../aws/cloudwatch';
 import { DEFAULT_ENDPOINT_NAME } from '../../constants';
 import type { DeployedProjectConfig } from '../../operations/resolve-agent';
-import { loadDeployedProjectConfig, resolveAgent } from '../../operations/resolve-agent';
+import { loadDeployedProjectConfig, resolveAgentOrHarness } from '../../operations/resolve-agent';
 import { VALID_LEVELS, buildFilterPattern } from './filter-pattern';
 import type { LogsOptions } from './types';
 
@@ -44,13 +44,14 @@ export function formatLogLine(event: { timestamp: number; message: string }, jso
 }
 
 /**
- * Resolve agent context from config + options
+ * Resolve agent context from config + options.
+ * Supports --harness to resolve a harness's underlying runtime.
  */
-export function resolveAgentContext(
+export async function resolveAgentContext(
   context: DeployedProjectConfig,
   options: LogsOptions
-): { success: true; agentContext: AgentContext } | { success: false; error: string } {
-  const result = resolveAgent(context, options);
+): Promise<{ success: true; agentContext: AgentContext } | { success: false; error: string }> {
+  const result = await resolveAgentOrHarness(context, options);
   if (!result.success) {
     return { success: false, error: result.error };
   }
@@ -83,7 +84,7 @@ export async function handleLogs(options: LogsOptions): Promise<LogsResult> {
   }
 
   const context = await loadDeployedProjectConfig();
-  const resolution = resolveAgentContext(context, options);
+  const resolution = await resolveAgentContext(context, options);
 
   if (!resolution.success) {
     return { success: false, error: resolution.error };

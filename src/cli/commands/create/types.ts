@@ -27,6 +27,7 @@ export interface CreateOptions extends VpcOptions {
   // Harness-specific
   modelId?: string;
   apiKeyArn?: string;
+  container?: string;
   harnessMemory?: boolean;
   maxIterations?: string;
   maxTokens?: string;

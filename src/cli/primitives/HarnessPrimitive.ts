@@ -1,6 +1,6 @@
-import { ConfigIO, findConfigRoot } from '../../lib';
+import { APP_DIR, ConfigIO, findConfigRoot } from '../../lib';
 import type { HarnessModelProvider, HarnessSpec, NetworkMode } from '../../schema';
-import { HarnessNameSchema, HarnessSpecSchema } from '../../schema';
+import { HarnessSpecSchema } from '../../schema';
 import { deleteHarness } from '../aws/agentcore-harness';
 import { getErrorMessage } from '../errors';
 import type { RemovalPreview, RemovalResult, SchemaChange } from '../operations/remove/types';
@@ -8,8 +8,8 @@ import { DEFAULT_MEMORY_EXPIRY_DAYS } from '../tui/screens/generate/defaults';
 import { BasePrimitive } from './BasePrimitive';
 import type { AddResult, AddScreenComponent, RemovableResource } from './types';
 import type { Command } from '@commander-js/extra-typings';
-import { rm, writeFile } from 'fs/promises';
-import { dirname, join } from 'path';
+import { access, copyFile, mkdir, rm, writeFile } from 'fs/promises';
+import { basename, dirname, isAbsolute, join, resolve } from 'path';
 
 export interface AddHarnessOptions {
   name: string;
@@ -18,6 +18,8 @@ export interface AddHarnessOptions {
   apiKeyArn?: string;
   systemPrompt?: string;
   skipMemory?: boolean;
+  containerUri?: string;
+  dockerfilePath?: string;
   maxIterations?: number;
   maxTokens?: number;
   timeoutSeconds?: number;
@@ -52,6 +54,24 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
 
       const memoryName = options.skipMemory ? undefined : `${options.name}Memory`;
 
+      let dockerfile: string | undefined;
+      if (options.dockerfilePath) {
+        const projectRoot = dirname(configBaseDir);
+        const srcPath = isAbsolute(options.dockerfilePath)
+          ? options.dockerfilePath
+          : resolve(projectRoot, options.dockerfilePath);
+        try {
+          await access(srcPath);
+        } catch {
+          return { success: false, error: `Dockerfile not found at: ${srcPath}` };
+        }
+        const appDir = join(projectRoot, APP_DIR, options.name);
+        await mkdir(appDir, { recursive: true });
+        const destFilename = basename(srcPath);
+        await copyFile(srcPath, join(appDir, destFilename));
+        dockerfile = destFilename;
+      }
+
       const harnessSpec: HarnessSpec = {
         name: options.name,
         model: {
@@ -63,6 +83,8 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
         skills: [],
         ...(options.systemPrompt && { systemPrompt: options.systemPrompt }),
         ...(memoryName && { memory: { name: memoryName } }),
+        ...(options.containerUri && { containerUri: options.containerUri }),
+        ...(dockerfile && { dockerfile }),
         ...(options.maxIterations !== undefined && { maxIterations: options.maxIterations }),
         ...(options.maxTokens !== undefined && { maxTokens: options.maxTokens }),
         ...(options.timeoutSeconds !== undefined && { timeoutSeconds: options.timeoutSeconds }),
@@ -84,7 +106,7 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
       const pathResolver = configIO.getPathResolver();
       const harnessDir = pathResolver.getHarnessDir(options.name);
       const systemPromptPath = join(harnessDir, 'system-prompt.md');
-      const systemPromptContent = options.systemPrompt || '# System Prompt\n\nEnter your system prompt here.\n';
+      const systemPromptContent = options.systemPrompt ?? 'You are a helpful assistant';
       await writeFile(systemPromptPath, systemPromptContent, 'utf-8');
 
       if (memoryName) {
@@ -99,7 +121,7 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
         ...harnesses,
         {
           name: options.name,
-          path: `./harnesses/${options.name}`,
+          path: `app/${options.name}`,
         },
       ];
 
@@ -174,7 +196,7 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
     }
 
     const summary: string[] = [`Removing harness: ${harnessName}`];
-    const directoriesToDelete: string[] = [`harnesses/${harnessName}`];
+    const directoriesToDelete: string[] = [`app/${harnessName}`];
     const schemaChanges: SchemaChange[] = [];
 
     const afterSpec = {
@@ -209,6 +231,7 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
       .option('--model-provider <provider>', 'Model provider: bedrock, open_ai, gemini')
       .option('--model-id <id>', 'Model ID (e.g., anthropic.claude-3-5-sonnet-20240620-v1:0)')
       .option('--api-key-arn <arn>', 'API key ARN for non-Bedrock providers')
+      .option('--container <uri-or-path>', 'Container image URI or path to a Dockerfile')
       .option('--no-memory', 'Skip auto-creating memory')
       .option('--max-iterations <n>', 'Max iterations', parseInt)
       .option('--max-tokens <n>', 'Max tokens', parseInt)
@@ -226,6 +249,7 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
           modelProvider?: string;
           modelId?: string;
           apiKeyArn?: string;
+          container?: string;
           memory?: boolean;
           maxIterations?: number;
           maxTokens?: number;
@@ -245,8 +269,8 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
             }
 
             if (cliOptions.name || cliOptions.json) {
-              if (!cliOptions.name || !cliOptions.modelProvider || !cliOptions.modelId) {
-                const error = '--name, --model-provider, and --model-id are required';
+              if (!cliOptions.name) {
+                const error = '--name is required';
                 if (cliOptions.json) {
                   console.log(JSON.stringify({ success: false, error }));
                 } else {
@@ -255,11 +279,19 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
                 process.exit(1);
               }
 
+              const { DEFAULT_MODEL_IDS } = await import('../tui/screens/harness/types');
+              const provider = (cliOptions.modelProvider ?? 'bedrock') as HarnessModelProvider;
+              const modelId = cliOptions.modelId ?? DEFAULT_MODEL_IDS[provider];
+
+              const containerOption = this.parseContainerFlag(cliOptions.container);
+
               const result = await this.add({
                 name: cliOptions.name,
-                modelProvider: cliOptions.modelProvider as HarnessModelProvider,
-                modelId: cliOptions.modelId,
+                modelProvider: provider,
+                modelId,
                 apiKeyArn: cliOptions.apiKeyArn,
+                containerUri: containerOption.containerUri,
+                dockerfilePath: containerOption.dockerfilePath,
                 skipMemory: cliOptions.memory === false,
                 maxIterations: cliOptions.maxIterations,
                 maxTokens: cliOptions.maxTokens,
@@ -325,6 +357,22 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
 
   addScreen(): AddScreenComponent {
     return null;
+  }
+
+  parseContainerFlag(value?: string): { containerUri?: string; dockerfilePath?: string } {
+    if (!value) return {};
+    // Treat as Dockerfile if it uses a relative path prefix or ends with a
+    // Dockerfile extension. Bare absolute paths like /my-org/image:tag are
+    // valid container URIs so we don't match on leading / alone.
+    const looksLikeDockerfile =
+      value.endsWith('Dockerfile') ||
+      value.endsWith('.dockerfile') ||
+      value.startsWith('./') ||
+      value.startsWith('../');
+    if (looksLikeDockerfile) {
+      return { dockerfilePath: value };
+    }
+    return { containerUri: value };
   }
 
   private buildLifecycleConfig(options: { idleTimeout?: number; maxLifetime?: number }) {

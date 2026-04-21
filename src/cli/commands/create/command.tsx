@@ -10,6 +10,7 @@ import type {
 } from '../../../schema';
 import { LIFECYCLE_TIMEOUT_MAX, LIFECYCLE_TIMEOUT_MIN } from '../../../schema';
 import { getErrorMessage } from '../../errors';
+import { harnessPrimitive } from '../../primitives/registry';
 import { COMMAND_DESCRIPTIONS } from '../../tui/copy';
 import { CreateScreen } from '../../tui/screens/create';
 import { parseCommaSeparatedList } from '../shared/vpc-utils';
@@ -25,7 +26,14 @@ import { Text, render } from 'ink';
 const AGENT_PATH_FLAGS = ['framework', 'language', 'build', 'protocol', 'type', 'agentId', 'agentAliasId'] as const;
 
 /** Flags that are harness-only */
-const HARNESS_ONLY_FLAGS = ['modelId', 'apiKeyArn', 'maxIterations', 'maxTokens', 'timeout', 'truncationStrategy'] as const;
+const HARNESS_ONLY_FLAGS = [
+  'modelId',
+  'apiKeyArn',
+  'maxIterations',
+  'maxTokens',
+  'timeout',
+  'truncationStrategy',
+] as const;
 
 /** Determines if the agent path should be taken based on provided flags */
 function isAgentPath(options: CreateOptions): boolean {
@@ -103,8 +111,8 @@ function printCreateHarnessSummary(projectName: string): void {
   // Created summary
   console.log(`${dim}Created:${reset}`);
   console.log(`  ${projectName}/`);
-  console.log(`    agentcore/                         ${dim}Config and CDK project${reset}`);
-  console.log(`    agentcore/harnesses/${projectName}/  ${dim}Harness config${reset}`);
+  console.log(`    agentcore/              ${dim}Config and CDK project${reset}`);
+  console.log(`    app/${projectName}/  ${dim}Harness config${reset}`);
   console.log('');
 
   // Success and next steps
@@ -121,7 +129,12 @@ async function handleCreateHarnessCLI(options: CreateOptions): Promise<void> {
   const cwd = options.outputDir ?? getWorkingDirectory();
 
   const validation = validateCreateHarnessOptions(
-    { name: options.name, modelProvider: options.modelProvider, modelId: options.modelId, apiKeyArn: options.apiKeyArn },
+    {
+      name: options.name,
+      modelProvider: options.modelProvider,
+      modelId: options.modelId,
+      apiKeyArn: options.apiKeyArn,
+    },
     cwd
   );
   if (!validation.valid) {
@@ -143,10 +156,17 @@ async function handleCreateHarnessCLI(options: CreateOptions): Promise<void> {
         else if (status === 'error') console.log(`\x1b[31m[error]${reset} ${step}`);
       };
 
-  const provider = (options.modelProvider
-    ? normalizeHarnessModelProvider(options.modelProvider)
-    : 'bedrock') as HarnessModelProvider;
-  const modelId = options.modelId ?? 'us.anthropic.claude-sonnet-4-5-20250514-v1:0';
+  const provider = (
+    options.modelProvider ? normalizeHarnessModelProvider(options.modelProvider) : 'bedrock'
+  ) as HarnessModelProvider;
+  const defaultModelIds: Record<string, string> = {
+    bedrock: 'global.anthropic.claude-sonnet-4-6',
+    open_ai: 'gpt-5',
+    gemini: 'gemini-2.5-flash',
+  };
+  const modelId = options.modelId ?? defaultModelIds[provider] ?? 'global.anthropic.claude-sonnet-4-6';
+
+  const containerOption = harnessPrimitive.parseContainerFlag(options.container);
 
   const result = await createProjectWithHarness({
     name: options.name!,
@@ -154,6 +174,8 @@ async function handleCreateHarnessCLI(options: CreateOptions): Promise<void> {
     modelProvider: provider,
     modelId,
     apiKeyArn: options.apiKeyArn,
+    containerUri: containerOption.containerUri,
+    dockerfilePath: containerOption.dockerfilePath,
     skipMemory: options.harnessMemory === false,
     maxIterations: options.maxIterations ? Number(options.maxIterations) : undefined,
     maxTokens: options.maxTokens ? Number(options.maxTokens) : undefined,
@@ -323,7 +345,11 @@ export const registerCreate = (program: Command) => {
     .option('--max-iterations <n>', 'Max agent loop iterations (harness) [non-interactive]')
     .option('--max-tokens <n>', 'Max tokens per iteration (harness) [non-interactive]')
     .option('--timeout <seconds>', 'Max execution duration in seconds (harness) [non-interactive]')
-    .option('--truncation-strategy <strategy>', 'Truncation strategy: sliding_window or summarization (harness) [non-interactive]')
+    .option(
+      '--truncation-strategy <strategy>',
+      'Truncation strategy: sliding_window or summarization (harness) [non-interactive]'
+    )
+    .option('--container <uri-or-path>', 'Container image URI or Dockerfile path (harness) [non-interactive]')
     .action(async options => {
       try {
         // Any flag triggers non-interactive CLI mode
@@ -372,7 +398,8 @@ export const registerCreate = (program: Command) => {
 
         // Conflict detection: agent-path flags + harness-only flags
         if (isAgentPath(opts) && hasHarnessOnlyFlags(opts)) {
-          const error = 'Cannot mix agent-path flags (--framework, --language, etc.) with harness-only flags (--model-id, --max-iterations, etc.)';
+          const error =
+            'Cannot mix agent-path flags (--framework, --language, etc.) with harness-only flags (--model-id, --max-iterations, etc.)';
           if (opts.json) {
             console.log(JSON.stringify({ success: false, error }));
           } else {

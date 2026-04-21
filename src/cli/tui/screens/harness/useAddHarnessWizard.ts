@@ -1,8 +1,12 @@
 import type { HarnessModelProvider, NetworkMode } from '../../../../schema';
-import type { AddHarnessConfig, AddHarnessStep, AdvancedSetting } from './types';
+import type { AddHarnessConfig, AddHarnessStep, AdvancedSetting, ContainerMode } from './types';
+import { DEFAULT_MODEL_IDS } from './types';
 import { useCallback, useMemo, useState } from 'react';
 
+const ADVANCED_SETTING_ORDER: AdvancedSetting[] = ['memory', 'network', 'lifecycle', 'execution', 'truncation'];
+
 const SETTING_TO_FIRST_STEP: Record<AdvancedSetting, AddHarnessStep> = {
+  memory: 'memory',
   network: 'network-mode',
   lifecycle: 'idle-timeout',
   execution: 'max-iterations',
@@ -10,7 +14,16 @@ const SETTING_TO_FIRST_STEP: Record<AdvancedSetting, AddHarnessStep> = {
 };
 
 function getFirstAdvancedStep(settings: AdvancedSetting[]): AddHarnessStep | undefined {
-  for (const setting of ['network', 'lifecycle', 'execution', 'truncation'] as AdvancedSetting[]) {
+  for (const setting of ADVANCED_SETTING_ORDER) {
+    if (settings.includes(setting)) return SETTING_TO_FIRST_STEP[setting];
+  }
+  return undefined;
+}
+
+function getNextAdvancedStep(settings: AdvancedSetting[], after: AdvancedSetting): AddHarnessStep | undefined {
+  const idx = ADVANCED_SETTING_ORDER.indexOf(after);
+  const remaining = ADVANCED_SETTING_ORDER.slice(idx + 1);
+  for (const setting of remaining) {
     if (settings.includes(setting)) return SETTING_TO_FIRST_STEP[setting];
   }
   return undefined;
@@ -20,7 +33,7 @@ function getDefaultConfig(): AddHarnessConfig {
   return {
     name: '',
     modelProvider: 'bedrock',
-    modelId: 'us.anthropic.claude-sonnet-4-5-20250514-v1:0',
+    modelId: DEFAULT_MODEL_IDS.bedrock,
   };
 }
 
@@ -30,17 +43,25 @@ export function useAddHarnessWizard() {
   const [advancedSettings, setAdvancedSettingsState] = useState<AdvancedSetting[]>([]);
 
   const allSteps = useMemo(() => {
-    const steps: AddHarnessStep[] = ['name', 'model-provider', 'model-id'];
+    const steps: AddHarnessStep[] = ['name', 'model-provider'];
 
-    // Add api-key-arn step for non-bedrock providers
     if (config.modelProvider !== 'bedrock') {
       steps.push('api-key-arn');
     }
 
-    // Always show advanced settings selection
+    steps.push('container');
+    if (config.containerMode === 'uri') {
+      steps.push('container-uri');
+    } else if (config.containerMode === 'dockerfile') {
+      steps.push('container-dockerfile');
+    }
+
     steps.push('advanced');
 
-    // Add steps based on advanced settings selections
+    if (advancedSettings.includes('memory')) {
+      steps.push('memory');
+    }
+
     if (advancedSettings.includes('network')) {
       steps.push('network-mode');
       if (config.networkMode === 'VPC') {
@@ -60,11 +81,10 @@ export function useAddHarnessWizard() {
       steps.push('truncation-strategy');
     }
 
-    // Always end with confirm
     steps.push('confirm');
 
     return steps;
-  }, [config.modelProvider, config.networkMode, advancedSettings]);
+  }, [config.modelProvider, config.containerMode, config.networkMode, advancedSettings]);
 
   const currentIndex = allSteps.indexOf(step);
 
@@ -91,23 +111,14 @@ export function useAddHarnessWizard() {
     [nextStep]
   );
 
-  const setModelProvider = useCallback(
-    (modelProvider: HarnessModelProvider) => {
-      setConfig(c => ({ ...c, modelProvider }));
-      const next = nextStep('model-provider');
-      if (next) setStep(next);
-    },
-    [nextStep]
-  );
-
-  const setModelId = useCallback(
-    (modelId: string) => {
-      setConfig(c => ({ ...c, modelId }));
-      const next = nextStep('model-id');
-      if (next) setStep(next);
-    },
-    [nextStep]
-  );
+  const setModelProvider = useCallback((modelProvider: HarnessModelProvider) => {
+    setConfig(c => ({ ...c, modelProvider, modelId: DEFAULT_MODEL_IDS[modelProvider] }));
+    if (modelProvider !== 'bedrock') {
+      setStep('api-key-arn');
+    } else {
+      setStep('container');
+    }
+  }, []);
 
   const setApiKeyArn = useCallback(
     (apiKeyArn: string) => {
@@ -118,30 +129,58 @@ export function useAddHarnessWizard() {
     [nextStep]
   );
 
-  const setAdvancedSettings = useCallback(
-    (settings: AdvancedSetting[]) => {
-      setAdvancedSettingsState(settings);
-      // Compute next step directly from incoming settings rather than relying
-      // on allSteps which still reflects the previous (empty) advancedSettings.
-      const firstAdvancedStep = getFirstAdvancedStep(settings);
-      setStep(firstAdvancedStep ?? 'confirm');
+  const setContainerMode = useCallback((containerMode: ContainerMode) => {
+    setConfig(c => ({ ...c, containerMode, containerUri: undefined, dockerfilePath: undefined }));
+    if (containerMode === 'uri') {
+      setStep('container-uri');
+    } else if (containerMode === 'dockerfile') {
+      setStep('container-dockerfile');
+    } else {
+      setStep('advanced');
+    }
+  }, []);
+
+  const setContainerUri = useCallback(
+    (containerUri: string) => {
+      setConfig(c => ({ ...c, containerUri }));
+      const next = nextStep('container-uri');
+      if (next) setStep(next);
     },
-    []
+    [nextStep]
+  );
+
+  const setDockerfilePath = useCallback(
+    (dockerfilePath: string) => {
+      setConfig(c => ({ ...c, dockerfilePath }));
+      const next = nextStep('container-dockerfile');
+      if (next) setStep(next);
+    },
+    [nextStep]
+  );
+
+  const setAdvancedSettings = useCallback((settings: AdvancedSetting[]) => {
+    setAdvancedSettingsState(settings);
+    const firstAdvancedStep = getFirstAdvancedStep(settings);
+    setStep(firstAdvancedStep ?? 'confirm');
+  }, []);
+
+  const setMemoryEnabled = useCallback(
+    (enabled: boolean) => {
+      setConfig(c => ({ ...c, skipMemory: !enabled }));
+      const next = getNextAdvancedStep(advancedSettings, 'memory');
+      setStep(next ?? 'confirm');
+    },
+    [advancedSettings]
   );
 
   const setNetworkMode = useCallback(
     (networkMode: NetworkMode) => {
       setConfig(c => ({ ...c, networkMode }));
-      // Compute next step directly: VPC needs subnets, PUBLIC skips to the
-      // next advanced section. Can't rely on allSteps since state hasn't
-      // re-rendered yet (same stale-closure pattern as setAdvancedSettings).
       if (networkMode === 'VPC') {
         setStep('subnets');
       } else {
-        const networkIdx = advancedSettings.indexOf('network');
-        const remaining = advancedSettings.slice(networkIdx + 1);
-        const nextAdvanced = getFirstAdvancedStep(remaining);
-        setStep(nextAdvanced ?? 'confirm');
+        const next = getNextAdvancedStep(advancedSettings, 'network');
+        setStep(next ?? 'confirm');
       }
     },
     [advancedSettings]
@@ -149,7 +188,10 @@ export function useAddHarnessWizard() {
 
   const setSubnets = useCallback(
     (subnetsStr: string) => {
-      const subnets = subnetsStr.split(',').map(s => s.trim()).filter(Boolean);
+      const subnets = subnetsStr
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
       setConfig(c => ({ ...c, subnets }));
       const next = nextStep('subnets');
       if (next) setStep(next);
@@ -159,7 +201,10 @@ export function useAddHarnessWizard() {
 
   const setSecurityGroups = useCallback(
     (sgStr: string) => {
-      const securityGroups = sgStr.split(',').map(s => s.trim()).filter(Boolean);
+      const securityGroups = sgStr
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
       setConfig(c => ({ ...c, securityGroups }));
       const next = nextStep('security-groups');
       if (next) setStep(next);
@@ -241,9 +286,12 @@ export function useAddHarnessWizard() {
     goBack,
     setName,
     setModelProvider,
-    setModelId,
     setApiKeyArn,
+    setContainerMode,
+    setContainerUri,
+    setDockerfilePath,
     setAdvancedSettings,
+    setMemoryEnabled,
     setNetworkMode,
     setSubnets,
     setSecurityGroups,

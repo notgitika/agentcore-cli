@@ -1,13 +1,12 @@
 import { HarnessNameSchema } from '../../../schema';
 import { validateFolderNotExists } from './validate';
-import { existsSync } from 'fs';
-import { join } from 'path';
 
 export interface CreateHarnessCliOptions {
   name?: string;
   modelProvider?: string;
   modelId?: string;
   apiKeyArn?: string;
+  container?: string;
   noMemory?: boolean;
   maxIterations?: string;
   maxTokens?: string;
@@ -31,12 +30,12 @@ export interface ValidationResult {
 }
 
 const MODEL_PROVIDER_MAPPING: Record<string, string> = {
-  'bedrock': 'bedrock',
-  'Bedrock': 'bedrock',
-  'open_ai': 'open_ai',
-  'OpenAI': 'open_ai',
-  'gemini': 'gemini',
-  'Gemini': 'gemini',
+  bedrock: 'bedrock',
+  Bedrock: 'bedrock',
+  open_ai: 'open_ai',
+  OpenAI: 'open_ai',
+  gemini: 'gemini',
+  Gemini: 'gemini',
 };
 
 export function normalizeHarnessModelProvider(raw: string): string | undefined {
@@ -61,16 +60,21 @@ export function validateCreateHarnessOptions(options: CreateHarnessCliOptions, c
   if (options.modelProvider) {
     const normalized = normalizeHarnessModelProvider(options.modelProvider);
     if (!normalized) {
-      return { valid: false, error: `Invalid model provider: ${options.modelProvider}. Use bedrock, open_ai, or gemini` };
+      return {
+        valid: false,
+        error: `Invalid model provider: ${options.modelProvider}. Use bedrock, open_ai, or gemini`,
+      };
     }
     options.modelProvider = normalized;
-  } else {
-    options.modelProvider = 'bedrock';
   }
+  options.modelProvider ??= 'bedrock';
 
-  if (!options.modelId) {
-    options.modelId = 'us.anthropic.claude-sonnet-4-5-20250514-v1:0';
-  }
+  const defaultModelIds: Record<string, string> = {
+    bedrock: 'global.anthropic.claude-sonnet-4-6',
+    open_ai: 'gpt-5',
+    gemini: 'gemini-2.5-flash',
+  };
+  options.modelId ??= defaultModelIds[options.modelProvider] ?? 'global.anthropic.claude-sonnet-4-6';
 
   if (options.modelProvider !== 'bedrock' && !options.apiKeyArn) {
     return { valid: false, error: `--api-key-arn is required for ${options.modelProvider} provider` };

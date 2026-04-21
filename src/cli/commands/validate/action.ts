@@ -7,6 +7,7 @@ import {
   NoProjectError,
   findConfigRoot,
 } from '../../../lib';
+import type { AgentCoreProjectSpec } from '../../../schema';
 
 export interface ValidateOptions {
   directory?: string;
@@ -36,8 +37,9 @@ export async function handleValidate(options: ValidateOptions): Promise<Validate
   const configIO = new ConfigIO({ baseDir: configRoot });
 
   // Validate project spec (agentcore.json)
+  let projectSpec: AgentCoreProjectSpec;
   try {
-    await configIO.readProjectSpec();
+    projectSpec = await configIO.readProjectSpec();
   } catch (err) {
     return { success: false, error: formatError(err, 'agentcore.json') };
   }
@@ -55,6 +57,27 @@ export async function handleValidate(options: ValidateOptions): Promise<Validate
       await configIO.readDeployedState();
     } catch (err) {
       return { success: false, error: formatError(err, '.cli/state.json') };
+    }
+  }
+
+  // Validate harness specs
+  const harnesses = projectSpec.harnesses ?? [];
+  const memoryNames = new Set((projectSpec.memories ?? []).map(m => m.name));
+
+  for (const harness of harnesses) {
+    const harnessFile = `harnesses/${harness.name}/harness.json`;
+
+    try {
+      const harnessSpec = await configIO.readHarnessSpec(harness.name);
+
+      if (harnessSpec.memory?.name && !memoryNames.has(harnessSpec.memory.name)) {
+        return {
+          success: false,
+          error: `Harness "${harness.name}" references memory "${harnessSpec.memory.name}" which is not defined in the project`,
+        };
+      }
+    } catch (err) {
+      return { success: false, error: formatError(err, harnessFile) };
     }
   }
 

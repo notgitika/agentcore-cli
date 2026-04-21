@@ -137,7 +137,7 @@ describe('validateCreateHarnessOptions', () => {
     const result = validateCreateHarnessOptions(options, testDir);
     expect(result.valid).toBe(true);
     expect(options.modelProvider).toBe('bedrock');
-    expect(options.modelId).toBe('us.anthropic.claude-sonnet-4-5-20250514-v1:0');
+    expect(options.modelId).toBe('global.anthropic.claude-sonnet-4-6');
   });
 
   it('accepts valid harness name with underscores', () => {
@@ -146,10 +146,7 @@ describe('validateCreateHarnessOptions', () => {
   });
 
   it('rejects harness name longer than 48 characters', () => {
-    const result = validateCreateHarnessOptions(
-      { name: 'a'.repeat(49) },
-      testDir
-    );
+    const result = validateCreateHarnessOptions({ name: 'a'.repeat(49) }, testDir);
     expect(result.valid).toBe(false);
   });
 });

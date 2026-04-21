@@ -2,7 +2,7 @@ import { CONFIG_DIR } from '../../../lib';
 import type { HarnessModelProvider, NetworkMode } from '../../../schema';
 import { getErrorMessage } from '../../errors';
 import { harnessPrimitive } from '../../primitives/registry';
-import { createProject, type ProgressCallback } from './action';
+import { type ProgressCallback, createProject } from './action';
 import type { CreateResult } from './types';
 import { join } from 'path';
 
@@ -13,6 +13,8 @@ export interface CreateHarnessProjectOptions {
   modelId: string;
   apiKeyArn?: string;
   skipMemory?: boolean;
+  containerUri?: string;
+  dockerfilePath?: string;
   maxIterations?: number;
   maxTokens?: number;
   timeoutSeconds?: number;
@@ -53,6 +55,8 @@ export async function createProjectWithHarness(options: CreateHarnessProjectOpti
       modelProvider: options.modelProvider,
       modelId: options.modelId,
       apiKeyArn: options.apiKeyArn,
+      containerUri: options.containerUri,
+      dockerfilePath: options.dockerfilePath,
       skipMemory: options.skipMemory,
       maxIterations: options.maxIterations,
       maxTokens: options.maxTokens,

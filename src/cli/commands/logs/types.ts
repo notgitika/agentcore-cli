@@ -1,5 +1,6 @@
 export interface LogsOptions {
   runtime?: string;
+  harness?: string;
   since?: string;
   until?: string;
   level?: string;

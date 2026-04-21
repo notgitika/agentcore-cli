@@ -583,7 +583,7 @@ describe('AgentCoreProjectSpecSchema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('defaults harnesses to empty array', () => {
+  it('harnesses is undefined when not provided', () => {
     const result = AgentCoreProjectSpecSchema.safeParse(minimalProject);
     expect(result.success).toBe(true);
     if (result.success) {

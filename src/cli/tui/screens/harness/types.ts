@@ -1,11 +1,16 @@
 import type { HarnessModelProvider, NetworkMode } from '../../../../schema';
 
+export type ContainerMode = 'none' | 'uri' | 'dockerfile';
+
 export type AddHarnessStep =
   | 'name'
   | 'model-provider'
-  | 'model-id'
   | 'api-key-arn'
+  | 'container'
+  | 'container-uri'
+  | 'container-dockerfile'
   | 'advanced'
+  | 'memory'
   | 'network-mode'
   | 'subnets'
   | 'security-groups'
@@ -22,6 +27,10 @@ export interface AddHarnessConfig {
   modelProvider: HarnessModelProvider;
   modelId: string;
   apiKeyArn?: string;
+  skipMemory?: boolean;
+  containerMode?: ContainerMode;
+  containerUri?: string;
+  dockerfilePath?: string;
   maxIterations?: number;
   maxTokens?: number;
   timeoutSeconds?: number;
@@ -36,9 +45,12 @@ export interface AddHarnessConfig {
 export const HARNESS_STEP_LABELS: Record<AddHarnessStep, string> = {
   name: 'Name',
   'model-provider': 'Model provider',
-  'model-id': 'Model',
   'api-key-arn': 'API key ARN',
+  container: 'Container',
+  'container-uri': 'Container URI',
+  'container-dockerfile': 'Dockerfile path',
   advanced: 'Advanced settings',
+  memory: 'Memory',
   'network-mode': 'Network mode',
   subnets: 'Subnets',
   'security-groups': 'Security groups',
@@ -57,12 +69,11 @@ export const MODEL_PROVIDER_OPTIONS = [
   { id: 'gemini' as const, title: 'Google Gemini', description: 'Use Google Gemini models (requires API key ARN)' },
 ] as const;
 
-export const BEDROCK_MODEL_OPTIONS = [
-  { id: 'us.anthropic.claude-sonnet-4-5-20250514-v1:0', title: 'Claude Sonnet 4 (Recommended)' },
-  { id: 'us.anthropic.claude-3-5-haiku-20241022-v1:0', title: 'Claude Haiku 3.5' },
-  { id: 'us.amazon.nova-pro-v1:0', title: 'Nova Pro' },
-  { id: 'us.amazon.nova-lite-v1:0', title: 'Nova Lite' },
-] as const;
+export const DEFAULT_MODEL_IDS: Record<HarnessModelProvider, string> = {
+  bedrock: 'global.anthropic.claude-sonnet-4-6',
+  open_ai: 'gpt-5',
+  gemini: 'gemini-2.5-flash',
+};
 
 export const TRUNCATION_STRATEGY_OPTIONS = [
   { id: 'sliding_window' as const, title: 'Sliding window', description: 'Keep most recent messages' },
@@ -70,6 +81,7 @@ export const TRUNCATION_STRATEGY_OPTIONS = [
 ] as const;
 
 export const ADVANCED_SETTING_OPTIONS = [
+  { id: 'memory', title: 'Memory', description: 'Enable or disable persistent memory' },
   { id: 'network', title: 'Network', description: 'VPC configuration' },
   { id: 'lifecycle', title: 'Lifecycle', description: 'Idle timeout and max lifetime' },
   { id: 'execution', title: 'Execution limits', description: 'Iterations, tokens, timeout' },
@@ -77,6 +89,21 @@ export const ADVANCED_SETTING_OPTIONS = [
 ] as const;
 
 export type AdvancedSetting = (typeof ADVANCED_SETTING_OPTIONS)[number]['id'];
+
+export const MEMORY_OPTIONS = [
+  {
+    id: 'disabled' as const,
+    title: 'No persistent memory',
+    description: 'Harness does not retain context across sessions',
+  },
+  { id: 'enabled' as const, title: 'Enabled', description: 'Create persistent memory for this harness' },
+] as const;
+
+export const CONTAINER_MODE_OPTIONS = [
+  { id: 'none' as const, title: 'None', description: 'Use the default managed runtime' },
+  { id: 'uri' as const, title: 'Container URI', description: 'Use a pre-built container image (ECR URI)' },
+  { id: 'dockerfile' as const, title: 'Dockerfile', description: 'Build from a Dockerfile' },
+] as const;
 
 export const NETWORK_MODE_OPTIONS = [
   { id: 'PUBLIC' as const, title: 'Public', description: 'Internet-facing' },

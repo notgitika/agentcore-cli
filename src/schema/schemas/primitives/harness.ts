@@ -226,8 +226,8 @@ export const HarnessSpecSchema = z
     maxTokens: z.number().int().min(1).optional(),
     timeoutSeconds: z.number().int().min(1).optional(),
     truncation: HarnessTruncationConfigSchema.optional(),
-    containerUri: z.string().optional(),
-    dockerfile: z.string().optional(),
+    containerUri: z.string().min(1).optional(),
+    dockerfile: z.string().min(1).optional(),
     executionRoleArn: z.string().optional(),
     networkMode: NetworkModeSchema.optional(),
     networkConfig: NetworkConfigSchema.optional(),
@@ -236,6 +236,13 @@ export const HarnessSpecSchema = z
     tags: TagsSchema.optional(),
   })
   .superRefine((data, ctx) => {
+    if (data.containerUri !== undefined && data.dockerfile !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'containerUri and dockerfile are mutually exclusive',
+        path: ['containerUri'],
+      });
+    }
     if (data.networkMode === 'VPC' && !data.networkConfig) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

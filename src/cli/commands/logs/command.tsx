@@ -21,6 +21,7 @@ export const registerLogs = (program: Command) => {
     .passThroughOptions()
     .description(COMMAND_DESCRIPTIONS.logs)
     .option('--runtime <name>', 'Select specific runtime')
+    .option('--harness <name>', 'Select specific harness')
     .option('--since <time>', 'Start time — defaults to 1h ago in search mode (e.g. "1h", "30m", "2d", ISO 8601)')
     .option('--until <time>', 'End time — defaults to now in search mode (e.g. "now", ISO 8601)')
     .option('--level <level>', 'Filter by log level (error, warn, info, debug)')

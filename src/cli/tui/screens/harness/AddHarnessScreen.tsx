@@ -15,11 +15,12 @@ import type { SelectableItem } from '../../components';
 import { HELP_TEXT } from '../../constants';
 import { useListNavigation, useMultiSelectNavigation } from '../../hooks';
 import { generateUniqueName } from '../../utils';
-import type { AddHarnessConfig, AdvancedSetting } from './types';
+import type { AddHarnessConfig, AdvancedSetting, ContainerMode } from './types';
 import {
   ADVANCED_SETTING_OPTIONS,
-  BEDROCK_MODEL_OPTIONS,
+  CONTAINER_MODE_OPTIONS,
   HARNESS_STEP_LABELS,
+  MEMORY_OPTIONS,
   MODEL_PROVIDER_OPTIONS,
   NETWORK_MODE_OPTIONS,
   TRUNCATION_STRATEGY_OPTIONS,
@@ -41,13 +42,18 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
     []
   );
 
-  const bedrockModelItems: SelectableItem[] = useMemo(
-    () => BEDROCK_MODEL_OPTIONS.map(opt => ({ id: opt.id, title: opt.title })),
+  const containerModeItems: SelectableItem[] = useMemo(
+    () => CONTAINER_MODE_OPTIONS.map(opt => ({ id: opt.id, title: opt.title, description: opt.description })),
     []
   );
 
   const advancedSettingItems: SelectableItem[] = useMemo(
     () => ADVANCED_SETTING_OPTIONS.map(opt => ({ id: opt.id, title: opt.title, description: opt.description })),
+    []
+  );
+
+  const memoryItems: SelectableItem[] = useMemo(
+    () => MEMORY_OPTIONS.map(opt => ({ id: opt.id, title: opt.title, description: opt.description })),
     []
   );
 
@@ -63,9 +69,12 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
 
   const isNameStep = wizard.step === 'name';
   const isModelProviderStep = wizard.step === 'model-provider';
-  const isModelIdStep = wizard.step === 'model-id';
   const isApiKeyArnStep = wizard.step === 'api-key-arn';
+  const isContainerStep = wizard.step === 'container';
+  const isContainerUriStep = wizard.step === 'container-uri';
+  const isContainerDockerfileStep = wizard.step === 'container-dockerfile';
   const isAdvancedStep = wizard.step === 'advanced';
+  const isMemoryStep = wizard.step === 'memory';
   const isNetworkModeStep = wizard.step === 'network-mode';
   const isSubnetsStep = wizard.step === 'subnets';
   const isSecurityGroupsStep = wizard.step === 'security-groups';
@@ -84,11 +93,11 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
     isActive: isModelProviderStep,
   });
 
-  const bedrockModelNav = useListNavigation({
-    items: bedrockModelItems,
-    onSelect: item => wizard.setModelId(item.id),
+  const containerModeNav = useListNavigation({
+    items: containerModeItems,
+    onSelect: item => wizard.setContainerMode(item.id as ContainerMode),
     onExit: () => wizard.goBack(),
-    isActive: isModelIdStep && wizard.config.modelProvider === 'bedrock',
+    isActive: isContainerStep,
   });
 
   const advancedSettingsNav = useMultiSelectNavigation({
@@ -98,6 +107,13 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
     onExit: () => wizard.goBack(),
     isActive: isAdvancedStep,
     requireSelection: false,
+  });
+
+  const memoryNav = useListNavigation({
+    items: memoryItems,
+    onSelect: item => wizard.setMemoryEnabled(item.id === 'enabled'),
+    onExit: () => wizard.goBack(),
+    isActive: isMemoryStep,
   });
 
   const networkModeNav = useListNavigation({
@@ -123,7 +139,7 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
 
   const helpText = isAdvancedStep
     ? 'Space toggle · Enter confirm · Esc back'
-    : isModelProviderStep || isNetworkModeStep || isTruncationStrategyStep || (isModelIdStep && wizard.config.modelProvider === 'bedrock')
+    : isModelProviderStep || isMemoryStep || isContainerStep || isNetworkModeStep || isTruncationStrategyStep
       ? HELP_TEXT.NAVIGATE_SELECT
       : isConfirmStep
         ? HELP_TEXT.CONFIRM_CANCEL
@@ -140,6 +156,18 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
 
     if (wizard.config.apiKeyArn) {
       fields.push({ label: 'API Key ARN', value: wizard.config.apiKeyArn });
+    }
+
+    if (wizard.config.skipMemory !== undefined) {
+      fields.push({ label: 'Memory', value: wizard.config.skipMemory ? 'Disabled' : 'Enabled' });
+    }
+
+    if (wizard.config.containerUri) {
+      fields.push({ label: 'Container URI', value: wizard.config.containerUri });
+    }
+
+    if (wizard.config.dockerfilePath) {
+      fields.push({ label: 'Dockerfile', value: wizard.config.dockerfilePath });
     }
 
     if (wizard.config.networkMode) {
@@ -211,26 +239,6 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
           />
         )}
 
-        {isModelIdStep && wizard.config.modelProvider === 'bedrock' && (
-          <WizardSelect
-            title="Select Bedrock model"
-            description="Choose a model from Amazon Bedrock"
-            items={bedrockModelItems}
-            selectedIndex={bedrockModelNav.selectedIndex}
-          />
-        )}
-
-        {isModelIdStep && wizard.config.modelProvider !== 'bedrock' && (
-          <TextInput
-            key="model-id"
-            prompt="Model ID"
-            initialValue=""
-            onSubmit={wizard.setModelId}
-            onCancel={() => wizard.goBack()}
-            customValidation={value => (value.trim().length > 0 ? true : 'Model ID is required')}
-          />
-        )}
-
         {isApiKeyArnStep && (
           <TextInput
             key="api-key-arn"
@@ -242,13 +250,53 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
           />
         )}
 
+        {isContainerStep && (
+          <WizardSelect
+            title="Custom container"
+            description="Optionally provide a custom container image for the harness runtime"
+            items={containerModeItems}
+            selectedIndex={containerModeNav.selectedIndex}
+          />
+        )}
+
+        {isContainerUriStep && (
+          <TextInput
+            key="container-uri"
+            prompt="Container image URI (e.g., 123456789012.dkr.ecr.us-east-1.amazonaws.com/my-harness:latest)"
+            initialValue=""
+            onSubmit={wizard.setContainerUri}
+            onCancel={() => wizard.goBack()}
+            customValidation={value => (value.trim().length > 0 ? true : 'Container URI is required')}
+          />
+        )}
+
+        {isContainerDockerfileStep && (
+          <TextInput
+            key="container-dockerfile"
+            prompt="Path to Dockerfile"
+            initialValue=""
+            onSubmit={wizard.setDockerfilePath}
+            onCancel={() => wizard.goBack()}
+            customValidation={value => (value.trim().length > 0 ? true : 'Dockerfile path is required')}
+          />
+        )}
+
         {isAdvancedStep && (
           <WizardMultiSelect
             title="Advanced settings (optional)"
-            description="Configure network, lifecycle, execution limits, or truncation"
+            description="Configure memory, network, lifecycle, execution limits, or truncation"
             items={advancedSettingItems}
             cursorIndex={advancedSettingsNav.cursorIndex}
             selectedIds={advancedSettingsNav.selectedIds}
+          />
+        )}
+
+        {isMemoryStep && (
+          <WizardSelect
+            title="Memory"
+            description="Persistent memory lets the harness remember context across sessions"
+            items={memoryItems}
+            selectedIndex={memoryNav.selectedIndex}
           />
         )}
 
@@ -268,7 +316,9 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
             initialValue=""
             onSubmit={wizard.setSubnets}
             onCancel={() => wizard.goBack()}
-            customValidation={value => (value.trim().length > 0 ? true : 'At least one subnet is required for VPC mode')}
+            customValidation={value =>
+              value.trim().length > 0 ? true : 'At least one subnet is required for VPC mode'
+            }
           />
         )}
 
@@ -279,7 +329,9 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
             initialValue=""
             onSubmit={wizard.setSecurityGroups}
             onCancel={() => wizard.goBack()}
-            customValidation={value => (value.trim().length > 0 ? true : 'At least one security group is required for VPC mode')}
+            customValidation={value =>
+              value.trim().length > 0 ? true : 'At least one security group is required for VPC mode'
+            }
           />
         )}
 
@@ -287,12 +339,12 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
           <TextInput
             key="idle-timeout"
             prompt="Idle timeout (seconds)"
-            initialValue="300"
+            initialValue="900"
             onSubmit={wizard.setIdleTimeout}
             onCancel={() => wizard.goBack()}
             customValidation={value => {
               const num = parseInt(value, 10);
-              return !isNaN(num) && num > 0 ? true : 'Must be a positive number';
+              return !isNaN(num) && num >= 60 && num <= 28800 ? true : 'Must be between 60 and 28800';
             }}
           />
         )}
@@ -301,12 +353,12 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
           <TextInput
             key="max-lifetime"
             prompt="Max lifetime (seconds)"
-            initialValue="3600"
+            initialValue="28800"
             onSubmit={wizard.setMaxLifetime}
             onCancel={() => wizard.goBack()}
             customValidation={value => {
               const num = parseInt(value, 10);
-              return !isNaN(num) && num > 0 ? true : 'Must be a positive number';
+              return !isNaN(num) && num >= 60 && num <= 28800 ? true : 'Must be between 60 and 28800';
             }}
           />
         )}

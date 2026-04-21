@@ -305,7 +305,7 @@ describe('ConfigIO', () => {
 
       await configIO.writeHarnessSpec('testHarness', harnessSpec);
 
-      const harnessDir = join(agentcoreDir, 'harnesses', 'testHarness');
+      const harnessDir = join(projectDir, 'app', 'testHarness');
       const harnessFile = join(harnessDir, 'harness.json');
       expect(existsSync(harnessFile)).toBe(true);
 

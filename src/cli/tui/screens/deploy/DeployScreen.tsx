@@ -36,8 +36,8 @@ interface DeployScreenProps {
 }
 
 /** Next steps shown after successful deployment */
-function getDeployNextSteps(hasAgents: boolean): NextStep[] {
-  if (hasAgents) {
+function getDeployNextSteps(hasInvokable: boolean): NextStep[] {
+  if (hasInvokable) {
     return [
       { command: 'invoke', label: 'Test your agent' },
       { command: 'status', label: 'View deployment status' },
@@ -392,7 +392,9 @@ export function DeployScreen({
 
       {allSuccess && !diffMode && (
         <NextSteps
-          steps={getDeployNextSteps((context?.projectSpec.runtimes.length ?? 0) > 0)}
+          steps={getDeployNextSteps(
+            (context?.projectSpec.runtimes.length ?? 0) > 0 || (context?.projectSpec.harnesses?.length ?? 0) > 0
+          )}
           isInteractive={isInteractive}
           onSelect={step => {
             if (step.command === 'invoke') {

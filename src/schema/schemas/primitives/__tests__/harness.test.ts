@@ -491,6 +491,18 @@ describe('HarnessSpecSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('rejects containerUri and dockerfile together', () => {
+    const result = HarnessSpecSchema.safeParse({
+      ...minimalHarness,
+      containerUri: '123456789012.dkr.ecr.us-west-2.amazonaws.com/my-agent:latest',
+      dockerfile: 'Dockerfile',
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some(i => i.message.includes('mutually exclusive'))).toBe(true);
+    }
+  });
+
   it('accepts harness with VPC network config', () => {
     const result = HarnessSpecSchema.safeParse({
       ...minimalHarness,
