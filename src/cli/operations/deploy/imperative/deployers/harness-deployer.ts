@@ -19,6 +19,7 @@ import { toPascalId } from '../../../../cloudformation/logical-ids';
 import type { DeployPhase, ImperativeDeployContext, ImperativeDeployResult, ImperativeDeployer } from '../types';
 import { mapHarnessSpecToCreateOptions } from './harness-mapper';
 import { readFile } from 'fs/promises';
+import { createHash } from 'node:crypto';
 import { dirname, join } from 'path';
 
 const ROLE_VALIDATION_RETRY_DELAYS_MS = [5_000, 10_000, 15_000, 20_000, 30_000];
@@ -30,6 +31,19 @@ const READY_POLL_MAX_ATTEMPTS = 40; // 2 minutes max
 // ============================================================================
 
 type HarnessDeployedStateMap = Record<string, HarnessDeployedState>;
+
+async function computeHarnessHash(harnessDir: string, harnessSpec: HarnessSpec, roleArn: string): Promise<string> {
+  const hash = createHash('sha256');
+  hash.update(JSON.stringify(harnessSpec));
+  hash.update(roleArn);
+  try {
+    const promptContent = await readFile(join(harnessDir, 'system-prompt.md'), 'utf-8');
+    hash.update(promptContent);
+  } catch {
+    // no system-prompt.md
+  }
+  return hash.digest('hex').slice(0, 16);
+}
 
 // ============================================================================
 // Deployer
@@ -104,6 +118,15 @@ export class HarnessDeployer implements ImperativeDeployer<HarnessDeployedStateM
       const deployedResources = deployedState.targets?.[targetName]?.resources;
       const existingHarness = deployedHarnesses[entry.name];
 
+      const configHash = await computeHarnessHash(harnessDir, harnessSpec, executionRoleArn);
+
+      if (existingHarness?.configHash === configHash) {
+        resultState[entry.name] = existingHarness;
+        notes.push(`Harness "${entry.name}" unchanged, skipped`);
+        context.onProgress?.(`Harness "${entry.name}": no changes`, 'done');
+        continue;
+      }
+
       try {
         if (existingHarness) {
           // Update existing harness
@@ -151,6 +174,7 @@ export class HarnessDeployer implements ImperativeDeployer<HarnessDeployedStateM
             status: finalHarness.status,
             agentRuntimeArn: extractRuntimeArn(finalHarness),
             memoryArn: createOptions.memory?.memoryArn,
+            configHash,
           };
           notes.push(`Updated harness "${entry.name}"`);
         } else {
@@ -173,6 +197,7 @@ export class HarnessDeployer implements ImperativeDeployer<HarnessDeployedStateM
             status: finalHarness.status,
             agentRuntimeArn: extractRuntimeArn(finalHarness),
             memoryArn: createOptions.memory?.memoryArn,
+            configHash,
           };
           notes.push(`Created harness "${entry.name}"`);
         }

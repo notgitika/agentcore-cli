@@ -1,6 +1,8 @@
+import { ConfigIO } from '../../../lib';
 import type { DeployMessage } from '../../cdk/toolkit-lib';
 import { handleDeploy } from '../../commands/deploy/actions';
 import { getErrorMessage } from '../../errors';
+import { canSkipDeploy } from '../../operations/deploy/change-detection';
 import type { Step, StepStatus } from '../components/StepProgress';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -44,6 +46,13 @@ export function useDevDeploy({ skip, ready = true }: UseDevDeployOptions = {}): 
 
     const run = async () => {
       try {
+        const configIO = new ConfigIO();
+        const noChanges = await canSkipDeploy(configIO);
+        if (noChanges) {
+          onProgress('No changes detected — skipping deploy', 'success');
+          return;
+        }
+
         const result = await handleDeploy({
           target: 'default',
           autoConfirm: true,

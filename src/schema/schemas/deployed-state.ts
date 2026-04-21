@@ -144,6 +144,7 @@ export const HarnessDeployedStateSchema = z.object({
   status: z.string().min(1),
   agentRuntimeArn: z.string().optional(),
   memoryArn: z.string().optional(),
+  configHash: z.string().optional(),
 });
 
 export type HarnessDeployedState = z.infer<typeof HarnessDeployedStateSchema>;
@@ -200,6 +201,7 @@ export const DeployedResourceStateSchema = z.object({
   harnesses: z.record(z.string(), HarnessDeployedStateSchema).optional(),
   stackName: z.string().optional(),
   identityKmsKeyArn: z.string().optional(),
+  deployHash: z.string().optional(),
 });
 
 export type DeployedResourceState = z.infer<typeof DeployedResourceStateSchema>;

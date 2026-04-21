@@ -31,6 +31,7 @@ import {
   synthesizeCdk,
   validateProject,
 } from '../../operations/deploy';
+import { computeProjectDeployHash } from '../../operations/deploy/change-detection';
 import { formatTargetStatus, getGatewayTargetStatuses } from '../../operations/deploy/gateway-status';
 import { createDeploymentManager } from '../../operations/deploy/imperative';
 import type { DeployResult } from './types';
@@ -478,6 +479,13 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       }
     }
 
+    let deployHash: string | undefined;
+    try {
+      deployHash = await computeProjectDeployHash(configIO);
+    } catch {
+      // hash computation is best-effort
+    }
+
     const deployedState = buildDeployedState({
       targetName: target.name,
       stackName,
@@ -493,6 +501,14 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       policies,
       harnesses: deployedHarnesses,
     });
+
+    if (deployHash) {
+      const targetState = deployedState.targets[target.name];
+      if (targetState?.resources) {
+        targetState.resources.deployHash = deployHash;
+      }
+    }
+
     await configIO.writeDeployedState(deployedState);
 
     if (harnessDeployError) {
