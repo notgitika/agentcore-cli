@@ -196,7 +196,7 @@ export interface ResourceEvaluator {
 /** Online eval config details in the resources response */
 export interface ResourceOnlineEvalConfig {
   name: string;
-  agent: string;
+  agent?: string;
   evaluators: string[];
   samplingRate: number;
   description?: string;
