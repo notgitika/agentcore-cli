@@ -125,7 +125,6 @@ export const registerInvoke = (program: Command) => {
     .option('--system-prompt <text>', 'Override system prompt (harness only) [non-interactive]')
     .option('--allowed-tools <tools>', 'Override allowed tools, comma-separated (harness only) [non-interactive]')
     .option('--actor-id <id>', 'Override memory actor ID (harness only) [non-interactive]')
-    .option('--auto-approve', 'Auto-approve inline function tool calls (harness only) [non-interactive]')
     .action(
       async (
         positionalPrompt: string | undefined,
@@ -154,7 +153,6 @@ export const registerInvoke = (program: Command) => {
           systemPrompt?: string;
           allowedTools?: string;
           actorId?: string;
-          autoApprove?: boolean;
         }
       ) => {
         try {
@@ -206,7 +204,6 @@ export const registerInvoke = (program: Command) => {
               systemPrompt: cliOptions.systemPrompt,
               allowedTools: cliOptions.allowedTools,
               actorId: cliOptions.actorId,
-              autoApprove: cliOptions.autoApprove,
             });
           } else {
             // No CLI options - interactive TUI mode (headers still passed if provided)

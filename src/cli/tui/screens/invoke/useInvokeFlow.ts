@@ -43,7 +43,6 @@ export interface InvokeConfig {
   harnesses: {
     name: string;
     state: HarnessDeployedState;
-    inlineFunctionTools: Set<string>;
     authorizerType?: RuntimeAuthorizerType;
   }[];
   target: AwsDeploymentTarget;
@@ -63,16 +62,8 @@ export interface InvokeFlowOptions {
 
 export type TokenFetchState = 'idle' | 'fetching' | 'fetched' | 'error';
 
-export interface PendingToolApproval {
-  toolUseId: string;
-  toolName: string;
-  input: Record<string, unknown>;
-  harnessArn: string;
-  sessionId: string;
-}
-
 export interface InvokeFlowState {
-  phase: 'loading' | 'ready' | 'invoking' | 'tool-approval' | 'error';
+  phase: 'loading' | 'ready' | 'invoking' | 'error';
   config: InvokeConfig | null;
   selectedAgent: number;
   messages: { role: 'user' | 'assistant'; content: string; isHint?: boolean }[];
@@ -86,22 +77,19 @@ export interface InvokeFlowState {
   tokenExpiresIn: number | undefined;
   mcpTools: McpToolDef[];
   mcpToolsFetched: boolean;
-  pendingToolApproval: PendingToolApproval | null;
   selectAgent: (index: number) => void;
   setUserId: (id: string) => void;
   setBearerToken: (token: string) => void;
   fetchBearerToken: () => Promise<void>;
   invoke: (prompt: string) => Promise<void>;
   execCommand: (command: string) => Promise<void>;
-  respondToTool: (approved: boolean, response: string) => Promise<void>;
   newSession: () => void;
   fetchMcpTools: () => Promise<void>;
 }
 
 export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState {
   const { initialSessionId, initialUserId, headers, initialBearerToken, initialHarnessName } = options;
-  const [phase, setPhase] = useState<'loading' | 'ready' | 'invoking' | 'tool-approval' | 'error'>('loading');
-  const [pendingToolApproval, setPendingToolApproval] = useState<PendingToolApproval | null>(null);
+  const [phase, setPhase] = useState<'loading' | 'ready' | 'invoking' | 'error'>('loading');
   const [config, setConfig] = useState<InvokeConfig | null>(null);
   const [selectedAgent, setSelectedAgent] = useState(0);
   const [messages, setMessages] = useState<
@@ -169,16 +157,14 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
         for (const harness of project.harnesses ?? []) {
           const state = targetState?.resources?.harnesses?.[harness.name];
           if (!state) continue;
-          let inlineFunctionTools = new Set<string>();
           let authorizerType: RuntimeAuthorizerType | undefined;
           try {
             const spec = await configIO.readHarnessSpec(harness.name);
-            inlineFunctionTools = new Set(spec.tools.filter(t => t.type === 'inline_function').map(t => t.name));
             authorizerType = spec.authorizerType;
           } catch {
-            // fall back to stream-end detection
+            // spec read is best-effort
           }
-          harnesses.push({ name: harness.name, state, inlineFunctionTools, authorizerType });
+          harnesses.push({ name: harness.name, state, authorizerType });
         }
 
         if (runtimes.length === 0 && harnesses.length === 0) {
@@ -294,14 +280,12 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
       region: string,
       harnessArn: string,
       runtimeSessionId: string,
-      harnessMessages: { role: string; content: Record<string, unknown>[] }[],
-      inlineFunctionTools?: Set<string>
+      harnessMessages: { role: string; content: Record<string, unknown>[] }[]
     ) => {
       const logger = loggerRef.current;
       let pendingToolUseId: string | undefined;
       let pendingToolName: string | undefined;
       let pendingToolInput = '';
-      let waitingForInlineToolResult = false;
       let lastMetadata: { inputTokens: number; outputTokens: number; latencyMs: number } | null = null;
 
       try {
@@ -374,30 +358,11 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
                   // use empty
                 }
                 logger?.logInfo(`Tool input (${pendingToolName}): ${JSON.stringify(inputObj)}`);
-
-                const isInline = inlineFunctionTools?.has(pendingToolName ?? '');
-                if (isInline) {
-                  setPendingToolApproval({
-                    toolUseId: pendingToolUseId,
-                    toolName: pendingToolName ?? 'unknown',
-                    input: inputObj,
-                    harnessArn,
-                    sessionId: runtimeSessionId,
-                  });
-                  setPhase('tool-approval');
-                  return;
-                }
-                // Unknown tool type — fall back to stream-end detection
-                waitingForInlineToolResult = true;
               } else if (event.stopReason === 'tool_result') {
-                waitingForInlineToolResult = false;
+                // Server-side tool execution completed
               }
               break;
-            case 'messageStart':
-              waitingForInlineToolResult = false;
-              break;
             case 'metadata': {
-              waitingForInlineToolResult = false;
               const { inputTokens, outputTokens } = event.usage;
               logger?.logInfo(`Tokens: ${inputTokens} in, ${outputTokens} out | Latency: ${event.metrics.latencyMs}ms`);
               lastMetadata = { inputTokens, outputTokens, latencyMs: event.metrics.latencyMs };
@@ -415,24 +380,6 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
               });
               break;
           }
-        }
-
-        if (waitingForInlineToolResult && pendingToolUseId) {
-          let inputObj: Record<string, unknown> = {};
-          try {
-            inputObj = JSON.parse(pendingToolInput) as Record<string, unknown>;
-          } catch {
-            // use empty
-          }
-          setPendingToolApproval({
-            toolUseId: pendingToolUseId,
-            toolName: pendingToolName ?? 'unknown',
-            input: inputObj,
-            harnessArn,
-            sessionId: runtimeSessionId,
-          });
-          setPhase('tool-approval');
-          return;
         }
 
         if (lastMetadata) {
@@ -560,13 +507,9 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
         streamingContentRef.current = '';
 
         logger.logPrompt(prompt, sessionId ?? undefined, userId);
-        await streamHarnessInvoke(
-          config.target.region,
-          harness.state.harnessArn,
-          sessionId ?? generateSessionId(),
-          [{ role: 'user', content: [{ text: prompt }] }],
-          harness.inlineFunctionTools
-        );
+        await streamHarnessInvoke(config.target.region, harness.state.harnessArn, sessionId ?? generateSessionId(), [
+          { role: 'user', content: [{ text: prompt }] },
+        ]);
         logger.logResponse(streamingContentRef.current);
         return;
       }
@@ -757,67 +700,10 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
     [config, selectedAgent, phase, sessionId, userId, headers, bearerToken]
   );
 
-  const respondToTool = useCallback(
-    async (approved: boolean, response: string) => {
-      if (!pendingToolApproval || !config) return;
-
-      const { toolUseId, harnessArn, sessionId: runtimeSessionId } = pendingToolApproval;
-
-      const statusIcon = approved ? ' ✓\x1b[0m' : ' \x1b[31m✗\x1b[0m';
-      streamingContentRef.current += `${statusIcon}\n`;
-      setMessages(prev => {
-        const updated = [...prev];
-        const lastIdx = updated.length - 1;
-        if (lastIdx >= 0 && updated[lastIdx]?.role === 'assistant') {
-          updated[lastIdx] = { role: 'assistant', content: streamingContentRef.current };
-        }
-        return updated;
-      });
-      setPendingToolApproval(null);
-      setPhase('invoking');
-
-      const harness = config.harnesses.find(h => h.state.harnessArn === harnessArn);
-      await streamHarnessInvoke(
-        config.target.region,
-        harnessArn,
-        runtimeSessionId,
-        [
-          {
-            role: 'assistant',
-            content: [
-              {
-                toolUse: {
-                  toolUseId,
-                  name: pendingToolApproval.toolName,
-                  input: pendingToolApproval.input,
-                },
-              },
-            ],
-          },
-          {
-            role: 'user',
-            content: [
-              {
-                toolResult: {
-                  toolUseId,
-                  content: [{ text: response }],
-                  status: approved ? 'success' : 'error',
-                },
-              },
-            ],
-          },
-        ],
-        harness?.inlineFunctionTools
-      );
-    },
-    [config, pendingToolApproval, streamHarnessInvoke]
-  );
-
   const newSession = useCallback(() => {
     const newId = generateSessionId();
     setSessionId(newId);
     setMessages([]);
-    setPendingToolApproval(null);
     // Reset MCP session
     mcpSessionIdRef.current = undefined;
     setMcpTools([]);
@@ -840,14 +726,12 @@ export function useInvokeFlow(options: InvokeFlowOptions = {}): InvokeFlowState 
     tokenExpiresIn,
     mcpTools,
     mcpToolsFetched,
-    pendingToolApproval,
     selectAgent: setSelectedAgent,
     setUserId,
     setBearerToken,
     fetchBearerToken,
     invoke,
     execCommand,
-    respondToTool,
     newSession,
     fetchMcpTools,
   };

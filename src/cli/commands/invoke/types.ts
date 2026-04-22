@@ -39,8 +39,6 @@ export interface InvokeOptions {
   allowedTools?: string;
   /** Override memory actor ID (harness only) */
   actorId?: string;
-  /** Auto-approve inline_function tool calls without prompting */
-  autoApprove?: boolean;
 }
 
 export interface InvokeResult {

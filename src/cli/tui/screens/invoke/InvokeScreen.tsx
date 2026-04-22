@@ -20,7 +20,7 @@ interface InvokeScreenProps {
   initialHarnessName?: string;
 }
 
-type Mode = 'select-agent' | 'chat' | 'input' | 'token-input' | 'tool-approval';
+type Mode = 'select-agent' | 'chat' | 'input' | 'token-input';
 
 interface ColoredLine {
   text: string;
@@ -136,13 +136,11 @@ export function InvokeScreen({
     bearerToken,
     tokenFetchState,
     mcpToolsFetched,
-    pendingToolApproval,
     selectAgent,
     setBearerToken,
     fetchBearerToken,
     invoke,
     execCommand,
-    respondToTool,
     newSession,
     fetchMcpTools,
   } = useInvokeFlow({
@@ -153,7 +151,6 @@ export function InvokeScreen({
     initialHarnessName,
   });
   const [mode, setMode] = useState<Mode>(initialHarnessName ? 'input' : 'select-agent');
-  const [toolApprovalIndex, setToolApprovalIndex] = useState(0);
   const [isExecInput, setIsExecInput] = useState(false);
   const [execInputEmpty, setExecInputEmpty] = useState(true);
   const [scrollOffset, setScrollOffset] = useState(0);
@@ -189,7 +186,15 @@ export function InvokeScreen({
 
   // When entering via initialHarnessName (dev mode), redirect to token-input once config loads
   useEffect(() => {
-    if (initialHarnessName && config && phase === 'ready' && mode === 'input' && isCustomJwt && !bearerToken && !initialBearerToken) {
+    if (
+      initialHarnessName &&
+      config &&
+      phase === 'ready' &&
+      mode === 'input' &&
+      isCustomJwt &&
+      !bearerToken &&
+      !initialBearerToken
+    ) {
       queueMicrotask(() => setMode('token-input'));
     }
   }, [initialHarnessName, config, phase, mode, isCustomJwt, bearerToken, initialBearerToken]);
@@ -215,12 +220,6 @@ export function InvokeScreen({
   useEffect(() => {
     if (prevPhaseRef.current === 'invoking' && phase === 'ready' && !initialPrompt) {
       queueMicrotask(() => setMode('input'));
-    }
-    if (phase === 'tool-approval') {
-      queueMicrotask(() => {
-        setToolApprovalIndex(0);
-        setMode('tool-approval');
-      });
     }
     prevPhaseRef.current = phase;
   }, [phase, initialPrompt]);
@@ -341,26 +340,6 @@ export function InvokeScreen({
     { isActive: mode === 'chat' || mode === 'select-agent' }
   );
 
-  const TOOL_APPROVAL_OPTIONS = ['Yes', 'No', 'Custom response'] as const;
-
-  useInput(
-    (input, key) => {
-      if (key.upArrow) setToolApprovalIndex(prev => Math.max(0, prev - 1));
-      if (key.downArrow) setToolApprovalIndex(prev => Math.min(TOOL_APPROVAL_OPTIONS.length - 1, prev + 1));
-      if (key.return) {
-        const choice = TOOL_APPROVAL_OPTIONS[toolApprovalIndex];
-        if (choice === 'Yes') {
-          void respondToTool(true, 'Approved');
-        } else if (choice === 'No') {
-          void respondToTool(false, 'Denied by user');
-        } else {
-          setMode('input');
-        }
-      }
-    },
-    { isActive: mode === 'tool-approval' }
-  );
-
   // Auto-fetch bearer token to pre-populate the token screen
   const tokenFetchTriggeredRef = useRef(false);
   useEffect(() => {
@@ -426,23 +405,21 @@ export function InvokeScreen({
   const helpText =
     mode === 'select-agent'
       ? '↑↓ select · Enter confirm · Esc quit'
-      : mode === 'tool-approval'
-        ? '↑↓ navigate · Enter select'
-        : mode === 'token-input'
-          ? 'Enter confirm · Esc skip'
-          : mode === 'input'
-            ? isExecInput
-              ? 'Enter run · Esc cancel · Backspace to exit exec mode'
+      : mode === 'token-input'
+        ? 'Enter confirm · Esc skip'
+        : mode === 'input'
+          ? isExecInput
+            ? 'Enter run · Esc cancel · Backspace to exit exec mode'
+            : isMcp
+              ? 'Enter send · Esc cancel · "list" to refresh tools · ! exec mode'
+              : 'Enter send · Esc cancel · ! exec mode'
+          : phase === 'invoking'
+            ? '↑↓ scroll'
+            : messages.length > 0
+              ? `↑↓ scroll · Enter invoke · Ctrl+N new session · ${backOrQuit}`
               : isMcp
-                ? 'Enter send · Esc cancel · "list" to refresh tools · ! exec mode'
-                : 'Enter send · Esc cancel · ! exec mode'
-            : phase === 'invoking'
-              ? '↑↓ scroll'
-              : messages.length > 0
-                ? `↑↓ scroll · Enter invoke · Ctrl+N new session · ${backOrQuit}`
-                : isMcp
-                  ? `Enter to call a tool · Ctrl+N new session · ${backOrQuit}`
-                  : `Enter to send a message · ${backOrQuit}`;
+                ? `Enter to call a tool · Ctrl+N new session · ${backOrQuit}`
+                : `Enter to send a message · ${backOrQuit}`;
 
   const headerContent = (
     <Box flexDirection="column">
@@ -499,9 +476,7 @@ export function InvokeScreen({
         </Text>
       )}
       {mode !== 'select-agent' && isHarnessSelected && screenTitle === 'Dev' && (
-        <Text color="yellow">
-          If you changed the harness config, redeploy to pick up changes: agentcore deploy
-        </Text>
+        <Text color="yellow">If you changed the harness config, redeploy to pick up changes: agentcore deploy</Text>
       )}
     </Box>
   );
@@ -593,26 +568,7 @@ export function InvokeScreen({
             )}
           </Box>
         )}
-        {mode === 'tool-approval' && pendingToolApproval && (
-          <Box flexDirection="column" marginTop={1}>
-            <Panel title={`⏸ ${pendingToolApproval.toolName}`} fullWidth>
-              <Box flexDirection="column">
-                {Object.keys(pendingToolApproval.input).length > 0 && (
-                  <Text dimColor>Input: {JSON.stringify(pendingToolApproval.input, null, 2)}</Text>
-                )}
-                <Box marginTop={1} flexDirection="column">
-                  {TOOL_APPROVAL_OPTIONS.map((opt, idx) => (
-                    <Text key={opt} color={idx === toolApprovalIndex ? 'cyan' : undefined}>
-                      {idx === toolApprovalIndex ? '❯ ' : '  '}
-                      {opt}
-                    </Text>
-                  ))}
-                </Box>
-              </Box>
-            </Panel>
-          </Box>
-        )}
-        {mode === 'input' && (phase === 'ready' || phase === 'tool-approval') && (
+        {mode === 'input' && phase === 'ready' && (
           <>
             <Box>
               <Text color={isExecInput ? 'magenta' : 'blue'}>{isExecInput ? '! ' : '> '}</Text>
@@ -644,15 +600,11 @@ export function InvokeScreen({
                   if (trimmed) {
                     setMode('chat');
                     setUserScrolled(false);
-                    if (pendingToolApproval) {
-                      void respondToTool(true, trimmed);
-                    } else if (isExecInput) {
+                    if (isExecInput) {
                       void execCommand(trimmed);
                     } else {
                       void invoke(text);
                     }
-                  } else if (pendingToolApproval) {
-                    setMode('tool-approval');
                   } else if (!isExecInput) {
                     setMode('chat');
                   }
@@ -660,8 +612,6 @@ export function InvokeScreen({
                 onCancel={() => {
                   if (isExecInput) {
                     setIsExecInput(false);
-                  } else if (pendingToolApproval) {
-                    setMode('tool-approval');
                   } else {
                     justCancelledRef.current = true;
                     setMode('chat');

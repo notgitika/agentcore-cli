@@ -621,7 +621,6 @@ async function handleHarnessInvoke(
     let pendingToolUseId: string | undefined;
     let pendingToolName: string | undefined;
     let pendingToolInput = '';
-    let waitingForInlineToolResult = false;
 
     let continueLoop = true;
     while (continueLoop) {
@@ -639,7 +638,6 @@ async function handleHarnessInvoke(
       pendingToolUseId = undefined;
       pendingToolName = undefined;
       pendingToolInput = '';
-      waitingForInlineToolResult = false;
 
       for await (const event of stream) {
         if (options.verbose) {
@@ -659,7 +657,6 @@ async function handleHarnessInvoke(
             } else if (event.delta.type === 'toolUse') {
               pendingToolInput += event.delta.input;
             } else if (event.delta.type === 'toolResult') {
-              // Server-side tool result streamed back
               const results = event.delta.results;
               for (const r of results) {
                 const text = (r.text as string) ?? (r.json ? JSON.stringify(r.json) : '');
@@ -689,9 +686,6 @@ async function handleHarnessInvoke(
               }
             }
             break;
-          case 'messageStart':
-            waitingForInlineToolResult = false;
-            break;
           case 'messageStop':
             if (event.stopReason === 'tool_use' && pendingToolUseId) {
               clearSpinner();
@@ -702,9 +696,7 @@ async function handleHarnessInvoke(
                 // use empty
               }
               logger.logInfo(`Tool input (${pendingToolName}): ${JSON.stringify(inputObj)}`);
-              waitingForInlineToolResult = true;
             } else if (event.stopReason === 'tool_result') {
-              waitingForInlineToolResult = false;
               if (!options.json) {
                 process.stderr.write(`${reset}\n`);
               }
@@ -713,7 +705,6 @@ async function handleHarnessInvoke(
             }
             break;
           case 'metadata':
-            waitingForInlineToolResult = false;
             logger.logInfo(
               `Tokens: ${event.usage.inputTokens} in, ${event.usage.outputTokens} out | Latency: ${event.metrics.latencyMs}ms`
             );
@@ -735,81 +726,6 @@ async function handleHarnessInvoke(
             process.stderr.write(`\nError: ${event.message}\n`);
             break;
         }
-      }
-    }
-
-    // If stream ended waiting for inline_function tool result, handle it
-    if (waitingForInlineToolResult && pendingToolUseId) {
-      let inputObj: Record<string, unknown> = {};
-      try {
-        inputObj = JSON.parse(pendingToolInput) as Record<string, unknown>;
-      } catch {
-        // use empty
-      }
-
-      let toolResponse: string;
-      if (options.autoApprove || options.json) {
-        toolResponse = 'Approved';
-        if (!options.json) {
-          process.stderr.write(`${dim}✓ Auto-approved${reset}\n`);
-        }
-      } else {
-        const readline = await import('node:readline');
-        const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
-        process.stderr.write(`${dim}Input: ${JSON.stringify(inputObj, null, 2)}${reset}\n`);
-        toolResponse = await new Promise<string>(resolve => {
-          rl.question('\x1b[33m[Y]es / [N]o / or type a custom response: \x1b[0m', answer => {
-            rl.close();
-            resolve(answer.trim() || 'Approved');
-          });
-        });
-      }
-
-      const trimmed = toolResponse.toLowerCase();
-      const denied = ['n', 'no', 'deny'].includes(trimmed);
-      const toolStatus = denied ? 'error' : 'success';
-      const toolText = denied ? 'Denied by user' : toolResponse;
-
-      logger.logInfo(`Inline tool response (${pendingToolName}): ${toolText} [${toolStatus}]`);
-
-      // Continue the harness loop with the tool result
-      const continueStream = invokeHarness({
-        region,
-        harnessArn: harnessState.harnessArn,
-        runtimeSessionId: sessionId,
-        messages: [
-          {
-            role: 'assistant',
-            content: [
-              { toolUse: { toolUseId: pendingToolUseId, name: pendingToolName ?? 'unknown', input: inputObj } },
-            ],
-          },
-          {
-            role: 'user',
-            content: [
-              { toolResult: { toolUseId: pendingToolUseId, content: [{ text: toolText }], status: toolStatus } },
-            ],
-          },
-        ],
-        bearerToken: options.bearerToken,
-        ...baseOpts,
-      });
-
-      for await (const event of continueStream) {
-        if (options.verbose) {
-          console.log(JSON.stringify(event));
-          continue;
-        }
-        if (event.type === 'contentBlockDelta' && event.delta.type === 'text') {
-          clearSpinner();
-          fullResponse += event.delta.text;
-          if (!options.json) {
-            process.stdout.write(event.delta.text);
-          }
-        }
-      }
-      if (!options.json) {
-        process.stdout.write('\n');
       }
     }
 
