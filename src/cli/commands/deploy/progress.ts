@@ -1,6 +1,7 @@
 import { ConfigIO } from '../../../lib';
 import { detectAwsContext } from '../../aws/aws-context';
 import { getErrorMessage } from '../../errors';
+import { canSkipDeploy } from '../../operations/deploy/change-detection';
 import { handleDeploy } from './actions';
 
 export const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -66,6 +67,14 @@ export async function runCliDeploy(): Promise<void> {
       } catch {
         // Can't detect — let handleDeploy fail with a clear error
       }
+    }
+
+    const noChanges = await canSkipDeploy(configIO);
+    if (noChanges) {
+      onProgress('No changes detected — skipping deploy', 'success');
+      cleanup();
+      console.log('');
+      return;
     }
 
     const result = await handleDeploy({
