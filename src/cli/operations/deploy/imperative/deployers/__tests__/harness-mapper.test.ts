@@ -32,6 +32,7 @@ const BASE_OPTIONS = {
   harnessDir: '/project/agentcore/harnesses/test_harness',
   executionRoleArn: 'arn:aws:iam::123456789012:role/HarnessRole',
   region: 'us-east-1' as const,
+  projectName: 'myproject',
 };
 
 describe('mapHarnessSpecToCreateOptions', () => {
@@ -436,7 +437,7 @@ describe('mapHarnessSpecToCreateOptions', () => {
       const result = await mapHarnessSpecToCreateOptions({ ...BASE_OPTIONS, harnessSpec: spec });
 
       expect(result.region).toBe('us-east-1');
-      expect(result.harnessName).toBe('test_harness');
+      expect(result.harnessName).toBe('myproject_test_harness');
       expect(result.executionRoleArn).toBe('arn:aws:iam::123456789012:role/HarnessRole');
     });
   });

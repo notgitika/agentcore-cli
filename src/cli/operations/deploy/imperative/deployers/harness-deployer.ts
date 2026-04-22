@@ -69,6 +69,7 @@ export class HarnessDeployer implements ImperativeDeployer<HarnessDeployedStateM
     const { projectSpec, target, configIO, deployedState, cdkOutputs } = context;
     const region = target.region;
     const targetName = target.name;
+    const projectName = projectSpec.name;
     const configRoot = configIO.getConfigRoot();
     const projectRoot = dirname(configRoot);
 
@@ -135,6 +136,7 @@ export class HarnessDeployer implements ImperativeDeployer<HarnessDeployedStateM
             harnessDir,
             executionRoleArn,
             region,
+            projectName,
             deployedResources,
             cdkOutputs,
           });
@@ -187,6 +189,7 @@ export class HarnessDeployer implements ImperativeDeployer<HarnessDeployedStateM
             harnessDir,
             executionRoleArn,
             region,
+            projectName,
             deployedResources,
             cdkOutputs,
           });

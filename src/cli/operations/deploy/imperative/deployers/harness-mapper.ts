@@ -32,6 +32,7 @@ export interface MapHarnessOptions {
   harnessDir: string;
   executionRoleArn: string;
   region: string;
+  projectName: string;
   deployedResources?: DeployedResourceState;
   cdkOutputs?: Record<string, string>;
 }
@@ -40,11 +41,11 @@ export interface MapHarnessOptions {
  * Transform a HarnessSpec into CreateHarnessOptions for the control plane API.
  */
 export async function mapHarnessSpecToCreateOptions(options: MapHarnessOptions): Promise<CreateHarnessOptions> {
-  const { harnessSpec, harnessDir, executionRoleArn, region, deployedResources, cdkOutputs } = options;
+  const { harnessSpec, harnessDir, executionRoleArn, region, projectName, deployedResources, cdkOutputs } = options;
 
   const result: CreateHarnessOptions = {
     region,
-    harnessName: harnessSpec.name,
+    harnessName: `${projectName}_${harnessSpec.name}`,
     executionRoleArn,
   };
 

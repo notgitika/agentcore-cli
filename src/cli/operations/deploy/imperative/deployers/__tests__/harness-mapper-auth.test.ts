@@ -30,6 +30,7 @@ const BASE_OPTIONS = {
   harnessDir: '/project/agentcore/harnesses/test_harness',
   executionRoleArn: 'arn:aws:iam::123456789012:role/HarnessRole',
   region: 'us-east-1' as const,
+  projectName: 'myproject',
 };
 
 describe('mapHarnessSpecToCreateOptions - authorizer configuration', () => {

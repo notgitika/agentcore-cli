@@ -165,6 +165,8 @@ interface AddFlowProps {
 
 function getInitialFlowState(resource?: AddResourceType): FlowState {
   switch (resource) {
+    case 'harness':
+      return { name: 'harness-wizard' };
     case 'agent':
       return { name: 'agent-wizard' };
     case 'gateway':

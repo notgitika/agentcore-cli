@@ -107,8 +107,9 @@ export async function validateProject(): Promise<PreflightContext> {
     isTeardownDeploy = true;
   }
 
-  // Validate runtime names don't exceed AWS limits
+  // Validate runtime and harness names don't exceed AWS limits
   validateRuntimeNames(projectSpec);
+  validateHarnessNames(projectSpec);
 
   // Validate Container agents have Dockerfiles
   validateContainerAgents(projectSpec, configRoot);
@@ -136,6 +137,26 @@ function validateRuntimeNames(projectSpec: AgentCoreProjectSpec): void {
           `Runtime name too long: "${combinedName}" (${combinedName.length} chars). ` +
             `AWS limits runtime names to ${MAX_RUNTIME_NAME_LENGTH} characters. ` +
             `Shorten the project name or agent name in agentcore.json.`
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Validates that combined harness names (projectName_harnessName) don't exceed AWS limits.
+ */
+function validateHarnessNames(projectSpec: AgentCoreProjectSpec): void {
+  const projectName = projectSpec.name;
+  for (const harness of projectSpec.harnesses || []) {
+    const harnessName = harness.name;
+    if (harnessName) {
+      const combinedName = `${projectName}_${harnessName}`;
+      if (combinedName.length > MAX_RUNTIME_NAME_LENGTH) {
+        throw new Error(
+          `Harness name too long: "${combinedName}" (${combinedName.length} chars). ` +
+            `AWS limits harness names to ${MAX_RUNTIME_NAME_LENGTH} characters. ` +
+            `Shorten the project name or harness name in agentcore.json.`
         );
       }
     }

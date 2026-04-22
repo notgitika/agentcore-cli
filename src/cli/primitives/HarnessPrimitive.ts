@@ -436,33 +436,30 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
                 process.exit(1);
               }
 
-              // Deploy harness to AWS
-              if (!cliOptions.json) {
-                console.log(`Added harness '${result.harnessName}'. Deploying...`);
-              }
-              try {
-                const { handleDeploy } = await import('../commands/deploy/actions');
-                const deployResult = await handleDeploy({ target: 'default', autoConfirm: true });
-                if (cliOptions.json) {
-                  console.log(JSON.stringify({ ...result, deployed: deployResult.success }));
-                } else if (deployResult.success) {
-                  console.log('Harness deployed successfully.');
-                } else {
-                  console.warn(`Deploy warning: ${deployResult.error}`);
-                }
-              } catch (err) {
-                if (cliOptions.json) {
-                  console.log(JSON.stringify({ ...result, deployed: false }));
-                } else {
-                  console.warn(`Deploy warning: ${getErrorMessage(err)}`);
-                }
+              if (cliOptions.json) {
+                console.log(JSON.stringify(result));
+              } else {
+                console.log(`Added harness '${result.harnessName}'.`);
               }
 
               process.exit(0);
             } else {
-              console.error('Interactive mode is not yet implemented for harnesses.');
-              console.error('Use --name, --model-provider, and --model-id flags to add a harness.');
-              process.exit(1);
+              const [{ render }, { default: React }, { AddFlow }] = await Promise.all([
+                import('ink'),
+                import('react'),
+                import('../tui/screens/add/AddFlow'),
+              ]);
+              const { clear, unmount } = render(
+                React.createElement(AddFlow, {
+                  isInteractive: false,
+                  initialResource: 'harness' as const,
+                  onExit: () => {
+                    clear();
+                    unmount();
+                    process.exit(0);
+                  },
+                })
+              );
             }
           } catch (error) {
             if (cliOptions.json) {

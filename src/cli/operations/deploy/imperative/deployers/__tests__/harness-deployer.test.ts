@@ -195,15 +195,16 @@ describe('HarnessDeployer', () => {
 
       expect(result.success).toBe(true);
       expect(result.state).toEqual({
-        my_harness: {
+        my_harness: expect.objectContaining({
           harnessId: 'h-new',
           harnessArn: 'arn:aws:bedrock-agentcore:us-east-1:123456789012:harness/h-new',
           roleArn: 'arn:aws:iam::123456789012:role/HarnessRole',
           status: 'READY',
           agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/rt-new',
           memoryArn: undefined,
-        },
+        }),
       });
+      expect(result.state!.my_harness).toHaveProperty('configHash');
       expect(mockedCreateHarness).toHaveBeenCalledWith(createOptions);
       expect(result.notes).toContain('Created harness "my_harness"');
     });
