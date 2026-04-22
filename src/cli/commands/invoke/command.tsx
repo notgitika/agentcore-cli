@@ -227,12 +227,12 @@ export const registerInvoke = (program: Command) => {
               process.stdout.write(SHOW_CURSOR);
             };
 
-            const { waitUntilExit } = render(
+            const { waitUntilExit, unmount } = render(
               <InvokeScreen
                 isInteractive={true}
                 onExit={() => {
                   exitAltScreen();
-                  process.exit(0);
+                  unmount();
                 }}
                 initialSessionId={cliOptions.sessionId}
                 initialUserId={cliOptions.userId}

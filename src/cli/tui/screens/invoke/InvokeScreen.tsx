@@ -1,5 +1,6 @@
 import { buildTraceConsoleUrl } from '../../../operations/traces';
 import { GradientText, LogLink, Panel, Screen, SelectList, TextInput } from '../../components';
+import { setExitMessage } from '../../exit-message';
 import { useInvokeFlow } from './useInvokeFlow';
 import { Box, Text, useInput, useStdout } from 'ink';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -32,7 +33,13 @@ interface ColoredLine {
  * Each line carries its own color so that word-wrapping preserves it.
  */
 function formatConversation(
-  messages: { role: 'user' | 'assistant'; content: string; isHint?: boolean; isExec?: boolean }[]
+  messages: {
+    role: 'user' | 'assistant';
+    content: string;
+    isHint?: boolean;
+    isExec?: boolean;
+    parts?: import('./useInvokeFlow').MessagePart[];
+  }[]
 ): ColoredLine[] {
   const lines: ColoredLine[] = [];
 
@@ -48,6 +55,22 @@ function formatConversation(
       lines.push({ text: msg.content });
     } else if (msg.isHint) {
       lines.push({ text: msg.content, color: 'gray' });
+    } else if (msg.parts && msg.parts.length > 0) {
+      // Rich AGUI rendering: render each part with distinct visual treatment
+      for (const part of msg.parts) {
+        if (part.kind === 'text') {
+          lines.push({ text: part.text, color: 'green' });
+        } else if (part.kind === 'tool_call') {
+          lines.push({ text: `  [tool] ${part.name}(${part.args})`, color: 'gray' });
+          if (part.result) {
+            lines.push({ text: `  [result] ${part.result}`, color: 'gray' });
+          }
+        } else if (part.kind === 'reasoning') {
+          lines.push({ text: `  [thinking] ${part.text}`, color: 'gray' });
+        } else if (part.kind === 'error') {
+          lines.push({ text: `Error: ${part.message}${part.code ? ` (${part.code})` : ''}`, color: 'red' });
+        }
+      }
     } else {
       lines.push({ text: msg.content, color: 'green' });
     }
@@ -158,6 +181,14 @@ export function InvokeScreen({
   const { stdout } = useStdout();
   const justCancelledRef = useRef(false);
   const mcpFetchTriggeredRef = useRef(false);
+
+  useEffect(() => {
+    if (sessionId && messages.length > 0) {
+      const cyan = '\x1b[36m';
+      const reset = '\x1b[0m';
+      setExitMessage(`To resume this session, run: ${cyan}agentcore invoke --session-id ${sessionId}${reset}`);
+    }
+  }, [sessionId, messages.length]);
 
   // Compute auth type early so hooks can reference it
   const totalInvokables = (config?.runtimes.length ?? 0) + (config?.harnesses.length ?? 0);
@@ -446,7 +477,7 @@ export function InvokeScreen({
       {mode !== 'select-agent' && (
         <Box>
           <Text>Session: </Text>
-          <Text color="magenta">{sessionId?.slice(0, 8) ?? 'none'}</Text>
+          <Text color="magenta">{sessionId ?? 'none'}</Text>
         </Box>
       )}
       {mode !== 'select-agent' && (
@@ -581,7 +612,7 @@ export function InvokeScreen({
                     ? undefined
                     : isMcp
                       ? 'tool_name {"arg": "value"}'
-                      : agentProtocol === 'A2A'
+                      : agentProtocol === 'A2A' || agentProtocol === 'AGUI'
                         ? 'Send a message...'
                         : undefined
                 }
