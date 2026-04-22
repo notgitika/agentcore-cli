@@ -1,3 +1,5 @@
+import { ConfigIO } from '../../../lib';
+import { detectAwsContext } from '../../aws/aws-context';
 import { getErrorMessage } from '../../errors';
 import { handleDeploy } from './actions';
 
@@ -44,6 +46,28 @@ export async function runCliDeploy(): Promise<void> {
   const { onProgress, cleanup } = createSpinnerProgress();
 
   try {
+    // Auto-populate aws-targets.json if empty
+    const configIO = new ConfigIO();
+    try {
+      const targets = await configIO.readAWSDeploymentTargets();
+      if (targets.length === 0) {
+        const ctx = await detectAwsContext();
+        if (ctx.accountId) {
+          await configIO.writeAWSDeploymentTargets([{ name: 'default', account: ctx.accountId, region: ctx.region }]);
+        }
+      }
+    } catch {
+      // aws-targets.json doesn't exist — try to create it
+      try {
+        const ctx = await detectAwsContext();
+        if (ctx.accountId) {
+          await configIO.writeAWSDeploymentTargets([{ name: 'default', account: ctx.accountId, region: ctx.region }]);
+        }
+      } catch {
+        // Can't detect — let handleDeploy fail with a clear error
+      }
+    }
+
     const result = await handleDeploy({
       target: 'default',
       autoConfirm: true,

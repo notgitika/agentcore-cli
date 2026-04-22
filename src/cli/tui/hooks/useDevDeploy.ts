@@ -1,4 +1,5 @@
 import { ConfigIO } from '../../../lib';
+import { detectAwsContext } from '../../aws/aws-context';
 import type { DeployMessage } from '../../cdk/toolkit-lib';
 import { handleDeploy } from '../../commands/deploy/actions';
 import { getErrorMessage } from '../../errors';
@@ -47,6 +48,31 @@ export function useDevDeploy({ skip, ready = true }: UseDevDeployOptions = {}): 
     const run = async () => {
       try {
         const configIO = new ConfigIO();
+
+        // Auto-populate aws-targets.json if empty
+        try {
+          const targets = await configIO.readAWSDeploymentTargets();
+          if (targets.length === 0) {
+            const ctx = await detectAwsContext();
+            if (ctx.accountId) {
+              await configIO.writeAWSDeploymentTargets([
+                { name: 'default', account: ctx.accountId, region: ctx.region },
+              ]);
+            }
+          }
+        } catch {
+          try {
+            const ctx = await detectAwsContext();
+            if (ctx.accountId) {
+              await configIO.writeAWSDeploymentTargets([
+                { name: 'default', account: ctx.accountId, region: ctx.region },
+              ]);
+            }
+          } catch {
+            // Can't detect — let handleDeploy fail with a clear error
+          }
+        }
+
         const noChanges = await canSkipDeploy(configIO);
         if (noChanges) {
           onProgress('No changes detected — skipping deploy', 'success');
