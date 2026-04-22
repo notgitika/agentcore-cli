@@ -21,6 +21,11 @@ import {
 import type { InvokeOptions, InvokeResult } from './types';
 import { randomUUID } from 'node:crypto';
 
+const TOOL_TYPE_DEFAULT_NAMES: Record<string, string> = {
+  agentcore_browser: 'browser',
+  agentcore_code_interpreter: 'code-interpreter',
+};
+
 export interface InvokeContext {
   project: AgentCoreProjectSpec;
   deployedState: DeployedState;
@@ -624,6 +629,12 @@ async function handleHarnessInvoke(
           baseOpts.model = { bedrockModelConfig: { modelId } };
           break;
       }
+    }
+    if (options.tools) {
+      baseOpts.tools = options.tools.split(',').map(t => {
+        const type = t.trim();
+        return { type, name: TOOL_TYPE_DEFAULT_NAMES[type] ?? type };
+      });
     }
     if (options.maxIterations != null) baseOpts.maxIterations = options.maxIterations;
     if (options.maxTokens != null) baseOpts.maxTokens = options.maxTokens;

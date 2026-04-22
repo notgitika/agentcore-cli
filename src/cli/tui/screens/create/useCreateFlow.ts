@@ -507,6 +507,11 @@ export function useCreateFlow(cwd: string): CreateFlowState {
                 securityGroups: addHarnessConfig.securityGroups,
                 idleTimeout: addHarnessConfig.idleTimeout,
                 maxLifetime: addHarnessConfig.maxLifetime,
+                sessionStoragePath: addHarnessConfig.sessionStoragePath,
+                selectedTools: addHarnessConfig.selectedTools,
+                mcpName: addHarnessConfig.mcpName,
+                mcpUrl: addHarnessConfig.mcpUrl,
+                gatewayArn: addHarnessConfig.gatewayArn,
                 authorizerType: addHarnessConfig.authorizerType,
                 jwtConfig: addHarnessConfig.jwtConfig
                   ? {

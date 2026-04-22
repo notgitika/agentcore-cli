@@ -247,6 +247,17 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
       }
     }
 
+    if (wizard.config.selectedTools?.length) {
+      const toolLabels = wizard.config.selectedTools.map(id => TOOL_SELECT_OPTIONS.find(o => o.id === id)?.title ?? id);
+      fields.push({ label: 'Tools', value: toolLabels.join(', ') });
+      if (wizard.config.mcpName) {
+        fields.push({ label: 'MCP Server', value: `${wizard.config.mcpName} (${wizard.config.mcpUrl})` });
+      }
+      if (wizard.config.gatewayArn) {
+        fields.push({ label: 'Gateway ARN', value: wizard.config.gatewayArn });
+      }
+    }
+
     if (wizard.config.containerUri) {
       fields.push({ label: 'Container URI', value: wizard.config.containerUri });
     }
