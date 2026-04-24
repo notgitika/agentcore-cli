@@ -1,6 +1,6 @@
 import { SecureCredentials, readEnvFile } from '../../../lib';
 import type { AgentCoreProjectSpec, Credential } from '../../../schema';
-import { getCredentialProvider } from '../../aws';
+import { createControlClient, getCredentialProvider } from '../../aws';
 import { isNoCredentialsError } from '../../errors';
 import { getAwsLoginGuidance } from '../../external-requirements/checks';
 import { computeDefaultCredentialEnvVarName } from '../../primitives/credential-utils';
@@ -13,7 +13,7 @@ import {
   updateApiKeyProvider,
   updateOAuth2Provider,
 } from '../identity';
-import { BedrockAgentCoreControlClient, GetTokenVaultCommand } from '@aws-sdk/client-bedrock-agentcore-control';
+import { type BedrockAgentCoreControlClient, GetTokenVaultCommand } from '@aws-sdk/client-bedrock-agentcore-control';
 import { CreateKeyCommand, KMSClient } from '@aws-sdk/client-kms';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -55,19 +55,17 @@ export interface SetupApiKeyProvidersOptions {
 export async function setupApiKeyProviders(options: SetupApiKeyProvidersOptions): Promise<PreDeployIdentityResult> {
   const { projectSpec, configBaseDir, region, runtimeCredentials, enableKmsEncryption } = options;
   const results: ApiKeyProviderSetupResult[] = [];
-  const credentials = getCredentialProvider();
-
   const envVars = await readEnvFile(configBaseDir);
   // Wrap env vars in SecureCredentials and merge with runtime credentials
   const envCredentials = SecureCredentials.fromEnvVars(envVars);
   const allCredentials = runtimeCredentials ? envCredentials.merge(runtimeCredentials) : envCredentials;
 
-  const client = new BedrockAgentCoreControlClient({ region, credentials });
+  const client = createControlClient(region);
 
   // Configure KMS encryption for token vault if enabled
   let kmsKeyArn: string | undefined;
   if (enableKmsEncryption) {
-    const kmsResult = await setupTokenVaultKms(region, credentials, projectSpec);
+    const kmsResult = await setupTokenVaultKms(region, projectSpec);
     if (!kmsResult.success) {
       return {
         results: [
@@ -100,11 +98,10 @@ export async function setupApiKeyProviders(options: SetupApiKeyProvidersOptions)
 
 async function setupTokenVaultKms(
   region: string,
-  credentials: ReturnType<typeof getCredentialProvider>,
   projectSpec: AgentCoreProjectSpec
 ): Promise<{ success: boolean; keyArn?: string; error?: string }> {
   try {
-    const controlClient = new BedrockAgentCoreControlClient({ region, credentials });
+    const controlClient = createControlClient(region);
 
     // Check if the token vault already has a customer-managed key
     try {
@@ -120,7 +117,7 @@ async function setupTokenVaultKms(
     }
 
     // No CMK configured — create a new KMS key and set it on the vault
-    const kmsClient = new KMSClient({ region, credentials });
+    const kmsClient = new KMSClient({ region, credentials: getCredentialProvider() });
     const response = await kmsClient.send(
       new CreateKeyCommand({
         Description: `AgentCore Identity encryption key for ${projectSpec.name}`,
@@ -289,13 +286,12 @@ export interface PreDeployOAuth2Result {
 export async function setupOAuth2Providers(options: SetupOAuth2ProvidersOptions): Promise<PreDeployOAuth2Result> {
   const { projectSpec, configBaseDir, region, runtimeCredentials } = options;
   const results: OAuth2ProviderSetupResult[] = [];
-  const credentials = getCredentialProvider();
 
   const envVars = await readEnvFile(configBaseDir);
   const envCredentials = SecureCredentials.fromEnvVars(envVars);
   const allCredentials = runtimeCredentials ? envCredentials.merge(runtimeCredentials) : envCredentials;
 
-  const client = new BedrockAgentCoreControlClient({ region, credentials });
+  const client = createControlClient(region);
 
   for (const credential of projectSpec.credentials) {
     if (credential.authorizerType === 'OAuthCredentialProvider') {

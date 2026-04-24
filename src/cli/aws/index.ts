@@ -56,6 +56,7 @@ export {
   type InvokeHarnessOptions,
 } from './agentcore-harness';
 export {
+  createAgentCoreClient,
   DEFAULT_RUNTIME_USER_ID,
   executeBashCommand,
   invokeA2ARuntime,

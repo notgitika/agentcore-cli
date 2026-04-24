@@ -1,4 +1,5 @@
 import type { EvaluationLevel } from '../../schema/schemas/primitives/evaluator';
+import { PACKAGE_VERSION } from '../constants';
 import { getCredentialProvider } from './account';
 import {
   BedrockAgentCoreControlClient,
@@ -23,6 +24,7 @@ export function createControlClient(region: string): BedrockAgentCoreControlClie
   return new BedrockAgentCoreControlClient({
     region,
     credentials: getCredentialProvider(),
+    customUserAgent: [['agentcore-cli', PACKAGE_VERSION]],
   });
 }
 

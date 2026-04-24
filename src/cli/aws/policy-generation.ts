@@ -1,6 +1,5 @@
-import { getCredentialProvider } from './account';
+import { createControlClient } from './agentcore-control';
 import {
-  BedrockAgentCoreControlClient,
   GetPolicyGenerationCommand,
   ListPolicyGenerationAssetsCommand,
   StartPolicyGenerationCommand,
@@ -33,10 +32,7 @@ export interface GetPolicyGenerationResult {
 export async function startPolicyGeneration(
   options: StartPolicyGenerationOptions
 ): Promise<StartPolicyGenerationResult> {
-  const client = new BedrockAgentCoreControlClient({
-    region: options.region,
-    credentials: getCredentialProvider(),
-  });
+  const client = createControlClient(options.region);
 
   const command = new StartPolicyGenerationCommand({
     policyEngineId: options.policyEngineId,
@@ -57,10 +53,7 @@ export async function startPolicyGeneration(
 }
 
 export async function getPolicyGeneration(options: GetPolicyGenerationOptions): Promise<GetPolicyGenerationResult> {
-  const client = new BedrockAgentCoreControlClient({
-    region: options.region,
-    credentials: getCredentialProvider(),
-  });
+  const client = createControlClient(options.region);
 
   // Use the SDK waiter to poll until generation completes
   const waiterResult = await waitUntilPolicyGenerationCompleted(

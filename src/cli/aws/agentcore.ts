@@ -1,4 +1,5 @@
 import { parseJsonRpcResponse } from '../../lib/utils/json-rpc';
+import { PACKAGE_VERSION } from '../constants';
 import { getCredentialProvider } from './account';
 import { parseAguiSSEStream } from './agui-parser';
 import { serviceEndpoint } from './partition';
@@ -23,11 +24,12 @@ function resolveDataPlaneEndpoint(region: string): string | undefined {
   return undefined;
 }
 
-function createAgentCoreClient(region: string, headers?: Record<string, string>): BedrockAgentCoreClient {
+export function createAgentCoreClient(region: string, headers?: Record<string, string>): BedrockAgentCoreClient {
   const endpoint = resolveDataPlaneEndpoint(region);
   const client = new BedrockAgentCoreClient({
     region,
     credentials: getCredentialProvider(),
+    customUserAgent: [['agentcore-cli', PACKAGE_VERSION]],
     ...(endpoint && { endpoint }),
   });
 
@@ -473,6 +475,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
   const client = new BedrockAgentCoreClient({
     region: options.region,
     credentials: getCredentialProvider(),
+    customUserAgent: [['agentcore-cli', PACKAGE_VERSION]],
   });
 
   const evaluationTarget = options.targetSpanIds
@@ -1066,6 +1069,7 @@ export async function stopRuntimeSession(options: StopRuntimeSessionOptions): Pr
   const client = new BedrockAgentCoreClient({
     region: options.region,
     credentials: getCredentialProvider(),
+    customUserAgent: [['agentcore-cli', PACKAGE_VERSION]],
   });
 
   const command = new StopRuntimeSessionCommand({

@@ -1,5 +1,5 @@
-import { getCredentialProvider } from '../../aws';
-import { BedrockAgentCoreClient, ListMemoryRecordsCommand } from '@aws-sdk/client-bedrock-agentcore';
+import { createAgentCoreClient } from '../../aws';
+import { ListMemoryRecordsCommand } from '@aws-sdk/client-bedrock-agentcore';
 
 export interface MemoryRecordEntry {
   memoryRecordId: string;
@@ -33,10 +33,7 @@ export interface ListMemoryRecordsResult {
 export async function listMemoryRecords(options: ListMemoryRecordsOptions): Promise<ListMemoryRecordsResult> {
   const { region, memoryId, namespace, memoryStrategyId, maxResults = 50, nextToken } = options;
 
-  const client = new BedrockAgentCoreClient({
-    region,
-    credentials: getCredentialProvider(),
-  });
+  const client = createAgentCoreClient(region);
 
   try {
     const response = await client.send(

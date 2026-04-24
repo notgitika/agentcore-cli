@@ -1,6 +1,6 @@
-import { getCredentialProvider } from '../../aws';
+import { createAgentCoreClient } from '../../aws';
 import type { MemoryRecordEntry } from './list-memory-records';
-import { BedrockAgentCoreClient, RetrieveMemoryRecordsCommand } from '@aws-sdk/client-bedrock-agentcore';
+import { RetrieveMemoryRecordsCommand } from '@aws-sdk/client-bedrock-agentcore';
 
 export interface RetrieveMemoryRecordsOptions {
   region: string;
@@ -28,10 +28,7 @@ export async function retrieveMemoryRecords(
 ): Promise<RetrieveMemoryRecordsResult> {
   const { region, memoryId, namespace, searchQuery, memoryStrategyId, topK, maxResults, nextToken } = options;
 
-  const client = new BedrockAgentCoreClient({
-    region,
-    credentials: getCredentialProvider(),
-  });
+  const client = createAgentCoreClient(region);
 
   try {
     const response = await client.send(
