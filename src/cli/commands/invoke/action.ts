@@ -369,6 +369,7 @@ export async function handleInvoke(context: InvokeContext, options: InvokeOption
         agentName: agentSpec.name,
         targetName: selectedTargetName,
         response,
+        sessionId: aguiResult.sessionId,
         logFilePath: logger.logFilePath,
       };
     } catch (err) {
