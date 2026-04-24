@@ -56,9 +56,13 @@ async function handleInvokeCLI(options: InvokeOptions): Promise<void> {
     if (options.json) {
       console.log(JSON.stringify(result));
     } else if (options.stream) {
-      // Streaming already wrote to stdout, just show log path
+      // Streaming already wrote to stdout, just show session and log path
+      if (result.sessionId) {
+        console.error(`\nSession: ${result.sessionId}`);
+        console.error(`To resume: agentcore invoke --session-id ${result.sessionId}`);
+      }
       if (result.logFilePath) {
-        console.error(`\nLog: ${result.logFilePath}`);
+        console.error(`Log: ${result.logFilePath}`);
       }
     } else {
       // Non-streaming, non-json: print provider info and response or error
@@ -67,8 +71,12 @@ async function handleInvokeCLI(options: InvokeOptions): Promise<void> {
       } else if (!result.success && result.error) {
         console.error(result.error);
       }
+      if (result.sessionId) {
+        console.error(`\nSession: ${result.sessionId}`);
+        console.error(`To resume: agentcore invoke --session-id ${result.sessionId}`);
+      }
       if (result.logFilePath) {
-        console.error(`\nLog: ${result.logFilePath}`);
+        console.error(`Log: ${result.logFilePath}`);
       }
     }
 

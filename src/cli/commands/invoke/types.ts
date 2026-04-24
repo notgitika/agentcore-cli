@@ -25,6 +25,7 @@ export interface InvokeResult {
   agentName?: string;
   targetName?: string;
   response?: string;
+  sessionId?: string;
   error?: string;
   logFilePath?: string;
 }

@@ -415,6 +415,7 @@ export async function handleInvoke(context: InvokeContext, options: InvokeOption
         agentName: agentSpec.name,
         targetName: selectedTargetName,
         response: fullResponse,
+        sessionId: result.sessionId,
         logFilePath: logger.logFilePath,
       };
     } catch (err) {
@@ -441,6 +442,7 @@ export async function handleInvoke(context: InvokeContext, options: InvokeOption
     agentName: agentSpec.name,
     targetName: selectedTargetName,
     response: response.content,
+    sessionId: response.sessionId,
     logFilePath: logger.logFilePath,
   };
 }
