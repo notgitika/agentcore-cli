@@ -69,6 +69,7 @@
     "test:e2e": "vitest run --project e2e",
     "test:update-snapshots": "vitest run --project unit --update",
     "test:tui": "npm run build:harness && vitest run --project tui",
+    "test:browser": "npx playwright test --config browser-tests/playwright.config.ts",
     "bundle": "node scripts/bundle.mjs"
   },
   "dependencies": {
@@ -111,6 +112,7 @@
     "@aws-sdk/client-cognito-identity-provider": "^3.1018.0",
     "@eslint/js": "^9.39.2",
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "@playwright/test": "^1.59.1",
     "@secretlint/secretlint-rule-preset-recommend": "^11.3.0",
     "@trivago/prettier-plugin-sort-imports": "^6.0.2",
     "@types/js-yaml": "^4.0.9",

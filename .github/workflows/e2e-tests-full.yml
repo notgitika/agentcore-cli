@@ -79,3 +79,19 @@ jobs:
           GEMINI_API_KEY: ${{ env.E2E_GEMINI_API_KEY }}
           CDK_TARBALL: ${{ env.CDK_TARBALL }}
         run: npm run test:e2e
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+      - name: Run browser tests
+        env:
+          AWS_ACCOUNT_ID: ${{ steps.aws.outputs.account_id }}
+          AWS_REGION: ${{ inputs.aws_region || 'us-east-1' }}
+          PLAYWRIGHT_TRACE: 'off'
+        run: npm run test:browser
+      - name: Print browser test debug info
+        if: failure()
+        run: |
+          echo "=== Dev server PTY output ==="
+          cat test-results/agentcore-dev-pty.log 2>/dev/null || echo "(no pty log)"
+          echo ""
+          echo "=== Error contexts ==="
+          find test-results -name 'error-context.md' -exec echo "--- {} ---" \; -exec cat {} \; 2>/dev/null || echo "(no error contexts)"
