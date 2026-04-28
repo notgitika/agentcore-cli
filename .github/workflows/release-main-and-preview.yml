@@ -12,12 +12,11 @@ on:
           - minor
           - major
       preview_bump_type:
-        description: 'Preview branch version bump'
+        description: 'Preview branch version bump (prerelease with preview tag)'
         required: true
         type: choice
         options:
-          - preview
-          - preview-major
+          - prerelease
       main_changelog:
         description: 'Main changelog entry (optional)'
         required: false
@@ -220,10 +219,9 @@ jobs:
       - name: Bump version
         id: bump
         env:
-          BUMP_TYPE: ${{ github.event.inputs.preview_bump_type }}
           CHANGELOG_INPUT: ${{ github.event.inputs.preview_changelog }}
         run: |
-          BUMP_CMD="npx tsx scripts/bump-version.ts $BUMP_TYPE"
+          BUMP_CMD="npx tsx scripts/bump-version.ts prerelease --prerelease-tag preview"
           if [ -n "$CHANGELOG_INPUT" ]; then
             BUMP_CMD="$BUMP_CMD --changelog \"$CHANGELOG_INPUT\""
           fi
@@ -291,13 +289,6 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm run test:unit
-      - run: npm pack
-      - uses: actions/upload-artifact@v7
-        with:
-          name: dist-main
-          path: |
-            dist/
-            *.tgz
 
   test-preview:
     name: Test Preview
@@ -320,13 +311,6 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm run test:unit
-      - run: npm pack
-      - uses: actions/upload-artifact@v7
-        with:
-          name: dist-preview
-          path: |
-            dist/
-            *.tgz
 
   # ═══════════════════════════════════════════════════════════════════
   # Step 4 — Manual approval gate
@@ -354,16 +338,53 @@ jobs:
           echo "1. Merge the main release PR (release/v$MAIN_VERSION → main)"
           echo "2. Merge the preview release PR (release/v$PREVIEW_VERSION → preview)"
           echo "3. Verify both PRs are merged"
-          echo ""
-          echo "🚨 Main is published FIRST, then preview."
 
   # ═══════════════════════════════════════════════════════════════════
-  # Step 5a — Publish main to npm (tag: latest)
+  # Step 5 — Verify both PRs merged before any publish
+  # ═══════════════════════════════════════════════════════════════════
+  verify-merges:
+    name: Verify Both PRs Merged
+    needs: [prepare-main, prepare-preview, release-approval]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Verify main version
+        env:
+          EXPECTED: ${{ needs.prepare-main.outputs.version }}
+        run: |
+          git fetch origin main
+          ACTUAL=$(git show origin/main:package.json | node -p "JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).version")
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "❌ Main release PR not merged yet!"
+            echo "Expected: $EXPECTED, Got: $ACTUAL"
+            exit 1
+          fi
+          echo "✅ Main version verified: $ACTUAL"
+
+      - name: Verify preview version
+        env:
+          EXPECTED: ${{ needs.prepare-preview.outputs.version }}
+        run: |
+          git fetch origin preview
+          ACTUAL=$(git show origin/preview:package.json | node -p "JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).version")
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "❌ Preview release PR not merged yet!"
+            echo "Expected: $EXPECTED, Got: $ACTUAL"
+            exit 1
+          fi
+          echo "✅ Preview version verified: $ACTUAL"
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Step 6a — Publish main to npm (tag: latest)
   # ═══════════════════════════════════════════════════════════════════
   publish-main:
     name: Publish Main (@latest)
-    needs: [prepare-main, release-approval]
-    if: ${{ !inputs.dry_run }}
+    needs: [prepare-main, verify-merges]
     runs-on: ubuntu-latest
     environment:
       name: npm-publish
@@ -373,24 +394,11 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout main (after PR merge)
+      - name: Checkout main
         uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
-
-      - name: Verify version
-        env:
-          EXPECTED_VERSION: ${{ needs.prepare-main.outputs.version }}
-        run: |
-          ACTUAL=$(node -p "require('./package.json').version")
-          if [ "$ACTUAL" != "$EXPECTED_VERSION" ]; then
-            echo "❌ Main release PR not merged yet!"
-            echo "Expected: $EXPECTED_VERSION, Got: $ACTUAL"
-            echo "👉 Merge the PR first, then re-approve."
-            exit 1
-          fi
-          echo "✅ Main version verified: $ACTUAL"
 
       - uses: actions/setup-node@v6
         with:
@@ -428,12 +436,11 @@ jobs:
             ```
 
   # ═══════════════════════════════════════════════════════════════════
-  # Step 5b — Publish preview to npm (tag: preview)
+  # Step 6b — Publish preview to npm (tag: preview)
   # ═══════════════════════════════════════════════════════════════════
   publish-preview:
     name: Publish Preview (@preview)
-    needs: [prepare-preview, publish-main]
-    if: ${{ !inputs.dry_run }}
+    needs: [prepare-preview, verify-merges]
     runs-on: ubuntu-latest
     environment:
       name: npm-publish
@@ -443,24 +450,11 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout preview (after PR merge)
+      - name: Checkout preview
         uses: actions/checkout@v6
         with:
           ref: preview
           fetch-depth: 0
-
-      - name: Verify version
-        env:
-          EXPECTED_VERSION: ${{ needs.prepare-preview.outputs.version }}
-        run: |
-          ACTUAL=$(node -p "require('./package.json').version")
-          if [ "$ACTUAL" != "$EXPECTED_VERSION" ]; then
-            echo "❌ Preview release PR not merged yet!"
-            echo "Expected: $EXPECTED_VERSION, Got: $ACTUAL"
-            echo "👉 Merge the PR first, then re-approve."
-            exit 1
-          fi
-          echo "✅ Preview version verified: $ACTUAL"
 
       - uses: actions/setup-node@v6
         with:
