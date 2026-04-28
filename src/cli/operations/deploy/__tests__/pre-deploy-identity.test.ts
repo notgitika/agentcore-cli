@@ -78,6 +78,7 @@ vi.mock('../../../../lib/index.js', () => ({
 
 vi.mock('../../../aws/index.js', () => ({
   getCredentialProvider: mockGetCredentialProvider,
+  createControlClient: vi.fn(() => ({ send: mockControlSend })),
 }));
 
 vi.mock('../../../errors.js', () => ({
