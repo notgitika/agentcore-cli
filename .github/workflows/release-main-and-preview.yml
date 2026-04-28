@@ -55,45 +55,27 @@ jobs:
             exit 1
           fi
 
-      - name: Configure git
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Rebase preview onto main
+      - name: Verify preview branch is rebased on main
         run: |
           git fetch origin preview
           MAIN_SHA=$(git rev-parse HEAD)
           MERGE_BASE=$(git merge-base HEAD origin/preview)
 
-          if [[ "$MAIN_SHA" == "$MERGE_BASE" ]]; then
-            echo "✅ preview is already rebased on main — nothing to do"
-            exit 0
-          fi
-
-          echo "ℹ️  preview is not rebased on main. Rebasing automatically..."
-          echo "Main HEAD:  $MAIN_SHA"
-          echo "Merge base: $MERGE_BASE"
-
-          git checkout origin/preview -B preview
-
-          if git rebase origin/main; then
-            git push --force-with-lease origin preview
-            echo "✅ preview rebased and pushed successfully"
-          else
-            git rebase --abort
+          if [[ "$MAIN_SHA" != "$MERGE_BASE" ]]; then
+            echo "❌ preview branch is NOT rebased on main."
             echo ""
-            echo "❌ Rebase failed due to conflicts."
+            echo "Main HEAD:  $MAIN_SHA"
+            echo "Merge base: $MERGE_BASE"
             echo ""
-            echo "Please resolve manually:"
-            echo "  git checkout preview"
-            echo "  git rebase main"
-            echo "  # resolve conflicts"
-            echo "  git push --force-with-lease"
+            echo "The sync-preview workflow should have rebased automatically."
+            echo "If it failed due to conflicts, resolve manually:"
+            echo "  git checkout preview && git rebase main && git push --force-with-lease"
             echo ""
             echo "Then re-run this workflow."
             exit 1
           fi
+
+          echo "✅ preview branch is rebased on main"
 
   # ═══════════════════════════════════════════════════════════════════
   # Step 1 — Prepare main release (bump, PR)

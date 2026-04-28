@@ -1,0 +1,50 @@
+name: Sync Preview with Main
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Rebase preview onto main
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Rebase preview onto main
+        run: |
+          git fetch origin preview
+          MAIN_SHA=$(git rev-parse HEAD)
+          MERGE_BASE=$(git merge-base HEAD origin/preview)
+
+          if [[ "$MAIN_SHA" == "$MERGE_BASE" ]]; then
+            echo "✅ preview is already up to date with main"
+            exit 0
+          fi
+
+          echo "ℹ️  Rebasing preview onto main..."
+          git checkout origin/preview -B preview
+
+          if git rebase origin/main; then
+            git push --force-with-lease origin preview
+            echo "✅ preview rebased and pushed"
+          else
+            git rebase --abort
+            echo ""
+            echo "⚠️  Rebase had conflicts — skipping auto-sync."
+            echo "Manual rebase needed before next release:"
+            echo "  git checkout preview && git rebase main && git push --force-with-lease"
+            echo ""
+            echo "This is not a failure — preview just needs manual attention."
+          fi
