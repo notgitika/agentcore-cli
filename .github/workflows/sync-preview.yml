@@ -9,12 +9,13 @@ permissions:
 
 jobs:
   sync:
-    name: Rebase preview onto main
+    name: Merge main into preview
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout preview
         uses: actions/checkout@v6
         with:
+          ref: preview
           fetch-depth: 0
 
       - name: Configure git
@@ -22,29 +23,30 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Rebase preview onto main
+      - name: Merge main into preview
         run: |
-          git fetch origin preview
-          MAIN_SHA=$(git rev-parse HEAD)
-          MERGE_BASE=$(git merge-base HEAD origin/preview)
+          git fetch origin main
+          MAIN_SHA=$(git rev-parse origin/main)
+          MERGE_BASE=$(git merge-base HEAD origin/main)
 
           if [[ "$MAIN_SHA" == "$MERGE_BASE" ]]; then
-            echo "✅ preview is already up to date with main"
+            echo "✅ preview already contains all of main"
             exit 0
           fi
 
-          echo "ℹ️  Rebasing preview onto main..."
-          git checkout origin/preview -B preview
+          echo "ℹ️  Merging main into preview..."
 
-          if git rebase origin/main; then
-            git push --force-with-lease origin preview
-            echo "✅ preview rebased and pushed"
+          if git merge origin/main --no-edit -m "chore: merge main into preview"; then
+            git push origin preview
+            echo "✅ main merged into preview and pushed"
           else
-            git rebase --abort
+            git merge --abort
             echo ""
-            echo "⚠️  Rebase had conflicts — skipping auto-sync."
-            echo "Manual rebase needed before next release:"
-            echo "  git checkout preview && git rebase main && git push --force-with-lease"
+            echo "⚠️  Merge had conflicts — skipping auto-sync."
+            echo "Manual merge needed before next release:"
+            echo "  git checkout preview && git merge main"
+            echo "  # resolve conflicts"
+            echo "  git push origin preview"
             echo ""
             echo "This is not a failure — preview just needs manual attention."
           fi
