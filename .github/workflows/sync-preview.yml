@@ -4,8 +4,13 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: sync-preview
+  cancel-in-progress: false
+
 permissions:
   contents: write
+  issues: write
 
 jobs:
   sync:
@@ -24,6 +29,7 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Merge main into preview
+        id: merge
         run: |
           git fetch origin main
           MAIN_SHA=$(git rev-parse origin/main)
@@ -31,6 +37,7 @@ jobs:
 
           if [[ "$MAIN_SHA" == "$MERGE_BASE" ]]; then
             echo "✅ preview already contains all of main"
+            echo "status=up-to-date" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -39,14 +46,36 @@ jobs:
           if git merge origin/main --no-edit -m "chore: merge main into preview"; then
             git push origin preview
             echo "✅ main merged into preview and pushed"
+            echo "status=merged" >> $GITHUB_OUTPUT
           else
             git merge --abort
-            echo ""
-            echo "⚠️  Merge had conflicts — skipping auto-sync."
-            echo "Manual merge needed before next release:"
-            echo "  git checkout preview && git merge main"
-            echo "  # resolve conflicts"
-            echo "  git push origin preview"
-            echo ""
-            echo "This is not a failure — preview just needs manual attention."
+            echo "status=conflict" >> $GITHUB_OUTPUT
           fi
+
+      - name: Create issue on conflict
+        if: steps.merge.outputs.status == 'conflict'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Only create if no open issue with this title exists
+          EXISTING=$(gh issue list --state open --search "preview branch needs manual merge from main" --json number --jq 'length')
+          if [[ "$EXISTING" != "0" ]]; then
+            echo "ℹ️  Issue already open — skipping duplicate."
+            exit 0
+          fi
+
+          gh issue create \
+            --title "preview branch needs manual merge from main" \
+            --body "The automated sync-preview workflow failed to merge \`main\` into \`preview\` due to conflicts.
+
+          **To resolve:**
+          \`\`\`bash
+          git checkout preview
+          git merge main
+          # resolve conflicts
+          git push origin preview
+          \`\`\`
+
+          This must be resolved before the next coordinated release.
+
+          _Opened automatically by the sync-preview workflow._"

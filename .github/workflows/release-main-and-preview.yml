@@ -202,6 +202,8 @@ jobs:
 
       - run: npm ci
 
+      # TODO: When @aws/agentcore-cdk publishes a @preview dist-tag, change this
+      # to: npm view @aws/agentcore-cdk@preview version
       - name: Sync @aws/agentcore-cdk to latest npm version
         run: |
           LATEST_CDK=$(npm view @aws/agentcore-cdk version 2>/dev/null || echo "")
