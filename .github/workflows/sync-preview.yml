@@ -10,7 +10,7 @@ concurrency:
 
 permissions:
   contents: write
-  issues: write
+  pull-requests: write
 
 jobs:
   sync:
@@ -52,30 +52,74 @@ jobs:
             echo "status=conflict" >> $GITHUB_OUTPUT
           fi
 
-      - name: Create issue on conflict
+      - name: Get original commit author
+        if: steps.merge.outputs.status == 'conflict'
+        id: author
+        run: |
+          AUTHOR=$(git log origin/main -1 --format='%an')
+          GH_USER=$(git log origin/main -1 --format='%ae' | grep -oP '.*(?=@users\.noreply\.github\.com)' || echo "")
+          if [[ -z "$GH_USER" ]]; then
+            # Try to get GitHub username from the commit
+            GH_USER=$(gh api "/repos/${{ github.repository }}/commits/$(git rev-parse origin/main)" --jq '.author.login // empty' 2>/dev/null || echo "")
+          fi
+          echo "name=$AUTHOR" >> $GITHUB_OUTPUT
+          echo "gh_user=$GH_USER" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Create PR for conflict resolution
         if: steps.merge.outputs.status == 'conflict'
         env:
           GH_TOKEN: ${{ github.token }}
+          AUTHOR_NAME: ${{ steps.author.outputs.name }}
+          AUTHOR_GH: ${{ steps.author.outputs.gh_user }}
         run: |
-          # Only create if no open issue with this title exists
-          EXISTING=$(gh issue list --state open --search "preview branch needs manual merge from main" --json number --jq 'length')
+          BRANCH="sync-preview/merge-main-$(date +%Y%m%d-%H%M%S)"
+
+          # Check if there's already an open sync PR
+          EXISTING=$(gh pr list --base preview --search "sync-preview: merge main into preview" --state open --json number --jq 'length')
           if [[ "$EXISTING" != "0" ]]; then
-            echo "ℹ️  Issue already open — skipping duplicate."
+            echo "ℹ️  Sync PR already open — skipping duplicate."
             exit 0
           fi
 
-          gh issue create \
-            --title "preview branch needs manual merge from main" \
-            --body "The automated sync-preview workflow failed to merge \`main\` into \`preview\` due to conflicts.
+          # Create a branch from preview with the conflict markers
+          git checkout -b "$BRANCH"
+          git merge origin/main --no-edit -m "chore: merge main into preview" || true
+          git add -A
+          git commit --no-edit -m "chore: merge main into preview (conflicts need resolution)" || true
+          git push origin "$BRANCH"
 
-          **To resolve:**
-          \`\`\`bash
-          git checkout preview
-          git merge main
-          # resolve conflicts
-          git push origin preview
-          \`\`\`
+          # Build mention string
+          MENTION=""
+          if [[ -n "$AUTHOR_GH" ]]; then
+            MENTION="cc @${AUTHOR_GH}"
+          fi
+
+          gh pr create \
+            --base preview \
+            --head "$BRANCH" \
+            --title "sync-preview: merge main into preview" \
+            --body "$(cat <<BODY
+          The automated sync-preview workflow could not cleanly merge \`main\` into \`preview\`.
+
+          **This PR contains the merge with conflict markers.** To resolve:
+
+          1. Check out this branch locally:
+             \`\`\`bash
+             gh pr checkout <this-pr-number>
+             \`\`\`
+          2. Search for conflict markers and resolve them:
+             \`\`\`bash
+             grep -rn '<<<<<<< HEAD' .
+             \`\`\`
+          3. Keep preview-specific values (package version, preview tests, etc.) — accept main's changes for everything else.
+          4. Commit and push, then merge this PR.
 
           This must be resolved before the next coordinated release.
 
-          _Opened automatically by the sync-preview workflow._"
+          ${MENTION}
+
+          _Opened automatically by the sync-preview workflow._
+          BODY
+          )"
