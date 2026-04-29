@@ -10,6 +10,8 @@ import {
 } from '../../operations/dev/web-ui';
 import type { HarnessInfo } from '../../operations/dev/web-ui/constants';
 import { listMemoryRecords, retrieveMemoryRecords } from '../../operations/memory';
+import { loadDeployedProjectConfig, resolveAgentOrHarness } from '../../operations/resolve-agent';
+import { fetchTraceRecords, listTraces } from '../../operations/traces';
 import { LayoutProvider } from '../../tui/context';
 import { runCliDeploy } from '../deploy/progress';
 import { render } from 'ink';
@@ -246,6 +248,47 @@ export async function runBrowserMode(opts: BrowserModeOptions): Promise<void> {
         ? (agentNameParam, startTime, endTime) => collector.listTraces(agentNameParam, startTime, endTime)
         : undefined,
       onGetTrace: collector ? (agentNameParam, traceId) => collector.getTraceSpans(agentNameParam, traceId) : undefined,
+      onListCloudWatchTraces: async (agentName, harnessName, startTime, endTime) => {
+        try {
+          const configIO = new ConfigIO({ baseDir });
+          const context = await loadDeployedProjectConfig(configIO);
+          const resolved = await resolveAgentOrHarness(context, { runtime: agentName, harness: harnessName });
+          if (!resolved.success) return { success: false, error: resolved.error };
+          return listTraces({
+            region: resolved.agent.region,
+            runtimeId: resolved.agent.runtimeId,
+            agentName: resolved.agent.agentName,
+            startTime,
+            endTime,
+          });
+        } catch (err) {
+          return {
+            success: false,
+            error: `Failed to list CloudWatch traces: ${err instanceof Error ? err.message : String(err)}`,
+          };
+        }
+      },
+      onGetCloudWatchTrace: async (agentName, harnessName, traceId, startTime, endTime) => {
+        try {
+          const configIO = new ConfigIO({ baseDir });
+          const context = await loadDeployedProjectConfig(configIO);
+          const resolved = await resolveAgentOrHarness(context, { runtime: agentName, harness: harnessName });
+          if (!resolved.success) return { success: false, error: resolved.error };
+          return fetchTraceRecords({
+            region: resolved.agent.region,
+            runtimeId: resolved.agent.runtimeId,
+            traceId,
+            startTime,
+            endTime,
+            includeSpans: true,
+          });
+        } catch (err) {
+          return {
+            success: false,
+            error: `Failed to get CloudWatch trace: ${err instanceof Error ? err.message : String(err)}`,
+          };
+        }
+      },
       onListMemoryRecords: async (memoryName, namespace, strategyId) => {
         const deployed = await resolveDeployedHandlers(baseDir, onLog);
         if (!deployed.onListMemoryRecords) return { success: false, error: 'No deployed AgentCore Memory found' };
