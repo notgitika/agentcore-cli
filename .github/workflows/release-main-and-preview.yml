@@ -120,6 +120,7 @@ jobs:
                 fs.writeFileSync('$TEMPLATE_PKG', JSON.stringify(pkg, null, 2) + '\n');
               "
               echo "✅ Updated @aws/agentcore-cdk: $CURRENT_CDK -> $LATEST_CDK"
+              npm run test:update-snapshots
             fi
           fi
 
@@ -218,6 +219,7 @@ jobs:
                 fs.writeFileSync('$TEMPLATE_PKG', JSON.stringify(pkg, null, 2) + '\n');
               "
               echo "✅ Updated @aws/agentcore-cdk: $CURRENT_CDK -> $LATEST_CDK"
+              npm run test:update-snapshots
             fi
           fi
 
