@@ -26,6 +26,22 @@ export function resilientParse(
   return result;
 }
 
+/**
+ * Lowercase a CLI value and parse it through a Zod enum, returning the narrowed type.
+ * The `as` cast on the failure branch is intentional: invalid values pass through to
+ * recordCommandRun, where COMMAND_SCHEMAS[command].parse(attrs) validates the full
+ * attr object in a try/catch — silently dropping the metric if any field is invalid.
+ * This ensures telemetry never crashes the CLI while keeping the happy-path type-safe.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function standardize<T extends z.ZodEnum<any>>(schema: T, value: string | undefined): z.infer<T> {
+  const lower = (value ?? '').toLowerCase();
+  const result = schema.safeParse(lower);
+  // If the value doesn't match the enum, return the lowercased value anyway —
+  // recordCommandRun's try/catch will silently drop the invalid metric.
+  return (result.success ? result.data : lower) as z.infer<T>;
+}
+
 // Primitive types
 export const Count = z.number().int().nonnegative();
 
@@ -59,7 +75,17 @@ export const GatewayTargetType = z.enum([
   'open-api-schema',
   'smithy-model',
   'lambda-function-arn',
+  'unknown',
 ]);
+
+/** Map camelCase CLI target type to kebab-case telemetry enum value. */
+export const GATEWAY_TARGET_TYPE_MAP: Record<string, z.infer<typeof GatewayTargetType>> = {
+  apiGateway: 'api-gateway',
+  openApiSchema: 'open-api-schema',
+  smithyModel: 'smithy-model',
+  lambdaFunctionArn: 'lambda-function-arn',
+  mcpServer: 'mcp-server',
+};
 export const Language = z.enum(['python', 'typescript', 'other']);
 export const Level = z.enum(['session', 'trace', 'tool_call']);
 export const Memory = z.enum(['none', 'shortterm', 'longandshortterm']);
