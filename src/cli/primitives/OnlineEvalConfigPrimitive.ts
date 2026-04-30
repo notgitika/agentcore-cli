@@ -15,6 +15,7 @@ export interface AddOnlineEvalConfigOptions {
   evaluators: string[];
   samplingRate: number;
   enableOnCreate?: boolean;
+  endpoint?: string;
 }
 
 export type RemovableOnlineEvalConfig = RemovableResource;
@@ -110,6 +111,7 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
       .option('-e, --evaluator <evaluators...>', 'Evaluator name(s), Builtin.* IDs, or ARNs [non-interactive]')
       .option('--evaluator-arn <arns...>', 'Evaluator ARN(s) [non-interactive]')
       .option('--sampling-rate <rate>', 'Sampling percentage (0.01-100) [non-interactive]')
+      .option('--endpoint <name>', 'Runtime endpoint name to scope monitoring [non-interactive]')
       .option('--enable-on-create', 'Enable evaluation immediately after deploy [non-interactive]')
       .option('--json', 'Output as JSON [non-interactive]')
       .action(
@@ -119,6 +121,7 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
           evaluator?: string[];
           evaluatorArn?: string[];
           samplingRate?: string;
+          endpoint?: string;
           enableOnCreate?: boolean;
           json?: boolean;
         }) => {
@@ -152,6 +155,7 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
                 evaluators: allEvaluators,
                 samplingRate,
                 enableOnCreate: cliOptions.enableOnCreate,
+                endpoint: cliOptions.endpoint,
               });
 
               if (!result.success) {
@@ -209,12 +213,28 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
 
     this.checkDuplicate(project.onlineEvalConfigs, options.name, 'Online eval config');
 
+    // Validate that the endpoint exists on the specified runtime if provided
+    if (options.endpoint) {
+      const runtime = project.runtimes.find(r => r.name === options.agent);
+      if (!runtime) {
+        throw new Error(`Runtime "${options.agent}" not found in project.`);
+      }
+      if (!runtime.endpoints?.[options.endpoint]) {
+        throw new Error(
+          `Endpoint "${options.endpoint}" not found on runtime "${options.agent}". Available endpoints: ${
+            runtime.endpoints ? Object.keys(runtime.endpoints).join(', ') : '(none)'
+          }`
+        );
+      }
+    }
+
     const config: OnlineEvalConfig = {
       name: options.name,
       agent: options.agent,
       evaluators: options.evaluators,
       samplingRate: options.samplingRate,
       ...(options.enableOnCreate !== undefined && { enableOnCreate: options.enableOnCreate }),
+      ...(options.endpoint && { endpoint: options.endpoint }),
     };
 
     project.onlineEvalConfigs.push(config);

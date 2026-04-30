@@ -12,7 +12,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import REGION, RESOURCE_SUFFIX, RESOURCES_FILE, get_control_client, get_account_id
+from common import REGION, RESOURCES_FILE, get_control_client, get_account_id
 
 import boto3
 
@@ -22,12 +22,8 @@ def cleanup_s3_code_objects():
     account_id = get_account_id()
     bucket_name = f"bugbash-agentcore-code-{account_id}-{REGION}"
     s3 = boto3.client("s3", region_name=REGION)
-    prefix = f"bugbash-{RESOURCE_SUFFIX}/" if RESOURCE_SUFFIX else ""
     try:
-        list_args = {"Bucket": bucket_name}
-        if prefix:
-            list_args["Prefix"] = prefix
-        resp = s3.list_objects_v2(**list_args)
+        resp = s3.list_objects_v2(Bucket=bucket_name)
         objects = resp.get("Contents", [])
         if not objects:
             return
@@ -35,7 +31,7 @@ def cleanup_s3_code_objects():
             Bucket=bucket_name,
             Delete={"Objects": [{"Key": o["Key"]} for o in objects]},
         )
-        print(f"Deleted {len(objects)} object(s) from s3://{bucket_name}/{prefix}")
+        print(f"Deleted {len(objects)} object(s) from s3://{bucket_name}")
     except Exception as e:
         print(f"Could not clean up S3 objects: {e}")
 
@@ -55,10 +51,6 @@ def main():
         rid = val.get("id")
         if not rid:
             continue
-        # Gateway targets are deleted automatically when the parent gateway is deleted
-        if "gateway" in key and "target" in key:
-            print(f"Skipping {key} (deleted with parent gateway)")
-            continue
         try:
             if "runtime" in key:
                 client.delete_agent_runtime(agentRuntimeId=rid)
@@ -66,8 +58,6 @@ def main():
                 client.delete_memory(memoryId=rid)
             elif "evaluator" in key:
                 client.delete_evaluator(evaluatorId=rid)
-            elif "gateway" in key:
-                client.delete_gateway(gatewayIdentifier=rid)
             print(f"Deleted {key}: {rid}")
         except Exception as e:
             print(f"Could not delete {key} ({rid}): {e}")

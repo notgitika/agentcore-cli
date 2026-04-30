@@ -3,6 +3,7 @@ import type { AwsDeploymentTarget } from '../../../schema';
 import { withTargetRegion } from '../../aws';
 import { CdkToolkitWrapper, silentIoHost } from '../../cdk/toolkit-lib';
 import { type DiscoveredStack, findStack } from '../../cloudformation/stack-discovery';
+import { deleteHttpGatewayWithTargets } from './post-deploy-http-gateways';
 import { StackSelectionStrategy } from '@aws-cdk/toolkit-lib';
 import { existsSync } from 'fs';
 import { join } from 'path';
@@ -111,6 +112,59 @@ export async function performStackTeardown(targetName: string): Promise<StackTea
 
   const discovered = await discoverDeployedTargets();
   const deployedTarget = discovered.deployedTargets.find(dt => dt.target.name === targetName);
+
+  // Clean up imperatively-created HTTP gateways before stack destruction
+  try {
+    const deployedState = await configIO.readDeployedState();
+    const httpGateways = deployedState.targets?.[targetName]?.resources?.httpGateways;
+    if (httpGateways) {
+      let region = deployedTarget?.target.region;
+      if (!region) {
+        try {
+          const targets = await configIO.resolveAWSDeploymentTargets();
+          const matchingTarget = targets.find(t => t.name === targetName);
+          region = matchingTarget?.region;
+        } catch {
+          // Can't resolve region
+        }
+      }
+      if (!region) {
+        console.warn(
+          'Warning: Could not determine region for HTTP gateway cleanup — gateways may need manual deletion'
+        );
+      }
+      if (region) {
+        for (const [gwName, gwState] of Object.entries(httpGateways)) {
+          try {
+            const result = await deleteHttpGatewayWithTargets({
+              region,
+              gatewayId: gwState.gatewayId,
+              gatewayName: gwName,
+              knownTargetId: gwState.targetId,
+              roleArn: gwState.roleArn,
+              roleCreatedByCli: gwState.roleCreatedByCli,
+            });
+            if (result.success) {
+              console.log(`Deleted HTTP gateway "${gwName}"`);
+            } else {
+              console.warn(`Warning: Failed to delete HTTP gateway "${gwName}": ${result.error}`);
+            }
+          } catch (err) {
+            console.warn(
+              `Warning: Error during HTTP gateway "${gwName}" cleanup: ${err instanceof Error ? err.message : String(err)}`
+            );
+          }
+        }
+      }
+    }
+  } catch (err) {
+    // Only suppress "file not found" — other errors (corrupt state, permissions) should warn
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes('ENOENT') && !msg.includes('not found') && !msg.includes('does not exist')) {
+      console.warn(`Warning: Could not read deployed state for HTTP gateway cleanup: ${msg}`);
+    }
+  }
+
   if (deployedTarget) {
     await destroyTarget({ target: deployedTarget, cdkProjectDir });
   }

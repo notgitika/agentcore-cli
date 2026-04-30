@@ -1,5 +1,7 @@
 import { getOrCreateInstallationId } from '../lib/schemas/io/global-config';
+import { registerABTestCommand } from './commands/abtest';
 import { registerAdd } from './commands/add';
+import { registerConfigBundle } from './commands/config-bundle';
 import { registerCreate } from './commands/create';
 import { registerDeploy } from './commands/deploy';
 import { registerDev } from './commands/dev';
@@ -10,11 +12,13 @@ import { registerImport } from './commands/import';
 import { registerInvoke } from './commands/invoke';
 import { registerLogs } from './commands/logs';
 import { registerPackage } from './commands/package';
-import { registerPause } from './commands/pause';
+import { registerPause, registerPromote } from './commands/pause';
+import { registerRecommendations } from './commands/recommendations';
 import { registerRemove } from './commands/remove';
 import { registerResume } from './commands/resume';
 import { registerRun } from './commands/run';
 import { registerStatus } from './commands/status';
+import { registerStop } from './commands/stop';
 import { registerTelemetry } from './commands/telemetry';
 import { registerTraces } from './commands/traces';
 import { registerUpdate } from './commands/update';
@@ -182,19 +186,26 @@ export function registerCommands(program: Command) {
   registerLogs(program);
   registerPackage(program);
   registerPause(program);
+  registerRecommendations(program);
   const removeCmd = registerRemove(program);
   registerResume(program);
   registerRun(program);
   registerStatus(program);
+  registerStop(program);
+  registerPromote(program);
   registerTelemetry(program);
   registerTraces(program);
   registerUpdate(program);
   registerValidate(program);
+  registerConfigBundle(program);
 
   // Register primitive subcommands (add agent, remove agent, add memory, etc.)
   for (const primitive of ALL_PRIMITIVES) {
     primitive.registerCommands(addCmd, removeCmd);
   }
+
+  // Register AB test detail command
+  registerABTestCommand(program);
 }
 
 export const main = async (argv: string[]) => {
@@ -208,7 +219,7 @@ export const main = async (argv: string[]) => {
 
   const args = argv.slice(2);
 
-  // Fire off non-blocking update check (skip for `update` command)
+  // Fire off non-blocking update check (skip for `update` command itself)
   const isUpdateCommand = args[0] === 'update';
   const updateCheck = isUpdateCommand ? Promise.resolve(null) : checkForUpdate();
 

@@ -5,8 +5,10 @@ import { useCallback, useEffect, useState } from 'react';
 interface CreateOnlineEvalConfig {
   name: string;
   agent: string;
+  endpoint?: string;
   evaluators: string[];
   samplingRate: number;
+  sessionTimeoutMinutes?: number;
   enableOnCreate: boolean;
 }
 
@@ -28,8 +30,10 @@ export function useCreateOnlineEval() {
           onlineEvalConfigPrimitive.add({
             name: config.name,
             agent: config.agent,
+            ...(config.endpoint ? { endpoint: config.endpoint } : {}),
             evaluators: config.evaluators,
             samplingRate: config.samplingRate,
+            ...(config.sessionTimeoutMinutes !== undefined && { sessionTimeoutMinutes: config.sessionTimeoutMinutes }),
             enableOnCreate: config.enableOnCreate,
           })
       );

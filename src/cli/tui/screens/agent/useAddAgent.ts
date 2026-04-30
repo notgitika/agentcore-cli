@@ -1,6 +1,7 @@
 import { APP_DIR, ConfigIO, NoProjectError, findConfigRoot, setEnvVar } from '../../../../lib';
 import type { AgentEnvSpec, DirectoryPath, FilePath } from '../../../../schema';
 import { type PythonSetupResult, setupPythonProject } from '../../../operations';
+import { createConfigBundleForAgent } from '../../../operations/agent/config-bundle-defaults';
 import {
   mapGenerateConfigToRenderConfig,
   mapModelProviderToCredentials,
@@ -130,6 +131,7 @@ function mapAddAgentConfigToGenerateConfig(config: AddAgentConfig): GenerateConf
     idleRuntimeSessionTimeout: config.idleRuntimeSessionTimeout,
     maxLifetime: config.maxLifetime,
     sessionStorageMountPath: config.sessionStorageMountPath,
+    withConfigBundle: config.withConfigBundle,
   };
 }
 
@@ -297,6 +299,11 @@ async function handleCreatePath(
   let pythonSetupResult: PythonSetupResult | undefined;
   if (config.language === 'Python') {
     pythonSetupResult = await setupPythonProject({ projectDir: agentPath });
+  }
+
+  // Auto-create config bundle when opted in
+  if (config.withConfigBundle) {
+    await createConfigBundleForAgent(config.name, configBaseDir);
   }
 
   return {

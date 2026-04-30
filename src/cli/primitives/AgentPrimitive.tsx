@@ -25,6 +25,7 @@ import { parseAndNormalizeHeaders } from '../commands/shared/header-utils';
 import type { VpcOptions } from '../commands/shared/vpc-utils';
 import { VPC_ENDPOINT_WARNING, parseCommaSeparatedList } from '../commands/shared/vpc-utils';
 import { getErrorMessage } from '../errors';
+import { createConfigBundleForAgent } from '../operations/agent/config-bundle-defaults';
 import {
   mapGenerateConfigToRenderConfig,
   mapModelProviderToCredentials,
@@ -89,6 +90,7 @@ export interface AddAgentOptions extends VpcOptions {
   idleTimeout?: number;
   maxLifetime?: number;
   sessionStorageMountPath?: string;
+  withConfigBundle?: boolean;
 }
 
 /**
@@ -266,6 +268,10 @@ export class AgentPrimitive extends BasePrimitive<AddAgentOptions, RemovableReso
         '--session-storage-mount-path <path>',
         'Absolute mount path for session filesystem storage (e.g. /mnt/session-storage) [non-interactive]'
       )
+      .option(
+        '--with-config-bundle',
+        'Create a config bundle wired into the agent template [preview] [non-interactive]'
+      )
       .option('--json', 'Output as JSON [non-interactive]')
       .action(async options => {
         if (!findConfigRoot()) {
@@ -323,6 +329,7 @@ export class AgentPrimitive extends BasePrimitive<AddAgentOptions, RemovableReso
               idleTimeout: cliOptions.idleTimeout ? Number(cliOptions.idleTimeout) : undefined,
               maxLifetime: cliOptions.maxLifetime ? Number(cliOptions.maxLifetime) : undefined,
               sessionStorageMountPath: cliOptions.sessionStorageMountPath,
+              withConfigBundle: cliOptions.withConfigBundle,
             });
 
             if (!result.success) {
@@ -439,6 +446,7 @@ export class AgentPrimitive extends BasePrimitive<AddAgentOptions, RemovableReso
       idleRuntimeSessionTimeout: options.idleTimeout,
       maxLifetime: options.maxLifetime,
       sessionStorageMountPath: options.sessionStorageMountPath,
+      withConfigBundle: options.withConfigBundle,
     };
 
     const agentPath = join(projectRoot, APP_DIR, options.name);
@@ -487,6 +495,10 @@ export class AgentPrimitive extends BasePrimitive<AddAgentOptions, RemovableReso
 
     if (options.language === 'Python') {
       await setupPythonProject({ projectDir: agentPath });
+    }
+
+    if (options.withConfigBundle) {
+      await createConfigBundleForAgent(options.name, configBaseDir);
     }
 
     return { success: true, agentName: options.name, agentPath };
