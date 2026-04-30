@@ -8,9 +8,11 @@ import tempfile
 import boto3
 
 REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1"
+RESOURCE_SUFFIX = os.environ.get("RESOURCE_SUFFIX", "")
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 APP_DIR = os.path.join(SCRIPT_DIR, "app")
-RESOURCES_FILE = os.path.join(SCRIPT_DIR, "bugbash-resources.json")
+_resources_name = f"bugbash-resources-{RESOURCE_SUFFIX}.json" if RESOURCE_SUFFIX else "bugbash-resources.json"
+RESOURCES_FILE = os.path.join(SCRIPT_DIR, _resources_name)
 INLINE_POLICY_NAME = "bugbash-agentcore-permissions"
 
 
@@ -35,6 +37,8 @@ def upload_code(prefix="bugbash"):
     """Zip APP_DIR and upload to S3. Returns (bucket, s3_key)."""
     bucket_name = get_code_bucket()
     s3 = boto3.client("s3", region_name=REGION)
+    if RESOURCE_SUFFIX:
+        prefix = f"{prefix}-{RESOURCE_SUFFIX}"
 
     # Create zip of app directory
     with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:

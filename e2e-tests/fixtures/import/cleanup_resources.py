@@ -12,7 +12,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import REGION, RESOURCES_FILE, get_control_client, get_account_id
+from common import REGION, RESOURCE_SUFFIX, RESOURCES_FILE, get_control_client, get_account_id
 
 import boto3
 
@@ -22,8 +22,12 @@ def cleanup_s3_code_objects():
     account_id = get_account_id()
     bucket_name = f"bugbash-agentcore-code-{account_id}-{REGION}"
     s3 = boto3.client("s3", region_name=REGION)
+    prefix = f"bugbash-{RESOURCE_SUFFIX}/" if RESOURCE_SUFFIX else ""
     try:
-        resp = s3.list_objects_v2(Bucket=bucket_name)
+        list_args = {"Bucket": bucket_name}
+        if prefix:
+            list_args["Prefix"] = prefix
+        resp = s3.list_objects_v2(**list_args)
         objects = resp.get("Contents", [])
         if not objects:
             return
@@ -31,7 +35,7 @@ def cleanup_s3_code_objects():
             Bucket=bucket_name,
             Delete={"Objects": [{"Key": o["Key"]} for o in objects]},
         )
-        print(f"Deleted {len(objects)} object(s) from s3://{bucket_name}")
+        print(f"Deleted {len(objects)} object(s) from s3://{bucket_name}/{prefix}")
     except Exception as e:
         print(f"Could not clean up S3 objects: {e}")
 
