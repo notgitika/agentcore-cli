@@ -206,7 +206,7 @@ describe.sequential('e2e: config bundles, batch evaluation, and recommendations'
       };
       expect(json.success).toBe(true);
 
-      const bundle = json.resources.find(r => r.resourceType === 'configBundle' && r.name === bundleName);
+      const bundle = json.resources.find(r => r.resourceType === 'config-bundle' && r.name === bundleName);
       expect(bundle, `Config bundle "${bundleName}" should appear in status`).toBeDefined();
 
       const evaluator = json.resources.find(r => r.resourceType === 'evaluator' && r.name === evalName);
