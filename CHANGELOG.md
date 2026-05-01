@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.0-preview.6] - 2026-05-01
+
+### Added
+- feat: replace credentialProviderName with outboundAuth for harness gateway tools (#1083) (f818286)
+
+### Fixed
+- fix: restore preview-specific package.json, lock, and changelog (#1084) (b873a49)
+
+### Other Changes
+- chore: sync main into preview — evo features (#1077) (aeb796a)
+
 ## [1.0.0-preview.5] - 2026-04-30
 
 ### Added
