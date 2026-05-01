@@ -444,7 +444,6 @@ actions used today.
 | `bedrock-agentcore:CreateOnlineEvaluationConfig`, `UpdateOnlineEvaluationConfig`, `DeleteOnlineEvaluationConfig`, `GetOnlineEvaluationConfig` | `AWS::BedrockAgentCore::OnlineEvaluationConfig` |
 | `bedrock-agentcore:CreatePolicyEngine`, `UpdatePolicyEngine`, `DeletePolicyEngine`, `GetPolicyEngine`                                         | `AWS::BedrockAgentCore::PolicyEngine`           |
 | `bedrock-agentcore:CreatePolicy`, `UpdatePolicy`, `DeletePolicy`, `GetPolicy`                                                                 | `AWS::BedrockAgentCore::Policy`                 |
-| `bedrock-agentcore:CreateHarness`, `UpdateHarness`, `DeleteHarness`, `GetHarness`, `ListHarnesses`                                            | Imperative harness deployment (direct API)      |
 
 ### IAM
 
