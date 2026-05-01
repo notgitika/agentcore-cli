@@ -368,7 +368,7 @@ describe.sequential('e2e: config bundles, batch evaluation, and recommendations'
           );
           const json = parseJsonOutput(result.stdout) as Record<string, unknown>;
           expect(json).toHaveProperty('success', true);
-          expect(json).toHaveProperty('batchEvaluateId');
+          expect(json).toHaveProperty('batchEvaluationId');
           expect(json.status).toBeDefined();
           expect(json.status).not.toBe('FAILED');
         },
@@ -446,7 +446,7 @@ describe.sequential('e2e: config bundles, batch evaluation, and recommendations'
             agentName,
             '--evaluator',
             'Builtin.Faithfulness',
-            '--lookback',
+            '--days',
             '1',
             '--json',
           ]);
@@ -537,34 +537,32 @@ describe.sequential('e2e: config bundles, batch evaluation, and recommendations'
   );
 
   it.skipIf(!canRun)(
-    'runs tool description recommendation via CLI',
+    'runs tool description recommendation via CLI (expect validation error — agent has no tool traces)',
     async () => {
-      await retry(
-        async () => {
-          const result = await run([
-            'run',
-            'recommendation',
-            '--type',
-            'tool-description',
-            '--runtime',
-            agentName,
-            '--tools',
-            'search:Searches the web for information',
-            '--tools',
-            'calculator:Performs mathematical calculations',
-            '--lookback',
-            '1',
-            '--json',
-          ]);
+      // The test agent is a simple Strands agent invoked with "Say hello", which
+      // produces no tool calls. The API validates that requested tools appear in
+      // agent traces, so this correctly returns a ValidationException.
+      const result = await run([
+        'run',
+        'recommendation',
+        '--type',
+        'tool-description',
+        '--runtime',
+        agentName,
+        '--tools',
+        'search:Searches the web for information',
+        '--tools',
+        'calculator:Performs mathematical calculations',
+        '--lookback',
+        '1',
+        '--json',
+      ]);
 
-          expect(result.exitCode, `tool-desc recommendation failed: ${result.stdout}`).toBe(0);
-          const json = parseJsonOutput(result.stdout) as Record<string, unknown>;
-          expect(json).toHaveProperty('success', true);
-          expect(json).toHaveProperty('recommendationId');
-        },
-        6,
-        30000
-      );
+      expect(result.exitCode).toBe(1);
+      const json = parseJsonOutput(result.stdout) as Record<string, unknown>;
+      expect(json).toHaveProperty('success', false);
+      expect(json.error).toBeDefined();
+      expect(String(json.error)).toMatch(/not found in.*traces/i);
     },
     600000
   );
