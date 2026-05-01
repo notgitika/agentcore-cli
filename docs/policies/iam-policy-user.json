@@ -56,6 +56,19 @@
       "Resource": "*"
     },
     {
+      "Sid": "HarnessManagement",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock-agentcore:CreateHarness",
+        "bedrock-agentcore:GetHarness",
+        "bedrock-agentcore:UpdateHarness",
+        "bedrock-agentcore:DeleteHarness",
+        "bedrock-agentcore:ListHarnesses",
+        "bedrock-agentcore:InvokeHarness"
+      ],
+      "Resource": "*"
+    },
+    {
       "Sid": "IdentityCredentialManagement",
       "Effect": "Allow",
       "Action": [

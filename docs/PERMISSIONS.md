@@ -39,6 +39,7 @@ Attach this to every IAM user or role that will run AgentCore CLI commands. The 
 - `sts:GetCallerIdentity`, `cloudformation:DescribeStacks`, `tag:GetResources` for basic operations
 - `bedrock-agentcore:Invoke*`, `bedrock-agentcore:Get*`, `bedrock-agentcore:List*` for invoking agents and checking
   status
+- Harness CRUD and invoke actions for `deploy`, `invoke`, and `status` when the project uses harnesses
 - Credential provider and token vault actions for `deploy` when the project uses identity features
 - CloudWatch Logs, X-Ray, and Application Signals actions for `logs`, `traces`, and observability setup
 - Bedrock actions for agent import and AI-assisted code generation (optional, see
@@ -164,6 +165,7 @@ safely removed:
 
 | If your team does not use...    | Remove from user policy                                              | Remove from CFN execution policy                                                                       |
 | ------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Harnesses                       | `HarnessManagement`                                                  | _(no change)_                                                                                          |
 | Container builds (CodeZip only) | _(no change)_                                                        | `EcrContainerBuilds`, `CodeBuildContainerBuilds`                                                       |
 | MCP Lambda compute              | _(no change)_                                                        | `LambdaMcpAndCustomResources` (keep if using container builds, which need Lambda for custom resources) |
 | Agent import from Bedrock       | `BedrockAgentImport`                                                 | _(no change)_                                                                                          |
@@ -335,6 +337,20 @@ Required for all deployment operations (`deploy`, `status`, `diff`).
 | `bedrock-agentcore:Evaluate`                     | `run evals`                               | Run on-demand evaluation against agent traces |
 | `bedrock-agentcore:UpdateOnlineEvaluationConfig` | `pause online-eval`, `resume online-eval` | Pause or resume online evaluation             |
 
+### Harness management
+
+Harnesses are deployed imperatively (direct API calls, not through CloudFormation), so harness CRUD permissions must be
+on the developer's IAM principal, not just the CFN execution role.
+
+| Action                            | CLI Commands                 | Purpose                                       |
+| --------------------------------- | ---------------------------- | --------------------------------------------- |
+| `bedrock-agentcore:CreateHarness` | `deploy`                     | Create a new harness                          |
+| `bedrock-agentcore:GetHarness`    | `deploy`, `status`, `invoke` | Get harness details and deployment state      |
+| `bedrock-agentcore:UpdateHarness` | `deploy`                     | Update an existing harness configuration      |
+| `bedrock-agentcore:DeleteHarness` | `deploy`                     | Delete a harness (during removal or teardown) |
+| `bedrock-agentcore:ListHarnesses` | `status`                     | List harnesses in the account                 |
+| `bedrock-agentcore:InvokeHarness` | `invoke`                     | Invoke a deployed harness (streaming)         |
+
 ### Identity and credential management
 
 | Action                                             | CLI Commands | Purpose                                   |
@@ -428,6 +444,7 @@ actions used today.
 | `bedrock-agentcore:CreateOnlineEvaluationConfig`, `UpdateOnlineEvaluationConfig`, `DeleteOnlineEvaluationConfig`, `GetOnlineEvaluationConfig` | `AWS::BedrockAgentCore::OnlineEvaluationConfig` |
 | `bedrock-agentcore:CreatePolicyEngine`, `UpdatePolicyEngine`, `DeletePolicyEngine`, `GetPolicyEngine`                                         | `AWS::BedrockAgentCore::PolicyEngine`           |
 | `bedrock-agentcore:CreatePolicy`, `UpdatePolicy`, `DeletePolicy`, `GetPolicy`                                                                 | `AWS::BedrockAgentCore::Policy`                 |
+| `bedrock-agentcore:CreateHarness`, `UpdateHarness`, `DeleteHarness`, `GetHarness`, `ListHarnesses`                                            | Imperative harness deployment (direct API)      |
 
 ### IAM
 
