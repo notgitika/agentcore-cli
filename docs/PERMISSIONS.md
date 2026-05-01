@@ -342,14 +342,15 @@ Required for all deployment operations (`deploy`, `status`, `diff`).
 Harnesses are deployed imperatively (direct API calls, not through CloudFormation), so harness CRUD permissions must be
 on the developer's IAM principal, not just the CFN execution role.
 
-| Action                            | CLI Commands                 | Purpose                                       |
-| --------------------------------- | ---------------------------- | --------------------------------------------- |
-| `bedrock-agentcore:CreateHarness` | `deploy`                     | Create a new harness                          |
-| `bedrock-agentcore:GetHarness`    | `deploy`, `status`, `invoke` | Get harness details and deployment state      |
-| `bedrock-agentcore:UpdateHarness` | `deploy`                     | Update an existing harness configuration      |
-| `bedrock-agentcore:DeleteHarness` | `deploy`                     | Delete a harness (during removal or teardown) |
-| `bedrock-agentcore:ListHarnesses` | `status`                     | List harnesses in the account                 |
-| `bedrock-agentcore:InvokeHarness` | `invoke`                     | Invoke a deployed harness (streaming)         |
+| Action                            | CLI Commands                 | Purpose                                                                                                                                       |
+| --------------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bedrock-agentcore:CreateHarness` | `deploy`                     | Create a new harness                                                                                                                          |
+| `bedrock-agentcore:GetHarness`    | `deploy`, `status`, `invoke` | Get harness details and deployment state                                                                                                      |
+| `bedrock-agentcore:UpdateHarness` | `deploy`                     | Update an existing harness configuration                                                                                                      |
+| `bedrock-agentcore:DeleteHarness` | `deploy`                     | Delete a harness (during removal or teardown)                                                                                                 |
+| `bedrock-agentcore:ListHarnesses` | `status`                     | List harnesses in the account                                                                                                                 |
+| `bedrock-agentcore:InvokeHarness` | `invoke`                     | Invoke a deployed harness (streaming)                                                                                                         |
+| `iam:PassRole`                    | `deploy`                     | Pass the CDK-created execution role to the CreateHarness/UpdateHarness API. Scope with `iam:PassedToService: bedrock-agentcore.amazonaws.com` |
 
 ### Identity and credential management
 
