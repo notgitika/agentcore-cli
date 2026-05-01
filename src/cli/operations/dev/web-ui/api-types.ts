@@ -8,6 +8,7 @@
  * TODO: Extract these types into a shared package so both repos import
  * from a single source of truth instead of manually duplicating.
  */
+import type { HarnessModelConfiguration, HarnessTool } from '../../../aws/agentcore-harness';
 import type { CloudWatchSpanRecord, CloudWatchTraceRecord } from '../../traces/types';
 
 // ---------------------------------------------------------------------------
@@ -285,20 +286,15 @@ export interface InvocationRequest {
 
 /** Overrides sent with harness invocations */
 export interface HarnessInvocationOverrides {
-  model?: HarnessModelOverride;
+  model?: HarnessModelConfiguration;
   systemPrompt?: string;
   skills?: { path: string }[];
   actorId?: string;
   maxIterations?: number;
   maxTokens?: number;
   timeoutSeconds?: number;
-}
-
-/** Model override — exactly one provider field should be set */
-export interface HarnessModelOverride {
-  bedrockModelConfig?: { modelId: string };
-  openAiModelConfig?: { modelId: string };
-  geminiModelConfig?: { modelId: string };
+  allowedTools?: string[];
+  tools?: HarnessTool[];
 }
 
 // ---------------------------------------------------------------------------
