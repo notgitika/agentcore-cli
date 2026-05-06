@@ -1,0 +1,97 @@
+archetype: "new_resource"
+
+feature_name: "Configuration Bundles"
+feature_slug: "config-bundle"
+feature_description: |
+  Configuration bundles let developers package and version sets of configuration
+  parameters for their agents. Instead of hardcoding config values or managing
+  environment variables, developers declare named bundles in agentcore.json that
+  get deployed alongside the agent runtime. The runtime can read bundle values
+  at invocation time via the AgentCore SDK.
+service_team: "AgentCore Control Plane"
+service_team_contact: "tjariy@"
+
+target_repo: "private"
+target_cdk_repo: "public"
+sensitivity_level: "internal"
+
+allowlisted_account_id: "123456789012"
+allowlisted_regions: ["us-west-2"]
+sdk_available: true
+sdk_package_name: "@aws-sdk/client-bedrock-agentcore-control"
+
+api_source: "smithy_model"
+api_reference: "https://model.example.com/config-bundles.smithy"
+control_plane_service: "bedrock-agentcore-control"
+control_plane_operations:
+  - name: "CreateConfigBundle"
+    http_method: "POST"
+    http_path: "/configuration-bundles"
+    input_shape: "name: string, parameters: Parameter[], description?: string"
+    output_shape: "configBundleId: string, configBundleArn: string, status: string"
+    is_async: false
+    notes: "Name must be unique per account"
+  - name: "GetConfigBundle"
+    http_method: "GET"
+    http_path: "/configuration-bundles/{configBundleId}"
+    input_shape: "configBundleId: string"
+    output_shape: "name, parameters[], status, createdAt, updatedAt"
+    is_async: false
+    notes: ""
+  - name: "UpdateConfigBundle"
+    http_method: "PUT"
+    http_path: "/configuration-bundles/{configBundleId}"
+    input_shape: "configBundleId: string, parameters?: Parameter[], description?: string"
+    output_shape: "configBundleId, status"
+    is_async: false
+    notes: "Partial update supported"
+  - name: "DeleteConfigBundle"
+    http_method: "DELETE"
+    http_path: "/configuration-bundles/{configBundleId}"
+    input_shape: "configBundleId: string"
+    output_shape: "{}"
+    is_async: false
+    notes: "Fails if bundle is referenced by an active runtime"
+  - name: "ListConfigBundles"
+    http_method: "GET"
+    http_path: "/configuration-bundles"
+    input_shape: "maxResults?: number, nextToken?: string"
+    output_shape: "configBundles[], nextToken?"
+    is_async: false
+    notes: "Paginated"
+
+trust_policy:
+  Version: "2012-10-17"
+  Statement:
+    - Effect: "Allow"
+      Principal:
+        Service: "bedrock-agentcore.amazonaws.com"
+      Action: "sts:AssumeRole"
+      Condition:
+        StringEquals:
+          "aws:SourceAccount": "${AWS::AccountId}"
+
+service_principal: "bedrock-agentcore.amazonaws.com"
+required_permissions:
+  - actions: ["bedrock-agentcore:GetConfigBundle", "bedrock-agentcore:ListConfigBundles"]
+    resources: ["arn:${partition}:bedrock-agentcore:${region}:${account}:config-bundle/*"]
+    description: "Runtime reads config bundles at invocation time"
+
+cfn_support: true
+cfn_resource_type: "AWS::BedrockAgentCore::ConfigBundle"
+cfn_outputs: ["ConfigBundleId", "ConfigBundleArn"]
+
+cli_verb: "add"
+tui_flow: true
+supports_remove: true
+
+closest_primitive_analogue: "evaluator"
+analogue_rationale: |
+  Both are schema-first resources with cross-resource references (evaluator
+  references agents, config-bundle will be referenced by agents), CDK deploy
+  path, and similar CRUD lifecycle. Evaluator is the cleanest existing primitive
+  with a straightforward add/remove pattern.
+
+additional_context: |
+  Service team has confirmed CFN support will be available by the time we ship.
+  They want the CLI to validate parameter types locally before deploy.

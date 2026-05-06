@@ -1,0 +1,497 @@
+# DevEx Doc Writer — Input Schema
+# Formal YAML schema definition for validating inputs before the pipeline runs.
+# Supports both archetypes: new_resource and scope_widening.
+
+---
+# Root schema — the input YAML must match one of the archetype variants
+root:
+  type: object
+  required:
+    - archetype
+    - feature_name
+    - feature_slug
+    - feature_description
+    - service_team
+    - service_team_contact
+    - target_repo
+    - target_cdk_repo
+    - sensitivity_level
+    - allowlisted_account_id
+    - allowlisted_regions
+  properties:
+    archetype:
+      type: string
+      enum: [new_resource, scope_widening]
+      description: Feature archetype. Determines which input fields are required.
+
+    # ─── Feature Identity ───────────────────────────────────────────────
+    feature_name:
+      type: string
+      min_length: 1
+      max_length: 100
+      description: Human-readable name of the feature
+
+    feature_slug:
+      type: string
+      pattern: '^[a-z][a-z0-9-]*$'
+      min_length: 1
+      max_length: 48
+      description: Kebab-case identifier for file paths, commands, schema keys
+
+    feature_description:
+      type: string
+      min_length: 50
+      description: 1-3 paragraphs describing the feature for someone unfamiliar
+
+    service_team:
+      type: string
+      min_length: 1
+      description: Owning service team name
+
+    service_team_contact:
+      type: string
+      pattern: '^[a-z]+@?$'
+      description: Alias to tag for questions/decisions
+
+    # ─── Target Repository & Sensitivity ────────────────────────────────
+    target_repo:
+      type: string
+      enum: [public, private]
+
+    target_cdk_repo:
+      type: string
+      enum: [public, private]
+
+    sensitivity_level:
+      type: string
+      enum: [public, internal]
+
+    public_feature_name:
+      type: string
+      required_if:
+        sensitivity_level: internal
+        target_repo: public
+      description: Sanitized name safe for public commits
+
+    # ─── AWS Account & Environment ──────────────────────────────────────
+    allowlisted_account_id:
+      type: string
+      pattern: '^[0-9]{12}$'
+      description: 12-digit AWS account ID
+
+    allowlisted_regions:
+      type: array
+      items:
+        type: string
+      min_items: 1
+      description: Regions where the service is available
+
+    sdk_available:
+      type: boolean
+      description: Whether AWS SDK includes these operations
+
+    sdk_package_name:
+      type: string
+      required_if:
+        sdk_available: true
+      pattern: '^@aws-sdk/client-'
+      description: The @aws-sdk/client-* package name
+
+    service_endpoint_override:
+      type: string
+      format: uri
+      description: Custom endpoint for beta/gamma SDK (optional)
+
+    service_ga_date:
+      type: string
+      description: Expected GA date (optional, affects beta labeling)
+
+---
+# ─── New Resource Archetype ─────────────────────────────────────────────────
+new_resource:
+  extends: root
+  additional_required:
+    - api_source
+    - api_reference
+    - control_plane_service
+    - control_plane_operations
+    - trust_policy
+    - service_principal
+    - required_permissions
+    - cfn_support
+    - cli_verb
+    - tui_flow
+    - supports_remove
+    - closest_primitive_analogue
+    - analogue_rationale
+  properties:
+    # ─── API Surface ──────────────────────────────────────────────────────
+    api_source:
+      type: string
+      enum: [smithy_model, dev_guide_url, openapi_spec, inline_operations]
+
+    api_reference:
+      type: string
+      description: URL or local file path to API model
+
+    control_plane_service:
+      type: string
+      description: Service identifier for control plane
+
+    control_plane_operations:
+      type: array
+      min_items: 1
+      items:
+        type: object
+        required: [name, http_method, http_path, input_shape, output_shape, is_async]
+        properties:
+          name:
+            type: string
+          http_method:
+            type: string
+            enum: [GET, POST, PUT, DELETE, PATCH]
+          http_path:
+            type: string
+          input_shape:
+            type: string
+          output_shape:
+            type: string
+          is_async:
+            type: boolean
+          notes:
+            type: string
+
+    data_plane_service:
+      type: string
+      description: Optional data plane service identifier
+
+    data_plane_operations:
+      type: array
+      items:
+        $ref: '#/new_resource/properties/control_plane_operations/items'
+
+    status_enum:
+      type: object
+      properties:
+        states:
+          type: array
+          items: { type: string }
+        transitions:
+          type: array
+          items:
+            type: object
+            properties:
+              from: { type: string }
+              to: { type: array, items: { type: string } }
+        terminal_states:
+          type: array
+          items: { type: string }
+        poll_operation:
+          type: string
+
+    # ─── IAM & Trust Policy ───────────────────────────────────────────────
+    trust_policy:
+      type: object
+      description: AssumeRolePolicyDocument JSON
+      required: [Version, Statement]
+      properties:
+        Version: { type: string }
+        Statement:
+          type: array
+          min_items: 1
+
+    service_principal:
+      type: string
+      description: Service principal for the execution role
+
+    required_permissions:
+      type: array
+      min_items: 1
+      items:
+        type: object
+        required: [actions, resources, description]
+        properties:
+          actions:
+            type: array
+            items: { type: string }
+          resources:
+            type: array
+            items: { type: string }
+          conditions:
+            type: object
+          description:
+            type: string
+
+    resource_policy:
+      type: object
+      description: Optional resource-based policy
+
+    cross_resource_permissions:
+      type: array
+      items:
+        type: object
+        required: [source_resource, target_resource, direction, actions, description]
+        properties:
+          source_resource: { type: string }
+          target_resource: { type: string }
+          direction: { type: string, enum: [grants_to, receives_from] }
+          actions: { type: array, items: { type: string } }
+          description: { type: string }
+
+    # ─── CloudFormation ───────────────────────────────────────────────────
+    cfn_support:
+      type: boolean
+
+    cfn_resource_type:
+      type: string
+      required_if:
+        cfn_support: true
+      pattern: '^AWS::'
+
+    cfn_outputs:
+      type: array
+      required_if:
+        cfn_support: true
+      items: { type: string }
+
+    # ─── Developer Experience ─────────────────────────────────────────────
+    cli_verb:
+      type: string
+      description: Primary verb (usually "add")
+
+    additional_verbs:
+      type: array
+      items: { type: string }
+
+    tui_flow:
+      type: boolean
+
+    supports_remove:
+      type: boolean
+
+    scope_constraints:
+      type: array
+      items: { type: string }
+
+    # ─── Closest Analogue ─────────────────────────────────────────────────
+    closest_primitive_analogue:
+      type: string
+      validate_against: snapshot.primitives[].kind
+      description: Must exist in the current primitives registry
+
+    analogue_rationale:
+      type: string
+      min_length: 10
+
+    differs_from_analogue:
+      type: array
+      items: { type: string }
+
+    anti_patterns:
+      type: array
+      items: { type: string }
+
+    # ─── Context ──────────────────────────────────────────────────────────
+    api_docs_url:
+      type: string
+      format: uri
+
+    design_doc_url:
+      type: string
+
+    related_devex_docs:
+      type: array
+      items: { type: string }
+
+    additional_context:
+      type: string
+
+---
+# ─── Scope Widening Archetype ───────────────────────────────────────────────
+scope_widening:
+  extends: root
+  additional_required:
+    - current_description
+    - current_key_files
+    - current_user_experience
+    - target_description
+    - coexistence_model
+    - backwards_compatible
+    - affected_commands
+    - closest_scope_widening_analogue
+    - analogue_rationale
+  properties:
+    # ─── Current Architecture ─────────────────────────────────────────────
+    current_description:
+      type: string
+      min_length: 50
+      description: How it works today (1-2 paragraphs)
+
+    current_key_files:
+      type: array
+      min_items: 1
+      items: { type: string }
+      validate_against: snapshot (files/dirs must exist)
+
+    current_user_experience:
+      type: string
+      description: Current CLI commands/workflow
+
+    # ─── Target Architecture ──────────────────────────────────────────────
+    target_description:
+      type: string
+      min_length: 50
+
+    coexistence_model:
+      type: string
+      enum: [user_chooses_one, stacked, migration]
+
+    backwards_compatible:
+      type: boolean
+
+    migration_plan:
+      type: string
+      required_if:
+        backwards_compatible: false
+
+    # ─── Affected Surfaces ────────────────────────────────────────────────
+    affected_commands:
+      type: array
+      min_items: 1
+      items:
+        type: object
+        required: [command, change_type, description, backwards_compatible]
+        properties:
+          command:
+            type: string
+            validate_against: snapshot.commands
+          change_type:
+            type: string
+            enum: [new_flag, new_behavior, branching_logic, new_subcommand]
+          description:
+            type: string
+          backwards_compatible:
+            type: boolean
+
+    affected_schema:
+      type: array
+      items:
+        type: object
+        required: [file, change_type, description]
+        properties:
+          file:
+            type: string
+            enum: [agentcore.json, deployed-state.json, aws-targets.json]
+          change_type:
+            type: string
+            enum: [new_field, new_enum_value, new_section, type_widening]
+          description:
+            type: string
+
+    affected_deploy_flow:
+      type: string
+
+    affected_build_system:
+      type: string
+
+    # ─── External Tool ────────────────────────────────────────────────────
+    external_tool:
+      type: string
+
+    external_tool_version:
+      type: string
+
+    external_docs_url:
+      type: string
+      format: uri
+
+    user_prerequisites:
+      type: array
+      items: { type: string }
+
+    external_dependencies:
+      type: array
+      items:
+        type: object
+        required: [name, type, version_constraint, optional, detection]
+        properties:
+          name: { type: string }
+          type: { type: string, enum: [cli_tool, npm_package, aws_service, runtime] }
+          version_constraint: { type: string }
+          optional: { type: boolean }
+          detection: { type: string }
+
+    # ─── Closest Analogue ─────────────────────────────────────────────────
+    closest_scope_widening_analogue:
+      type: string
+      description: Previous scope widening that's most similar
+
+    analogue_rationale:
+      type: string
+      min_length: 10
+
+    # ─── Context ──────────────────────────────────────────────────────────
+    design_doc_url:
+      type: string
+
+    related_devex_docs:
+      type: array
+      items: { type: string }
+
+    additional_context:
+      type: string
+
+---
+# ─── Validation Rules (cross-field) ────────────────────────────────────────
+validation_rules:
+  - id: slug_no_collision
+    description: feature_slug must not collide with existing schema keys or command nouns
+    check:
+      feature_slug NOT IN snapshot.schema_shape.agentcore_json.top_level_arrays[].key AND feature_slug NOT IN
+      snapshot.commands.verbs[].nouns[]
+
+  - id: trust_policy_valid
+    description: trust_policy must have at least one Statement with a Principal
+    check: trust_policy.Statement.length >= 1 AND each Statement has Principal
+    applies_to: new_resource
+
+  - id: control_plane_has_mutating_op
+    description: control_plane_operations must include at least one mutating operation
+    check: control_plane_operations has at least one where http_method IN [POST, PUT, DELETE, PATCH]
+    applies_to: new_resource
+
+  - id: analogue_exists
+    description: closest_primitive_analogue must exist in snapshot
+    check: closest_primitive_analogue IN snapshot.primitives[].kind
+    applies_to: new_resource
+
+  - id: account_id_format
+    description: allowlisted_account_id must be 12 digits
+    check: allowlisted_account_id matches /^[0-9]{12}$/
+
+  - id: regions_valid
+    description: allowlisted_regions must be valid AgentCore regions
+    check: all items match known region patterns
+
+  - id: cfn_fields_required
+    description: If cfn_support=true, cfn_resource_type and cfn_outputs are required
+    check: cfn_support=true → cfn_resource_type is set AND cfn_outputs is set
+    applies_to: new_resource
+
+  - id: sensitivity_public_name
+    description: If internal + public repo, public_feature_name is required
+    check: sensitivity_level=internal AND target_repo=public → public_feature_name is set
+
+  - id: sdk_package_required
+    description: If sdk_available=true, sdk_package_name is required
+    check: sdk_available=true → sdk_package_name is set
+
+  - id: backwards_compat_migration
+    description: If backwards_compatible=false, migration_plan is required
+    check: backwards_compatible=false → migration_plan is set
+    applies_to: scope_widening
+
+  - id: affected_commands_exist
+    description: affected_commands must reference real commands
+    check: all affected_commands[].command match snapshot.commands.verbs[].name
+    applies_to: scope_widening

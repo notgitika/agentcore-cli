@@ -1,0 +1,279 @@
+schema_version: 1
+generated_at: 2026-05-06T04:47:21.494Z
+commit: c9852f47
+repo: aws/agentcore-cli
+primitives:
+  - name: AgentPrimitive
+    file: src/cli/primitives/AgentPrimitive.tsx
+    kind: agent
+    label: Agent
+    resources_managed:
+      - agents
+    schema_key: agents
+    supports_tui: true
+    supports_remove: true
+    has_cross_references: false
+  - name: CredentialPrimitive
+    file: src/cli/primitives/CredentialPrimitive.tsx
+    kind: credential
+    label: Credential
+    resources_managed:
+      - credentials
+    schema_key: credentials
+    supports_tui: true
+    supports_remove: true
+    has_cross_references: false
+  - name: EvaluatorPrimitive
+    file: src/cli/primitives/EvaluatorPrimitive.ts
+    kind: evaluator
+    label: Evaluator
+    resources_managed:
+      - evaluators
+    schema_key: evaluators
+    supports_tui: true
+    supports_remove: true
+    has_cross_references: false
+  - name: GatewayPrimitive
+    file: src/cli/primitives/GatewayPrimitive.ts
+    kind: gateway
+    label: Gateway
+    resources_managed:
+      - gateways
+    schema_key: gateways
+    supports_tui: true
+    supports_remove: true
+    has_cross_references: false
+  - name: GatewayTargetPrimitive
+    file: src/cli/primitives/GatewayTargetPrimitive.ts
+    kind: gateway-target
+    label: Gateway Target
+    resources_managed:
+      - gatewayTargets
+    schema_key: gatewayTargets
+    supports_tui: true
+    supports_remove: true
+    has_cross_references: false
+  - name: MemoryPrimitive
+    file: src/cli/primitives/MemoryPrimitive.tsx
+    kind: memory
+    label: Memory
+    resources_managed:
+      - memories
+    schema_key: memories
+    supports_tui: true
+    supports_remove: true
+    has_cross_references: false
+  - name: OnlineEvalConfigPrimitive
+    file: src/cli/primitives/OnlineEvalConfigPrimitive.ts
+    kind: online-eval
+    label: Online Eval Config
+    resources_managed:
+      - onlineEvalConfigs
+    schema_key: onlineEvalConfigs
+    supports_tui: true
+    supports_remove: true
+    has_cross_references: false
+  - name: PolicyEnginePrimitive
+    file: src/cli/primitives/PolicyEnginePrimitive.ts
+    kind: policy-engine
+    label: Policy Engine
+    resources_managed:
+      - policyEngines
+    schema_key: policyEngines
+    supports_tui: true
+    supports_remove: true
+    has_cross_references: false
+  - name: PolicyPrimitive
+    file: src/cli/primitives/PolicyPrimitive.ts
+    kind: policy
+    label: Policy
+    resources_managed:
+      - policies
+    schema_key: policies
+    supports_tui: true
+    supports_remove: true
+    has_cross_references: false
+  - name: RuntimeEndpointPrimitive
+    file: src/cli/primitives/RuntimeEndpointPrimitive.ts
+    kind: runtime-endpoint
+    label: Runtime Endpoint
+    resources_managed:
+      - runtimeEndpoints
+    schema_key: runtimeEndpoints
+    supports_tui: true
+    supports_remove: true
+    has_cross_references: false
+schema_shape:
+  agentcore_json:
+    top_level_arrays:
+      - key: runtimes
+        schema_file: src/schema/schemas/agent-env.ts
+      - key: memories
+        schema_file: src/schema/schemas/agentcore-project.ts
+      - key: credentials
+        schema_file: src/schema/schemas/agentcore-project.ts
+      - key: evaluators
+        schema_file: src/schema/schemas/primitives/evaluator.ts
+      - key: onlineEvalConfigs
+        schema_file: src/schema/schemas/primitives/online-eval-config.ts
+      - key: agentCoreGateways
+        schema_file: src/schema/schemas/mcp.ts
+      - key: mcpRuntimeTools
+        schema_file: src/schema/schemas/mcp.ts
+      - key: unassignedTargets
+        schema_file: src/schema/schemas/mcp.ts
+      - key: policyEngines
+        schema_file: src/schema/schemas/primitives/policy.ts
+    cross_field_validations:
+      - source: onlineEvalConfigs[].agent
+        target: runtimes[].name
+        rule: must_exist
+      - source: onlineEvalConfigs[].evaluators[]
+        target: evaluators[].name
+        rule: must_exist
+  deployed_state:
+    file: src/schema/schemas/deployed-state.ts
+    resource_types:
+      - key: runtimes
+        fields:
+          - runtimeId
+          - runtimeArn
+          - roleArn
+          - sessionId
+          - memoryIds
+          - browserId
+          - codeInterpreterId
+          - runtimeVersion
+      - key: memories
+        fields:
+          - memoryId
+          - memoryArn
+      - key: gateways
+        fields:
+          - gatewayId
+          - gatewayArn
+          - gatewayUrl
+      - key: mcpRuntimes
+        fields:
+          - runtimeId
+          - runtimeArn
+          - runtimeEndpoint
+      - key: mcpLambdas
+        fields:
+          - functionArn
+          - functionName
+      - key: policyEngines
+        fields:
+          - policyEngineId
+          - policyEngineArn
+      - key: policies
+        fields:
+          - policyId
+          - policyArn
+          - engineName
+      - key: credentials
+        fields:
+          - credentialProviderArn
+          - clientSecretArn
+          - callbackUrl
+      - key: evaluators
+        fields:
+          - evaluatorId
+          - evaluatorArn
+      - key: onlineEvalConfigs
+        fields:
+          - onlineEvaluationConfigId
+          - onlineEvaluationConfigArn
+          - executionStatus
+      - key: runtimeEndpoints
+        fields:
+          - endpointId
+          - endpointArn
+deploy_flow:
+  file: src/cli/operations/deploy/
+  steps:
+    '1': Preflight validation (schema parse, credentials check, target resolution)
+    '2': 'IMPERATIVE: Create/update API key providers'
+    '3': 'IMPERATIVE: Create/update OAuth2 providers'
+    '4': CDK synth + deploy (CloudFormation via CDK toolkit)
+    '5': Parse CFN outputs → build deployed-state.json
+    '6': 'Post-deploy: setup transaction search'
+commands:
+  verbs:
+    - name: add
+      nouns:
+        - agent
+        - credential
+        - evaluator
+        - gateway
+        - gateway-target
+        - memory
+        - online-eval
+        - policy
+        - policy-engine
+        - runtime-endpoint
+      has_tui: true
+    - name: create
+      has_tui: true
+    - name: deploy
+    - name: dev
+    - name: eval
+      nouns:
+        - history
+    - name: fetch
+      nouns:
+        - access
+    - name: help
+    - name: import
+    - name: invoke
+    - name: logs
+    - name: package
+    - name: pause
+      nouns:
+        - online-eval
+    - name: remove
+      nouns:
+        - agent
+        - credential
+        - evaluator
+        - gateway
+        - gateway-target
+        - memory
+        - online-eval
+        - policy
+        - policy-engine
+        - runtime-endpoint
+      has_tui: false
+    - name: resume
+      nouns:
+        - online-eval
+    - name: run
+      nouns:
+        - eval
+    - name: status
+    - name: tag
+    - name: telemetry
+    - name: traces
+      nouns:
+        - list
+        - get
+    - name: update
+    - name: validate
+iam_patterns:
+  service_principal: bedrock-agentcore.amazonaws.com
+  lambda_principal: lambda.amazonaws.com
+  role_creation: 'CDK: new iam.Role({ assumedBy: new iam.ServicePrincipal(AGENTCORE_SERVICE_PRINCIPAL) })'
+  existing_role_support: executionRoleArn on agent schema allows BYO role
+  partition_utility: src/cli/aws/partition.ts — arnPrefix(), serviceEndpoint(), dnsSuffix()
+code_style:
+  rules:
+    - No inline imports
+    - '{ success: boolean, error?: string } for results'
+    - Existing types before inline
+    - Constants in closest subdirectory
+    - 'Never hardcode arn:aws:'
+    - Tags via TagsSchema on all resources
+  tui_patterns:
+    - Screen → Flow → Wizard hook → Operation hook → Primitive
+    - MAX_CONTENT_WIDTH = 60
+    - SelectList uses wrap='wrap'

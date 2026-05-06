@@ -1,0 +1,51 @@
+schema_version: 1
+generated_at: 2026-05-06T04:47:21.509Z
+commit: 06e11dea
+repo: aws/agentcore-l3-cdk-constructs
+service_principal: bedrock-agentcore.amazonaws.com
+constructs:
+  - name: AgentCoreApplication
+    file: src/cdk/constructs/l3/AgentCoreApplication.ts
+    type: l3
+  - name: AgentCoreHarnessEnvironment
+    file: src/cdk/constructs/l3/AgentCoreHarnessEnvironment.ts
+    type: l3
+  - name: AgentCoreMcp
+    file: src/cdk/constructs/l3/AgentCoreMcp.ts
+    type: l3
+  - name: AgentEnvironment
+    file: src/cdk/constructs/l3/AgentEnvironment.ts
+    type: l3
+  - name: BasePrimitiveConstruct
+    file: src/cdk/constructs/components/primitives/BasePrimitiveConstruct.ts
+    type: primitive
+  - name: AgentCoreEvaluator
+    file: src/cdk/constructs/components/primitives/evaluator/AgentCoreEvaluator.ts
+    type: primitive
+  - name: AgentCoreOnlineEvaluationConfig
+    file: src/cdk/constructs/components/primitives/evaluator/AgentCoreOnlineEvaluationConfig.ts
+    type: primitive
+  - name: AgentCoreHarnessRole
+    file: src/cdk/constructs/components/primitives/harness/AgentCoreHarnessRole.ts
+    type: primitive
+  - name: AgentCoreMemory
+    file: src/cdk/constructs/components/primitives/memory/AgentCoreMemory.ts
+    type: primitive
+  - name: AgentCorePolicyEngine
+    file: src/cdk/constructs/components/primitives/policy/AgentCorePolicyEngine.ts
+    type: primitive
+  - name: AgentCoreRuntime
+    file: src/cdk/constructs/components/primitives/runtime/AgentCoreRuntime.ts
+    type: primitive
+  - name: Gateway
+    file: src/cdk/constructs/components/mcp/Gateway.ts
+    type: mcp
+  - name: McpLambdaCompute
+    file: src/cdk/constructs/components/mcp/McpLambdaCompute.ts
+    type: mcp
+  - name: McpRuntimeCompute
+    file: src/cdk/constructs/components/mcp/McpRuntimeCompute.ts
+    type: mcp
+  - name: mcp-utils
+    file: src/cdk/constructs/components/mcp/mcp-utils.ts
+    type: mcp
