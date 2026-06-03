@@ -206,8 +206,8 @@ export function useAddABTestWizard() {
         controlTargetInfo: target,
         controlTargetIsNew: isNew,
         controlTarget: target.name,
-        controlEndpoint: target.qualifier,
-        runtime: target.runtimeRef,
+        controlEndpoint: target.endpoint,
+        runtime: target.runtime,
       }));
       advance('controlTarget');
     },
@@ -221,9 +221,9 @@ export function useAddABTestWizard() {
         treatmentTargetInfo: target,
         treatmentTargetIsNew: isNew,
         treatmentTarget: target.name,
-        treatmentEndpoint: target.qualifier,
+        treatmentEndpoint: target.endpoint,
         // Keep runtime from control if already set, otherwise use treatment's
-        runtime: c.runtime || target.runtimeRef,
+        runtime: c.runtime || target.runtime,
       }));
       advance('treatmentTarget');
     },

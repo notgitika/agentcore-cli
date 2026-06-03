@@ -104,7 +104,7 @@ export class ABTestPrimitive extends BasePrimitive<AddABTestOptions, RemovableAB
             const targetNames = removedTest.variants
               .map(v => v.variantConfiguration.target?.targetName)
               .filter((n): n is string => !!n);
-            const gw = (project.httpGateways ?? []).find(g => g.name === gwName);
+            const gw = (project.agentCoreGateways ?? []).find(g => g.name === gwName);
             if (gw?.targets) {
               gw.targets = gw.targets.filter(t => !targetNames.includes(t.name));
             }
@@ -116,7 +116,7 @@ export class ABTestPrimitive extends BasePrimitive<AddABTestOptions, RemovableAB
             return m?.[1] === gwName;
           });
           if (!stillReferenced) {
-            project.httpGateways = (project.httpGateways ?? []).filter(gw => gw.name !== gwName);
+            project.agentCoreGateways = (project.agentCoreGateways ?? []).filter(gw => gw.name !== gwName);
           }
         }
       }
@@ -144,7 +144,7 @@ export class ABTestPrimitive extends BasePrimitive<AddABTestOptions, RemovableAB
     const afterSpec = {
       ...project,
       abTests: (project.abTests ?? []).filter(t => t.name !== testName),
-      httpGateways: [...(project.httpGateways ?? [])],
+      agentCoreGateways: [...(project.agentCoreGateways ?? [])],
     };
 
     // Check if the gateway would be orphaned
@@ -160,7 +160,7 @@ export class ABTestPrimitive extends BasePrimitive<AddABTestOptions, RemovableAB
         });
         if (!stillReferenced) {
           summary.push(`Also removing HTTP gateway: ${gwName} (no other AB tests reference it)`);
-          afterSpec.httpGateways = (project.httpGateways ?? []).filter(gw => gw.name !== gwName);
+          afterSpec.agentCoreGateways = (project.agentCoreGateways ?? []).filter(gw => gw.name !== gwName);
         }
       }
     }
@@ -531,7 +531,7 @@ Target-Based Mode (--mode target-based)
 
     if (choice.type === 'existing-http') {
       // Reuse an existing HTTP gateway from the project spec
-      const existing = (project.httpGateways ?? []).find(gw => gw.name === choice.name);
+      const existing = (project.agentCoreGateways ?? []).find(gw => gw.name === choice.name);
       if (!existing) {
         throw new Error(`HTTP gateway "${choice.name}" not found in project.`);
       }
@@ -539,19 +539,30 @@ Target-Based Mode (--mode target-based)
     } else {
       // Create new HTTP gateway — truncate name to fit 48-char limit
       const httpGwName = `${options.name.replace(/_/g, '-').slice(0, 44)}-gw`;
-      const existingGw = (project.httpGateways ?? []).find(gw => gw.name === httpGwName);
+      const existingGw = (project.agentCoreGateways ?? []).find(gw => gw.name === httpGwName);
       if (existingGw) {
-        if (existingGw.runtimeRef !== options.agent) {
+        const existingRuntimeTarget = existingGw.targets.find(t => t.targetType === 'httpRuntime');
+        if (existingRuntimeTarget?.httpRuntime?.runtime !== options.agent) {
           throw new Error(
-            `HTTP gateway "${httpGwName}" already exists with a different runtime (${existingGw.runtimeRef}). ` +
+            `HTTP gateway "${httpGwName}" already exists with a different runtime (${existingRuntimeTarget?.httpRuntime?.runtime}). ` +
               `Choose a different AB test name to avoid a gateway name collision.`
           );
         }
       } else {
-        project.httpGateways ??= [];
-        project.httpGateways.push({
+        project.agentCoreGateways ??= [];
+        project.agentCoreGateways.push({
           name: httpGwName,
-          runtimeRef: options.agent,
+          protocolType: 'None',
+          targets: [
+            {
+              name: options.agent,
+              targetType: 'httpRuntime',
+              httpRuntime: { runtime: options.agent },
+            },
+          ],
+          authorizerType: 'NONE',
+          enableSemanticSearch: false,
+          exceptionLevel: 'NONE',
         });
       }
       gatewayRef = `{{gateway:${httpGwName}}}`;
@@ -634,39 +645,49 @@ Target-Based Mode (--mode target-based)
       );
     }
 
-    // Auto-generate target names from runtime + qualifier
+    // Auto-generate target names from runtime + endpoint
     const controlTarget = `${options.runtime}-${options.controlEndpoint}`;
     const treatmentTarget = `${options.runtime}-${options.treatmentEndpoint}`;
 
     // Auto-create HTTP gateway if it doesn't exist
-    let existing = (project.httpGateways ?? []).find(gw => gw.name === options.gateway);
-    if (!existing) {
-      existing = {
+    let existingGw = (project.agentCoreGateways ?? []).find(gw => gw.name === options.gateway);
+    if (!existingGw) {
+      existingGw = {
         name: options.gateway,
+        protocolType: 'None',
         description: `HTTP gateway for AB test ${options.name}`,
-        runtimeRef: options.runtime,
         targets: [
-          { name: controlTarget, runtimeRef: options.runtime, qualifier: options.controlEndpoint },
-          { name: treatmentTarget, runtimeRef: options.runtime, qualifier: options.treatmentEndpoint },
+          {
+            name: controlTarget,
+            targetType: 'httpRuntime',
+            httpRuntime: { runtime: options.runtime, runtimeEndpoint: options.controlEndpoint },
+          },
+          {
+            name: treatmentTarget,
+            targetType: 'httpRuntime',
+            httpRuntime: { runtime: options.runtime, runtimeEndpoint: options.treatmentEndpoint },
+          },
         ],
+        authorizerType: 'NONE',
+        enableSemanticSearch: false,
+        exceptionLevel: 'NONE',
       };
-      project.httpGateways ??= [];
-      project.httpGateways.push(existing);
+      project.agentCoreGateways ??= [];
+      project.agentCoreGateways.push(existingGw);
     } else {
       // Gateway exists — ensure targets exist
-      existing.targets ??= [];
-      if (!existing.targets.find(t => t.name === controlTarget)) {
-        existing.targets.push({
+      if (!existingGw.targets.find(t => t.name === controlTarget)) {
+        existingGw.targets.push({
           name: controlTarget,
-          runtimeRef: options.runtime,
-          qualifier: options.controlEndpoint,
+          targetType: 'httpRuntime',
+          httpRuntime: { runtime: options.runtime, runtimeEndpoint: options.controlEndpoint },
         });
       }
-      if (!existing.targets.find(t => t.name === treatmentTarget)) {
-        existing.targets.push({
+      if (!existingGw.targets.find(t => t.name === treatmentTarget)) {
+        existingGw.targets.push({
           name: treatmentTarget,
-          runtimeRef: options.runtime,
-          qualifier: options.treatmentEndpoint,
+          targetType: 'httpRuntime',
+          httpRuntime: { runtime: options.runtime, runtimeEndpoint: options.treatmentEndpoint },
         });
       }
     }

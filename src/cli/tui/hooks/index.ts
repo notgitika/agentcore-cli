@@ -6,7 +6,7 @@ export { useExitHandler } from './useExitHandler';
 export { useListNavigation } from './useListNavigation';
 export { useMultiSelectNavigation } from './useMultiSelectNavigation';
 export { useResponsive } from './useResponsive';
-export { useAvailableAgents, useCreateGateway, useExistingGateways } from './useCreateMcp';
+export { useAvailableAgents, useCreateGateway, useExistingGateways, useMcpGatewayNames } from './useCreateMcp';
 export { useDevServer } from './useDevServer';
 export { useLogsStream } from './useLogsStream';
 export { useProject } from './useProject';

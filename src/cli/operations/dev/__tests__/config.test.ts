@@ -23,7 +23,6 @@ describe('getDevConfig', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -56,7 +55,6 @@ describe('getDevConfig', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -88,7 +86,6 @@ describe('getDevConfig', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -126,7 +123,6 @@ describe('getDevConfig', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -159,7 +155,6 @@ describe('getDevConfig', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -193,7 +188,6 @@ describe('getDevConfig', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -227,7 +221,6 @@ describe('getDevConfig', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -261,7 +254,6 @@ describe('getDevConfig', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -295,7 +287,6 @@ describe('getDevConfig', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -328,7 +319,6 @@ describe('getDevConfig', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -361,7 +351,6 @@ describe('getDevConfig', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -394,7 +383,6 @@ describe('getDevConfig', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -427,7 +415,6 @@ describe('getDevConfig', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -461,7 +448,6 @@ describe('getDevConfig', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -508,7 +494,6 @@ describe('getAgentPort', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -531,7 +516,6 @@ describe('getAgentPort', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -559,7 +543,6 @@ describe('getDevSupportedAgents', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -590,7 +573,6 @@ describe('getDevSupportedAgents', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -631,7 +613,6 @@ describe('getDevSupportedAgents', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
     };
 
@@ -662,7 +643,6 @@ describe('getDevSupportedAgents', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -703,7 +683,6 @@ describe('getDevSupportedAgents', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };

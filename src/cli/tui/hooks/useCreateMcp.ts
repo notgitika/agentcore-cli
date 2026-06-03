@@ -91,6 +91,56 @@ export function useExistingGateways() {
   return { gateways, refresh };
 }
 
+export function useMcpGatewayNames() {
+  const [mcpGateways, setMcpGateways] = useState<string[]>([]);
+
+  useEffect(() => {
+    async function load() {
+      const result = await gatewayPrimitive.getMcpGatewayNames();
+      setMcpGateways(result);
+    }
+    void load();
+  }, []);
+
+  return { mcpGateways };
+}
+
+export function useExistingRuntimeNames() {
+  const [runtimeNames, setRuntimeNames] = useState<string[]>([]);
+
+  useEffect(() => {
+    async function load() {
+      const result = await gatewayPrimitive.getRuntimeNames();
+      setRuntimeNames(result);
+    }
+    void load();
+  }, []);
+
+  return { runtimeNames };
+}
+
+export function useRuntimeEndpoints(runtimeName: string | undefined) {
+  const [endpoints, setEndpoints] = useState<{ name: string; version: number }[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    async function load() {
+      if (!runtimeName) {
+        setEndpoints([]);
+        setLoaded(false);
+        return;
+      }
+      setLoaded(false);
+      const result = await gatewayPrimitive.getRuntimeEndpoints(runtimeName);
+      setEndpoints(result);
+      setLoaded(true);
+    }
+    void load();
+  }, [runtimeName]);
+
+  return { endpoints, loaded };
+}
+
 export function useExistingPolicyEngines() {
   const [engines, setEngines] = useState<string[]>([]);
 

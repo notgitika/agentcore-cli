@@ -608,10 +608,10 @@ function resolveComponentKeyForJsonPath(key: string, deployedState: DeployedStat
   if (gwMatch) {
     const gwName = gwMatch[1]!;
     for (const target of Object.values(deployedState.targets)) {
-      const httpGw = target.resources?.httpGateways?.[gwName];
-      if (httpGw) return httpGw.gatewayArn;
       const mcpGw = target.resources?.mcp?.gateways?.[gwName];
       if (mcpGw) return mcpGw.gatewayArn;
+      const httpGw = target.resources?.gateways?.[gwName];
+      if (httpGw) return httpGw.gatewayArn;
     }
   }
 

@@ -17,8 +17,27 @@ export const GatewayTargetTypeSchema = z.enum([
   'smithyModel',
   'apiGateway',
   'lambdaFunctionArn',
+  'httpRuntime',
 ]);
 export type GatewayTargetType = z.infer<typeof GatewayTargetTypeSchema>;
+
+/**
+ * Target types that use the non-MCP (HTTP) protocol.
+ * These targets require a gateway with protocolType: "None".
+ */
+export const NON_MCP_TARGET_TYPES: readonly GatewayTargetType[] = ['httpRuntime'] as const;
+
+/**
+ * Target types that use the MCP protocol.
+ */
+export const MCP_TARGET_TYPES: readonly GatewayTargetType[] = [
+  'lambda',
+  'mcpServer',
+  'openApiSchema',
+  'smithyModel',
+  'apiGateway',
+  'lambdaFunctionArn',
+] as const;
 
 // ============================================================================
 // Gateway Authorization Schemas
@@ -60,6 +79,7 @@ export const TARGET_TYPE_AUTH_CONFIG: Record<
   mcpServer: { authRequired: false, validAuthTypes: ['OAUTH', 'NONE'], iamRoleFallback: false },
   lambda: { authRequired: false, validAuthTypes: ['OAUTH', 'NONE'], iamRoleFallback: true },
   lambdaFunctionArn: { authRequired: false, validAuthTypes: ['OAUTH', 'NONE'], iamRoleFallback: true },
+  httpRuntime: { authRequired: false, validAuthTypes: ['OAUTH', 'NONE'], iamRoleFallback: true },
 };
 
 // ============================================================================
@@ -325,6 +345,19 @@ export const SchemaSourceSchema = z.union([
 export type SchemaSource = z.infer<typeof SchemaSourceSchema>;
 
 // ============================================================================
+// HTTP Runtime Configuration
+// ============================================================================
+
+export const HttpRuntimeConfigSchema = z
+  .object({
+    runtime: z.string().min(1),
+    runtimeEndpoint: z.string().min(1).optional(),
+  })
+  .strict();
+
+export type HttpRuntimeConfig = z.infer<typeof HttpRuntimeConfigSchema>;
+
+// ============================================================================
 // Gateway Target
 // ============================================================================
 
@@ -344,7 +377,7 @@ export const AgentCoreGatewayTargetSchema = z
     toolDefinitions: z.array(ToolDefinitionSchema).optional(),
     /** Compute configuration. Required for Lambda/Runtime scaffold targets. */
     compute: ToolComputeConfigSchema.optional(),
-    /** MCP Server endpoint URL. Required for external MCP Server targets. */
+    /** Endpoint URL for mcpServer targets. */
     endpoint: z.string().url().optional(),
     /** Outbound auth configuration for the target. */
     outboundAuth: OutboundAuthSchema.optional(),
@@ -354,6 +387,8 @@ export const AgentCoreGatewayTargetSchema = z
     schemaSource: SchemaSourceSchema.optional(),
     /** Lambda Function ARN configuration. Required for lambdaFunctionArn target type. */
     lambdaFunctionArn: LambdaFunctionArnConfigSchema.optional(),
+    /** HTTP Runtime configuration. Required for httpRuntime target type. */
+    httpRuntime: HttpRuntimeConfigSchema.optional(),
   })
   .strict()
   .superRefine((data, ctx) => {
@@ -498,6 +533,50 @@ export const AgentCoreGatewayTargetSchema = z
         });
       }
     }
+    if (data.targetType === 'httpRuntime') {
+      if (!data.httpRuntime) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'httpRuntime targets require an httpRuntime configuration (with a runtime reference).',
+          path: ['httpRuntime'],
+        });
+      }
+      if (data.endpoint) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'httpRuntime targets should use httpRuntime.runtimeEndpoint instead of endpoint.',
+          path: ['endpoint'],
+        });
+      }
+      if (data.compute) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'compute is not applicable for httpRuntime target type',
+          path: ['compute'],
+        });
+      }
+      if (data.apiGateway) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'apiGateway is not applicable for httpRuntime target type',
+          path: ['apiGateway'],
+        });
+      }
+      if (data.lambdaFunctionArn) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'lambdaFunctionArn is not applicable for httpRuntime target type',
+          path: ['lambdaFunctionArn'],
+        });
+      }
+      if (data.toolDefinitions && data.toolDefinitions.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'toolDefinitions is not applicable for httpRuntime target type',
+          path: ['toolDefinitions'],
+        });
+      }
+    }
     if (data.targetType === 'lambda' && !data.compute) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -577,11 +656,16 @@ export type GatewayPolicyEngineConfiguration = z.infer<typeof GatewayPolicyEngin
  * Gateway abstraction with opinionated defaults.
  * Supports NONE (default) or CUSTOM_JWT authorizer types.
  */
+export const GatewayProtocolTypeSchema = z.enum(['MCP', 'None']);
+export type GatewayProtocolType = z.infer<typeof GatewayProtocolTypeSchema>;
+
 export const AgentCoreGatewaySchema = z
   .object({
     name: GatewayNameSchema,
     /** Actual AWS resource name for imported gateways. When set, CDK uses this instead of generating projectName-name. */
     resourceName: GatewayNameSchema.optional(),
+    /** Protocol type for this gateway. */
+    protocolType: GatewayProtocolTypeSchema.optional(),
     description: z.string().optional(),
     targets: z.array(AgentCoreGatewayTargetSchema),
     /** Authorization type for the gateway. Defaults to 'NONE'. */
@@ -615,7 +699,23 @@ export const AgentCoreGatewaySchema = z
       message: 'customJwtAuthorizer configuration is required when authorizerType is CUSTOM_JWT',
       path: ['authorizerConfiguration'],
     }
-  );
+  )
+  .superRefine((gw, ctx) => {
+    for (const target of gw.targets) {
+      if (gw.protocolType !== 'None' && NON_MCP_TARGET_TYPES.includes(target.targetType)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Target "${target.name}" is ${target.targetType} but gateway does not have protocolType: "None". Add --protocol-type None when creating the gateway.`,
+        });
+      }
+      if (gw.protocolType === 'None' && (MCP_TARGET_TYPES as readonly string[]).includes(target.targetType)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Target "${target.name}" is ${target.targetType} which requires a gateway with protocolType: "MCP" (or unset).`,
+        });
+      }
+    }
+  });
 
 export type AgentCoreGateway = z.infer<typeof AgentCoreGatewaySchema>;
 

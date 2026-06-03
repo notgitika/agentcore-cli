@@ -19,7 +19,6 @@ import {
   KmsKeyArnSchema,
 } from './primitives/evaluator';
 import { HarnessNameSchema } from './primitives/harness';
-import { HttpGatewaySchema } from './primitives/http-gateway';
 import {
   DEFAULT_EPISODIC_REFLECTION_NAMESPACES,
   DEFAULT_EPISODIC_REFLECTION_NAMESPACE_TEMPLATES,
@@ -76,8 +75,6 @@ export { DatasetNameSchema, DatasetSchemaTypeSchema } from './primitives/dataset
 export type { Dataset, DatasetSchemaType } from './primitives/dataset';
 export type { ABTestMode, TargetRef, GatewayFilter, PerVariantOnlineEvaluationConfig } from './primitives/ab-test';
 export { ABTestModeSchema, TargetRefSchema, GatewayFilterSchema } from './primitives/ab-test';
-export type { HttpGatewayTarget } from './primitives/http-gateway';
-export { HttpGatewayTargetSchema } from './primitives/http-gateway';
 export type {
   HarnessGatewayOutboundAuth,
   HarnessMemoryRef,
@@ -442,16 +439,6 @@ export const AgentCoreProjectSpecSchema = z
         )
       ),
 
-    httpGateways: z
-      .array(HttpGatewaySchema)
-      .default([])
-      .superRefine(
-        uniqueBy(
-          gw => gw.name,
-          name => `Duplicate HTTP gateway name: ${name}`
-        )
-      ),
-
     harnesses: z
       .array(HarnessRegistryEntrySchema)
       .default([])
@@ -475,6 +462,14 @@ export const AgentCoreProjectSpecSchema = z
           seen.add(dataset.name);
         }
       }),
+
+    httpGateways: z
+      .array(z.unknown())
+      .max(
+        0,
+        '"httpGateways" is deprecated. Migrate to agentCoreGateways with protocolType: "None", or use "agentcore import gateway".'
+      )
+      .optional(),
   })
   .strict()
   .superRefine((spec, ctx) => {
@@ -503,14 +498,28 @@ export const AgentCoreProjectSpecSchema = z
       }
     }
 
-    // Validate HTTP gateway runtimeRef references
-    for (const gw of spec.httpGateways ?? []) {
-      const runtimeExists = spec.runtimes.some(r => r.name === gw.runtimeRef);
-      if (!runtimeExists) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `HTTP gateway "${gw.name}" references unknown runtime "${gw.runtimeRef}"`,
-        });
+    // Validate httpRuntime target runtime references
+    for (const gw of spec.agentCoreGateways ?? []) {
+      for (const target of gw.targets) {
+        if (target.targetType === 'httpRuntime') {
+          if (target.httpRuntime?.runtime) {
+            const runtimeExists = spec.runtimes.some(r => r.name === target.httpRuntime!.runtime);
+            if (!runtimeExists) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Gateway "${gw.name}" target "${target.name}" references unknown runtime "${target.httpRuntime.runtime}". Check spec.runtimes.`,
+              });
+            } else if (target.httpRuntime.runtimeEndpoint && target.httpRuntime.runtimeEndpoint !== 'DEFAULT') {
+              const runtime = spec.runtimes.find(r => r.name === target.httpRuntime!.runtime);
+              if (runtime && !runtime.endpoints?.[target.httpRuntime.runtimeEndpoint]) {
+                ctx.addIssue({
+                  code: z.ZodIssueCode.custom,
+                  message: `Gateway "${gw.name}" target "${target.name}" references endpoint "${target.httpRuntime.runtimeEndpoint}" which does not exist on runtime "${target.httpRuntime.runtime}".`,
+                });
+              }
+            }
+          }
+        }
       }
     }
 
@@ -521,17 +530,17 @@ export const AgentCoreProjectSpecSchema = z
         const match = /^\{\{gateway:(.+)\}\}$/.exec(gwField);
         if (match) {
           const gwName = match[1];
-          const gwExists = (spec.httpGateways ?? []).some(gw => gw.name === gwName);
+          const gwExists = (spec.agentCoreGateways ?? []).some(gw => gw.name === gwName);
           if (!gwExists) {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
-              message: `AB test "${test.name}" references gateway "${gwName}" which does not exist in httpGateways`,
+              message: `AB test "${test.name}" references gateway "${gwName}" which does not exist in agentCoreGateways`,
             });
           }
 
           // For target-based AB tests, validate target names exist in the gateway's targets array
           if (test.mode === 'target-based') {
-            const gw = (spec.httpGateways ?? []).find(g => g.name === gwName);
+            const gw = (spec.agentCoreGateways ?? []).find(g => g.name === gwName);
             if (gw) {
               const gwTargetNames = new Set((gw.targets ?? []).map(t => t.name));
               for (const variant of test.variants) {
@@ -545,24 +554,6 @@ export const AgentCoreProjectSpecSchema = z
               }
             }
           }
-        }
-      }
-    }
-
-    // Validate HTTP gateway target runtimeRef and qualifier references
-    for (const gw of spec.httpGateways ?? []) {
-      for (const target of gw.targets ?? []) {
-        const runtime = spec.runtimes.find(r => r.name === target.runtimeRef);
-        if (!runtime) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `HTTP gateway "${gw.name}" target "${target.name}" references unknown runtime "${target.runtimeRef}"`,
-          });
-        } else if (target.qualifier && target.qualifier !== 'DEFAULT' && !runtime.endpoints?.[target.qualifier]) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `HTTP gateway "${gw.name}" target "${target.name}" references qualifier "${target.qualifier}" which is not an endpoint on runtime "${target.runtimeRef}"`,
-          });
         }
       }
     }

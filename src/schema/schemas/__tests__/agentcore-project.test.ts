@@ -1,3 +1,4 @@
+import type { DirectoryPath, FilePath } from '../../types/index.js';
 import {
   AgentCoreProjectSpecSchema,
   CredentialNameSchema,
@@ -579,5 +580,146 @@ describe('AgentCoreProjectSpecSchema', () => {
       harnesses: [{ name: 'myHarness', path: '' }],
     });
     expect(result.success).toBe(false);
+  });
+
+  it('httpGateways empty array passes silently', () => {
+    const result = AgentCoreProjectSpecSchema.safeParse({
+      ...minimalProject,
+      httpGateways: [],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('httpGateways with entries produces migration error', () => {
+    const result = AgentCoreProjectSpecSchema.safeParse({
+      ...minimalProject,
+      httpGateways: [{ name: 'old-gw' }],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some(i => i.message.includes('deprecated'))).toBe(true);
+    }
+  });
+
+  it('rejects httpRuntime target on MCP gateway (no protocolType None)', () => {
+    const result = AgentCoreProjectSpecSchema.safeParse({
+      ...minimalProject,
+      agentCoreGateways: [
+        {
+          name: 'mcp-gw',
+          targets: [
+            {
+              name: 'http-target',
+              targetType: 'httpRuntime',
+              httpRuntime: { runtime: 'MyAgent' },
+            },
+          ],
+        },
+      ],
+      runtimes: [
+        {
+          name: 'MyAgent',
+          build: 'CodeZip',
+          entrypoint: 'main.py' as FilePath,
+          codeLocation: './src' as DirectoryPath,
+          runtimeVersion: 'PYTHON_3_12',
+          protocol: 'HTTP',
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some(i => i.message.includes('protocolType'))).toBe(true);
+    }
+  });
+
+  it('accepts httpRuntime target on gateway with protocolType None', () => {
+    const result = AgentCoreProjectSpecSchema.safeParse({
+      ...minimalProject,
+      agentCoreGateways: [
+        {
+          name: 'http-gw',
+          protocolType: 'None',
+          targets: [
+            {
+              name: 'http-target',
+              targetType: 'httpRuntime',
+              httpRuntime: { runtime: 'MyAgent' },
+            },
+          ],
+        },
+      ],
+      runtimes: [
+        {
+          name: 'MyAgent',
+          build: 'CodeZip',
+          entrypoint: 'main.py' as FilePath,
+          codeLocation: './src' as DirectoryPath,
+          runtimeVersion: 'PYTHON_3_12',
+          protocol: 'HTTP',
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects httpRuntime target referencing non-existent runtime', () => {
+    const result = AgentCoreProjectSpecSchema.safeParse({
+      ...minimalProject,
+      agentCoreGateways: [
+        {
+          name: 'http-gw',
+          protocolType: 'None',
+          targets: [
+            {
+              name: 'http-target',
+              targetType: 'httpRuntime',
+              httpRuntime: { runtime: 'NonExistentAgent' },
+            },
+          ],
+        },
+      ],
+      runtimes: [],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some(i => i.message.includes('unknown runtime'))).toBe(true);
+    }
+  });
+
+  it('rejects httpRuntime target referencing non-existent runtimeEndpoint', () => {
+    const result = AgentCoreProjectSpecSchema.safeParse({
+      ...minimalProject,
+      agentCoreGateways: [
+        {
+          name: 'http-gw',
+          protocolType: 'None',
+          targets: [
+            {
+              name: 'http-target',
+              targetType: 'httpRuntime',
+              httpRuntime: { runtime: 'MyAgent', runtimeEndpoint: 'NONEXISTENT' },
+            },
+          ],
+        },
+      ],
+      runtimes: [
+        {
+          name: 'MyAgent',
+          build: 'CodeZip',
+          entrypoint: 'main.py' as FilePath,
+          codeLocation: './src' as DirectoryPath,
+          runtimeVersion: 'PYTHON_3_12',
+          protocol: 'HTTP',
+          endpoints: {
+            LIVE: { version: 1, description: 'Live endpoint' },
+          },
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some(i => i.message.includes('does not exist on runtime'))).toBe(true);
+    }
   });
 });

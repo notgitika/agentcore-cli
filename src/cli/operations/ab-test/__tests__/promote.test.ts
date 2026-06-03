@@ -25,7 +25,7 @@ function makeConfigBundleProject(testName = 'myTest') {
   return {
     name: 'TestProject',
     runtimes: [],
-    httpGateways: [],
+    agentCoreGateways: [],
     onlineEvalConfigs: [],
     abTests: [
       {
@@ -66,12 +66,20 @@ function makeTargetBasedProject(testName = 'targetTest') {
         },
       },
     ],
-    httpGateways: [
+    agentCoreGateways: [
       {
         name: 'my-gw',
         targets: [
-          { name: 'ctrl-target', runtimeRef: 'my-runtime', qualifier: 'control' },
-          { name: 'treat-target', runtimeRef: 'my-runtime', qualifier: 'treatment' },
+          {
+            name: 'ctrl-target',
+            targetType: 'httpRuntime',
+            httpRuntime: { runtime: 'my-runtime', runtimeEndpoint: 'control' },
+          },
+          {
+            name: 'treat-target',
+            targetType: 'httpRuntime',
+            httpRuntime: { runtime: 'my-runtime', runtimeEndpoint: 'treatment' },
+          },
         ],
       },
     ],

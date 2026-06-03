@@ -78,22 +78,28 @@ export async function promoteABTestConfig(abTestId: string, testNameFallback?: s
     const gwMatch = /^\{\{gateway:(.+)\}\}$/.exec(abTest.gatewayRef);
     const gwName = gwMatch?.[1];
     if (gwName) {
-      const gw = (project.httpGateways ?? []).find(g => g.name === gwName);
+      const gw = (project.agentCoreGateways ?? []).find(g => g.name === gwName);
       if (gw?.targets) {
         const controlTarget = gw.targets.find(t => t.name === controlTargetName);
         const treatmentTarget = gw.targets.find(t => t.name === treatmentTargetName);
 
-        if (controlTarget && treatmentTarget) {
-          const runtime = project.runtimes.find(r => r.name === controlTarget.runtimeRef);
-          const controlEp = runtime?.endpoints?.[controlTarget.qualifier];
-          const treatmentEp = runtime?.endpoints?.[treatmentTarget.qualifier];
+        if (
+          controlTarget &&
+          treatmentTarget &&
+          controlTarget.httpRuntime?.runtime &&
+          controlTarget.httpRuntime?.runtimeEndpoint &&
+          treatmentTarget.httpRuntime?.runtimeEndpoint
+        ) {
+          const runtime = project.runtimes.find(r => r.name === controlTarget.httpRuntime!.runtime);
+          const controlEp = runtime?.endpoints?.[controlTarget.httpRuntime.runtimeEndpoint];
+          const treatmentEp = runtime?.endpoints?.[treatmentTarget.httpRuntime.runtimeEndpoint];
           if (controlEp && treatmentEp) {
             controlEp.version = treatmentEp.version;
             await configIO.writeProjectSpec(project);
             return {
               promoted: true,
               mode,
-              promotionDetail: `Control endpoint "${controlTarget.qualifier}" updated to version ${treatmentEp.version} (from treatment "${treatmentTarget.qualifier}").`,
+              promotionDetail: `Control endpoint "${controlTarget.httpRuntime.runtimeEndpoint}" updated to version ${treatmentEp.version} (from treatment "${treatmentTarget.httpRuntime.runtimeEndpoint}").`,
             };
           }
         }

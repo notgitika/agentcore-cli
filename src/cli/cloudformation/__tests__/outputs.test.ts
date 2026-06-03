@@ -504,32 +504,21 @@ describe('buildDeployedState carry-forward', () => {
     });
   });
 
-  it('carries forward httpGateways from existing state', () => {
-    const existingState = {
-      targets: {
-        default: {
-          resources: {
-            stackName: 'TestStack',
-            httpGateways: {
-              MyHttpGw: {
-                gatewayId: 'hgw-456',
-                gatewayArn: 'arn:aws:bedrock:us-east-1:123456789012:http-gateway/hgw-456',
-              },
-            },
-          },
-        },
-      },
-    };
-
+  it('populates resources.gateways from httpGateways parameter', () => {
     const result = buildDeployedState({
       targetName: 'default',
       stackName: 'TestStack',
       agents: {},
       gateways: {},
-      existingState,
+      httpGateways: {
+        MyHttpGw: {
+          gatewayId: 'hgw-456',
+          gatewayArn: 'arn:aws:bedrock:us-east-1:123456789012:http-gateway/hgw-456',
+        },
+      },
     });
 
-    expect(result.targets.default!.resources?.httpGateways).toEqual({
+    expect(result.targets.default!.resources?.gateways).toEqual({
       MyHttpGw: {
         gatewayId: 'hgw-456',
         gatewayArn: 'arn:aws:bedrock:us-east-1:123456789012:http-gateway/hgw-456',
@@ -560,26 +549,15 @@ describe('buildDeployedState carry-forward', () => {
     expect(result.targets.default!.resources?.abTests).toBeUndefined();
   });
 
-  it('does not carry forward empty httpGateways', () => {
-    const existingState = {
-      targets: {
-        default: {
-          resources: {
-            stackName: 'TestStack',
-            httpGateways: {},
-          },
-        },
-      },
-    };
-
+  it('does not populate resources.gateways when httpGateways param is empty', () => {
     const result = buildDeployedState({
       targetName: 'default',
       stackName: 'TestStack',
       agents: {},
       gateways: {},
-      existingState,
+      httpGateways: {},
     });
 
-    expect(result.targets.default!.resources?.httpGateways).toBeUndefined();
+    expect(result.targets.default!.resources?.gateways).toBeUndefined();
   });
 });

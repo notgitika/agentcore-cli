@@ -154,18 +154,18 @@ describe('integration: add and remove target-based ab-test', () => {
     expect(abTest!.gatewayRef).toBe(`{{gateway:${gatewayName}}}`);
 
     // Verify gateway was auto-created with targets
-    const gw = spec.httpGateways?.find((g: { name: string }) => g.name === gatewayName);
+    const gw = spec.agentCoreGateways?.find((g: { name: string }) => g.name === gatewayName);
     expect(gw, 'HTTP gateway should have been auto-created').toBeDefined();
     expect(gw!.targets).toBeDefined();
-    expect(gw!.targets!.length).toBeGreaterThanOrEqual(2);
+    expect(gw!.targets.length).toBeGreaterThanOrEqual(2);
 
-    const controlTarget = gw!.targets!.find((t: { name: string }) => t.name === `${project.agentName}-prod`);
+    const controlTarget = gw!.targets.find((t: { name: string }) => t.name === `${project.agentName}-prod`);
     expect(controlTarget).toBeDefined();
-    expect(controlTarget!.qualifier).toBe('prod');
+    expect(controlTarget!.httpRuntime?.runtimeEndpoint).toBe('prod');
 
-    const treatmentTarget = gw!.targets!.find((t: { name: string }) => t.name === `${project.agentName}-staging`);
+    const treatmentTarget = gw!.targets.find((t: { name: string }) => t.name === `${project.agentName}-staging`);
     expect(treatmentTarget).toBeDefined();
-    expect(treatmentTarget!.qualifier).toBe('staging');
+    expect(treatmentTarget!.httpRuntime?.runtimeEndpoint).toBe('staging');
 
     // Verify per-variant evaluation config
     const evalConfig = abTest!.evaluationConfig;
@@ -218,7 +218,7 @@ describe('integration: add and remove target-based ab-test', () => {
 
     const spec = await readProjectConfig(project.projectPath);
     // Gateway should still exist (reused, not duplicated)
-    const gateways = spec.httpGateways?.filter((g: { name: string }) => g.name === gatewayName);
+    const gateways = spec.agentCoreGateways?.filter((g: { name: string }) => g.name === gatewayName);
     expect(gateways).toHaveLength(1);
   });
 
@@ -433,7 +433,7 @@ describe('integration: add and remove target-based ab-test', () => {
     expect(abTest).toBeUndefined();
 
     // Gateway should still exist (other AB tests reference it)
-    const gw = spec.httpGateways?.find((g: { name: string }) => g.name === gatewayName);
+    const gw = spec.agentCoreGateways?.find((g: { name: string }) => g.name === gatewayName);
     expect(gw, 'Gateway should still exist when other AB tests reference it').toBeDefined();
   });
 
@@ -450,7 +450,7 @@ describe('integration: add and remove target-based ab-test', () => {
 
     // Verify gateway was also removed (no other AB tests reference it)
     const spec = await readProjectConfig(project.projectPath);
-    const gw = spec.httpGateways?.find((g: { name: string }) => g.name === gatewayName);
+    const gw = spec.agentCoreGateways?.find((g: { name: string }) => g.name === gatewayName);
     expect(gw, 'Gateway should be removed with --delete-gateway when no other AB tests reference it').toBeUndefined();
   });
 

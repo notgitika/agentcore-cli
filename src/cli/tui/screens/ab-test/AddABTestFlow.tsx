@@ -81,20 +81,22 @@ export function AddABTestFlow({ isInteractive = true, onExit, onBack, onDev, onD
           }))
         );
 
-        // Existing HTTP gateways from project spec
-        const httpGws = projectSpec.httpGateways ?? [];
+        // Existing HTTP gateways from project spec (protocolType === 'None')
+        const httpGws = (projectSpec.agentCoreGateways ?? []).filter(gw => gw.protocolType === 'None');
         setExistingHttpGateways(httpGws.map(gw => gw.name));
 
         // HTTP gateway details with targets for target-based mode
         setHttpGatewayDetails(
           httpGws.map(gw => ({
             name: gw.name,
-            runtimeRef: gw.runtimeRef,
-            targets: (gw.targets ?? []).map(t => ({
-              name: t.name,
-              runtimeRef: t.runtimeRef,
-              qualifier: t.qualifier,
-            })),
+            runtime: gw.targets.find(t => t.targetType === 'httpRuntime')?.httpRuntime?.runtime ?? '',
+            targets: gw.targets
+              .filter(t => t.targetType === 'httpRuntime')
+              .map(t => ({
+                name: t.name,
+                runtime: t.httpRuntime?.runtime ?? '',
+                endpoint: t.httpRuntime?.runtimeEndpoint ?? 'DEFAULT',
+              })),
           }))
         );
 

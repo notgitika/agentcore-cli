@@ -397,7 +397,7 @@ export async function validateAddGatewayTargetOptions(options: AddGatewayTargetO
     return {
       valid: false,
       error:
-        '--type is required. Valid options: mcp-server, api-gateway, open-api-schema, smithy-model, lambda-function-arn',
+        '--type is required. Valid options: mcp-server, api-gateway, open-api-schema, smithy-model, lambda-function-arn, http-runtime',
     };
   }
 
@@ -407,12 +407,13 @@ export async function validateAddGatewayTargetOptions(options: AddGatewayTargetO
     'open-api-schema': 'openApiSchema',
     'smithy-model': 'smithyModel',
     'lambda-function-arn': 'lambdaFunctionArn',
+    'http-runtime': 'httpRuntime',
   };
   const mappedType = typeMap[options.type];
   if (!mappedType) {
     return {
       valid: false,
-      error: `Invalid type: ${options.type}. Valid options: mcp-server, api-gateway, open-api-schema, smithy-model, lambda-function-arn`,
+      error: `Invalid type: ${options.type}. Valid options: mcp-server, api-gateway, open-api-schema, smithy-model, lambda-function-arn, http-runtime`,
     };
   }
   options.type = mappedType;
@@ -558,6 +559,44 @@ export async function validateAddGatewayTargetOptions(options: AddGatewayTargetO
       if (typeof item.description !== 'string' || !item.description) {
         return { valid: false, error: `Tool schema entry ${i} is missing a valid "description" field` };
       }
+    }
+
+    options.language = 'Other';
+    return { valid: true };
+  }
+
+  // HTTP Runtime targets: validate early and return
+  if (mappedType === 'httpRuntime') {
+    if (!options.runtime) {
+      return { valid: false, error: '--runtime is required for http-runtime type' };
+    }
+    if (options.language && options.language !== 'Other') {
+      return { valid: false, error: '--language is not applicable for http-runtime type' };
+    }
+
+    const HTTP_RUNTIME_DISALLOWED_OPTIONS = [
+      'host',
+      'restApiId',
+      'stage',
+      'lambdaArn',
+      'toolSchemaFile',
+      'toolFilterPath',
+      'toolFilterMethods',
+      'schema',
+    ] as const;
+
+    for (const opt of HTTP_RUNTIME_DISALLOWED_OPTIONS) {
+      if (options[opt]) {
+        return {
+          valid: false,
+          error: `--${opt.replace(/([A-Z])/g, '-$1').toLowerCase()} is not applicable for http-runtime type`,
+        };
+      }
+    }
+
+    // Map --runtime-endpoint to the endpoint field used by createHttpRuntimeTarget
+    if (options.runtimeEndpoint) {
+      options.endpoint = options.runtimeEndpoint;
     }
 
     options.language = 'Other';

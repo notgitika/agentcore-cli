@@ -496,8 +496,8 @@ function resolveGatewayArn(ref: string, deployedResources?: DeployedResourceStat
     return gateways[gwName].gatewayArn;
   }
 
-  // Check HTTP gateways (imperatively created for A/B testing)
-  const httpGateways = deployedResources?.httpGateways;
+  // Check HTTP gateways (deployed via CFN under resources.gateways)
+  const httpGateways = deployedResources?.gateways;
   if (httpGateways && gwName && httpGateways[gwName]) {
     return httpGateways[gwName].gatewayArn;
   }

@@ -41,16 +41,26 @@ export async function getStackOutputs(region: string, stackName: string): Promis
  * Parse stack outputs into deployed state for gateways.
  *
  * Output key pattern for gateways:
- * Gateway{GatewayName}UrlOutput{Hash}
+ * Gateway{GatewayName}(Id|Arn|Url)Output{Hash}
+ *
+ * Output key pattern for gateway targets:
+ * GatewayTarget{TargetName}IdOutput{Hash}
  *
  * Examples:
  * - GatewayMyGatewayUrlOutput3E11FAB4
+ * - GatewayTargetMyTargetIdOutputA1B2C3D4
  */
 export function parseGatewayOutputs(
   outputs: StackOutputs,
   gatewaySpecs: Record<string, unknown>
-): Record<string, { gatewayId: string; gatewayArn: string; gatewayUrl?: string }> {
-  const gateways: Record<string, { gatewayId: string; gatewayArn: string; gatewayUrl?: string }> = {};
+): Record<
+  string,
+  { gatewayId: string; gatewayArn: string; gatewayUrl?: string; targets?: Record<string, { targetId: string }> }
+> {
+  const gateways: Record<
+    string,
+    { gatewayId: string; gatewayArn: string; gatewayUrl?: string; targets?: Record<string, { targetId: string }> }
+  > = {};
 
   // Map PascalCase gateway names to original names for lookup
   const gatewayNames = Object.keys(gatewaySpecs);
@@ -58,8 +68,23 @@ export function parseGatewayOutputs(
 
   // Match pattern: Gateway{Name}{Type}Output{Hash}
   const outputPattern = /^Gateway(.+?)(Id|Arn|Url)Output/;
+  // Match pattern: GatewayTarget{TargetName}IdOutput{Hash}
+  const targetOutputPattern = /^GatewayTarget(.+?)IdOutput/;
+
+  // Collect target outputs separately
+  const targetOutputs: { logicalTarget: string; targetId: string }[] = [];
 
   for (const [key, value] of Object.entries(outputs)) {
+    // Check target pattern first (more specific) to avoid false matches with gateway pattern
+    const targetMatch = targetOutputPattern.exec(key);
+    if (targetMatch) {
+      const logicalTarget = targetMatch[1];
+      if (logicalTarget) {
+        targetOutputs.push({ logicalTarget, targetId: value });
+      }
+      continue;
+    }
+
     const match = outputPattern.exec(key);
     if (!match) continue;
 
@@ -78,6 +103,32 @@ export function parseGatewayOutputs(
       gateways[gatewayName].gatewayArn = value;
     } else if (outputType === 'Url') {
       gateways[gatewayName].gatewayUrl = value;
+    }
+  }
+
+  // Associate target outputs with gateways
+  // Build a map from PascalCase target name to [gatewayName, originalTargetName]
+  const targetToGateway = new Map<string, { gatewayName: string; targetName: string }>();
+  for (const gwName of gatewayNames) {
+    const gwSpec = gatewaySpecs[gwName];
+    if (
+      gwSpec &&
+      typeof gwSpec === 'object' &&
+      'targets' in gwSpec &&
+      Array.isArray((gwSpec as { targets?: unknown[] }).targets)
+    ) {
+      for (const target of (gwSpec as { targets: { name: string }[] }).targets) {
+        targetToGateway.set(toPascalId(target.name), { gatewayName: gwName, targetName: target.name });
+      }
+    }
+  }
+
+  for (const { logicalTarget, targetId } of targetOutputs) {
+    const mapping = targetToGateway.get(logicalTarget);
+    const gwState = mapping ? gateways[mapping.gatewayName] : undefined;
+    if (mapping && gwState) {
+      gwState.targets ??= {};
+      gwState.targets[mapping.targetName] = { targetId };
     }
   }
 
@@ -412,6 +463,10 @@ export interface BuildDeployedStateOptions {
   stackName: string;
   agents: Record<string, AgentCoreDeployedState>;
   gateways: Record<string, { gatewayId: string; gatewayArn: string; gatewayUrl?: string }>;
+  httpGateways?: Record<
+    string,
+    { gatewayId: string; gatewayArn: string; gatewayUrl?: string; targets?: Record<string, { targetId: string }> }
+  >;
   existingState?: DeployedState;
   identityKmsKeyArn?: string;
   credentials?: Record<string, { credentialProviderArn: string; clientSecretArn?: string; callbackUrl?: string }>;
@@ -445,6 +500,7 @@ export function buildDeployedState(opts: BuildDeployedStateOptions): DeployedSta
     stackName,
     agents,
     gateways,
+    httpGateways,
     existingState,
     identityKmsKeyArn,
     credentials,
@@ -473,6 +529,11 @@ export function buildDeployedState(opts: BuildDeployedStateOptions): DeployedSta
     targetState.resources!.mcp = {
       gateways,
     };
+  }
+
+  // Add HTTP gateway state if HTTP gateways exist
+  if (httpGateways && Object.keys(httpGateways).length > 0) {
+    targetState.resources!.gateways = httpGateways;
   }
 
   // Add credential state if credentials exist
@@ -509,12 +570,6 @@ export function buildDeployedState(opts: BuildDeployedStateOptions): DeployedSta
   const existingABTests = existingState?.targets?.[targetName]?.resources?.abTests;
   if (existingABTests && Object.keys(existingABTests).length > 0) {
     targetState.resources!.abTests = existingABTests;
-  }
-
-  // Carry forward HTTP gateways from existing state (managed post-deploy, not via CFN outputs)
-  const existingHttpGateways = existingState?.targets?.[targetName]?.resources?.httpGateways;
-  if (existingHttpGateways && Object.keys(existingHttpGateways).length > 0) {
-    targetState.resources!.httpGateways = existingHttpGateways;
   }
 
   // Add harness state if harnesses exist

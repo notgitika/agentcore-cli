@@ -47,6 +47,9 @@ export function useAddGatewayTargetWizard(
         case 'lambdaFunctionArn':
           baseSteps.push('lambda-arn', 'tool-schema', 'gateway');
           break;
+        case 'httpRuntime':
+          baseSteps.push('runtime', 'runtime-endpoint', 'gateway', 'outbound-auth');
+          break;
         case 'mcpServer':
         default:
           baseSteps.push('endpoint', 'gateway', 'outbound-auth');
@@ -101,6 +104,9 @@ export function useAddGatewayTargetWizard(
         break;
       case 'lambdaFunctionArn':
         setStep('lambda-arn');
+        break;
+      case 'httpRuntime':
+        setStep('runtime');
         break;
       case 'mcpServer':
       default:
@@ -200,6 +206,22 @@ export function useAddGatewayTargetWizard(
     [goToNextStep]
   );
 
+  const setRuntime = useCallback(
+    (runtime: string) => {
+      setConfig(c => ({ ...c, runtime }));
+      goToNextStep();
+    },
+    [goToNextStep]
+  );
+
+  const setRuntimeEndpoint = useCallback(
+    (endpoint: string | undefined) => {
+      setConfig(c => ({ ...c, endpoint }));
+      goToNextStep();
+    },
+    [goToNextStep]
+  );
+
   return {
     config,
     step,
@@ -219,6 +241,8 @@ export function useAddGatewayTargetWizard(
     setApiGatewayAuth,
     setLambdaArn,
     setToolSchemaFile,
+    setRuntime,
+    setRuntimeEndpoint,
     reset,
   };
 }

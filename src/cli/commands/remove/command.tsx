@@ -36,7 +36,6 @@ async function handleRemoveAll(_options: RemoveAllOptions): Promise<RemoveResult
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     });

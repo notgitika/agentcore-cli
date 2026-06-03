@@ -35,10 +35,17 @@ export type MemoryDeployedState = z.infer<typeof MemoryDeployedStateSchema>;
 // MCP Gateway Deployed State
 // ============================================================================
 
+export const GatewayTargetDeployedStateSchema = z.object({
+  targetId: z.string().min(1),
+});
+
+export type GatewayTargetDeployedState = z.infer<typeof GatewayTargetDeployedStateSchema>;
+
 export const GatewayDeployedStateSchema = z.object({
   gatewayId: z.string().min(1),
   gatewayArn: z.string().min(1),
   gatewayUrl: z.string().optional(),
+  targets: z.record(z.string(), GatewayTargetDeployedStateSchema).optional(),
 });
 
 export type GatewayDeployedState = z.infer<typeof GatewayDeployedStateSchema>;
@@ -232,21 +239,6 @@ export const ABTestDeployedStateSchema = z.object({
 export type ABTestDeployedState = z.infer<typeof ABTestDeployedStateSchema>;
 
 // ============================================================================
-// HTTP Gateway Deployed State
-// ============================================================================
-
-export const HttpGatewayDeployedStateSchema = z.object({
-  gatewayId: z.string().min(1),
-  gatewayArn: z.string().min(1),
-  gatewayUrl: z.string().optional(),
-  targetId: z.string().min(1).optional(),
-  roleArn: z.string().min(1).optional(),
-  roleCreatedByCli: z.boolean().optional(),
-});
-
-export type HttpGatewayDeployedState = z.infer<typeof HttpGatewayDeployedStateSchema>;
-
-// ============================================================================
 // Runtime Endpoint Deployed State
 // ============================================================================
 
@@ -265,6 +257,7 @@ export const DeployedResourceStateSchema = z.object({
   runtimes: z.record(z.string(), AgentCoreDeployedStateSchema).optional(),
   memories: z.record(z.string(), MemoryDeployedStateSchema).optional(),
   mcp: McpDeployedStateSchema.optional(),
+  gateways: z.record(z.string(), GatewayDeployedStateSchema).optional(),
   externallyManaged: ExternallyManagedStateSchema.optional(),
   credentials: z.record(z.string(), CredentialDeployedStateSchema).optional(),
   evaluators: z.record(z.string(), EvaluatorDeployedStateSchema).optional(),
@@ -272,7 +265,6 @@ export const DeployedResourceStateSchema = z.object({
   datasets: z.record(z.string(), DatasetDeployedStateSchema).optional(),
   configBundles: z.record(z.string(), ConfigBundleDeployedStateSchema).optional(),
   abTests: z.record(z.string(), ABTestDeployedStateSchema).optional(),
-  httpGateways: z.record(z.string(), HttpGatewayDeployedStateSchema).optional(),
   policyEngines: z.record(z.string(), PolicyEngineDeployedStateSchema).optional(),
   policies: z.record(z.string(), PolicyDeployedStateSchema).optional(),
   harnesses: z.record(z.string(), HarnessDeployedStateSchema).optional(),

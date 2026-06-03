@@ -21,7 +21,6 @@ export function createDefaultProjectSpec(projectName: string): AgentCoreProjectS
     harnesses: [],
     configBundles: [],
     abTests: [],
-    httpGateways: [],
     datasets: [],
     tags: {
       'agentcore:created-by': 'agentcore-cli',

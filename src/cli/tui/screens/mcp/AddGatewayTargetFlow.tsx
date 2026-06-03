@@ -1,6 +1,11 @@
 import { gatewayTargetPrimitive } from '../../../primitives/registry';
 import { ErrorPrompt } from '../../components';
-import { useExistingGateways, useExistingToolNames } from '../../hooks/useCreateMcp';
+import {
+  useExistingGateways,
+  useExistingRuntimeNames,
+  useExistingToolNames,
+  useMcpGatewayNames,
+} from '../../hooks/useCreateMcp';
 import { AddSuccessScreen } from '../add/AddSuccessScreen';
 import { AddIdentityScreen } from '../identity/AddIdentityScreen';
 import type { AddIdentityConfig } from '../identity/types';
@@ -34,6 +39,8 @@ export function AddGatewayTargetFlow({
   onDeploy,
 }: AddGatewayTargetFlowProps) {
   const { gateways: existingGateways } = useExistingGateways();
+  const { mcpGateways: mcpGatewayNames } = useMcpGatewayNames();
+  const { runtimeNames: existingRuntimeNames } = useExistingRuntimeNames();
   const { toolNames: existingToolNames } = useExistingToolNames();
   const { credentials } = useExistingCredentials();
   const { names: existingIdentityNames } = useExistingIdentityNames();
@@ -102,6 +109,23 @@ export function AddGatewayTargetFlow({
         .catch((err: unknown) => {
           setFlow({ name: 'error', message: err instanceof Error ? err.message : 'Unknown error' });
         });
+    } else if (config.targetType === 'httpRuntime') {
+      void gatewayTargetPrimitive
+        .createHttpRuntimeTarget(
+          config as {
+            name: string;
+            gateway: string;
+            runtime: string;
+            endpoint?: string;
+            outboundAuth?: { type: string; credentialName?: string; scopes?: string[] };
+          }
+        )
+        .then((result: { toolName: string }) => {
+          setFlow({ name: 'create-success', toolName: result.toolName, projectPath: '' });
+        })
+        .catch((err: unknown) => {
+          setFlow({ name: 'error', message: err instanceof Error ? err.message : 'Unknown error' });
+        });
     } else {
       setFlow({ name: 'error', message: `Unsupported target type: ${(config as { targetType: string }).targetType}` });
     }
@@ -158,6 +182,8 @@ export function AddGatewayTargetFlow({
     return (
       <AddGatewayTargetScreen
         existingGateways={existingGateways}
+        mcpGatewayNames={mcpGatewayNames}
+        existingRuntimeNames={existingRuntimeNames}
         existingToolNames={existingToolNames}
         existingOAuthCredentialNames={oauthCredentialNames}
         existingApiKeyCredentialNames={apiKeyCredentialNames}

@@ -4,6 +4,7 @@ import { ConfirmReview, Panel, Screen, StepIndicator, TextInput, WizardSelect } 
 import type { SelectableItem } from '../../components';
 import { HELP_TEXT } from '../../constants';
 import { useListNavigation } from '../../hooks';
+import { useRuntimeEndpoints } from '../../hooks/useCreateMcp';
 import { generateUniqueName } from '../../utils';
 import type {
   AddGatewayTargetConfig,
@@ -39,6 +40,10 @@ function buildCredentialItems(names: string[], credentialLabel: string): Selecta
 
 interface AddGatewayTargetScreenProps {
   existingGateways: string[];
+  /** Names of gateways with protocolType MCP — not selectable for httpRuntime targets. */
+  mcpGatewayNames?: string[];
+  /** Runtime names from the project for httpRuntime target selection. */
+  existingRuntimeNames?: string[];
   existingToolNames: string[];
   existingOAuthCredentialNames: string[];
   existingApiKeyCredentialNames: string[];
@@ -51,6 +56,8 @@ interface AddGatewayTargetScreenProps {
 
 export function AddGatewayTargetScreen({
   existingGateways,
+  mcpGatewayNames = [],
+  existingRuntimeNames = [],
   existingToolNames,
   existingOAuthCredentialNames,
   existingApiKeyCredentialNames,
@@ -61,6 +68,9 @@ export function AddGatewayTargetScreen({
   initialStep,
 }: AddGatewayTargetScreenProps) {
   const wizard = useAddGatewayTargetWizard(existingGateways, initialConfig, initialStep);
+
+  // Load endpoints for the selected runtime (used by runtime-endpoint step)
+  const { endpoints: runtimeEndpoints, loaded: runtimeEndpointsLoaded } = useRuntimeEndpoints(wizard.config.runtime);
 
   // Tracks which credential type sub-step is active within either auth step.
   // null = showing the auth type picker; 'OAUTH'/'API_KEY' = showing credential list.
@@ -79,14 +89,36 @@ export function AddGatewayTargetScreen({
   const isSchemaSourceStep = wizard.step === 'schema-source';
   const isLambdaArnStep = wizard.step === 'lambda-arn';
   const isToolSchemaStep = wizard.step === 'tool-schema';
+  const isRuntimeStep = wizard.step === 'runtime';
+  const isRuntimeEndpointStep = wizard.step === 'runtime-endpoint';
   const isConfirmStep = wizard.step === 'confirm';
   const isAuthStep = isOutboundAuthStep || isApiGatewayAuthStep;
   const noGatewaysAvailable = isGatewayStep && existingGateways.length === 0;
 
   // ── Selectable item lists ──
+  const isHttpRuntimeTarget = wizard.config.targetType === 'httpRuntime';
+  const runtimeItems: SelectableItem[] = useMemo(
+    () => existingRuntimeNames.map(r => ({ id: r, title: r })),
+    [existingRuntimeNames]
+  );
+  const runtimeEndpointItems: SelectableItem[] = useMemo(
+    () => [
+      { id: 'DEFAULT', title: 'DEFAULT (latest version)' },
+      ...runtimeEndpoints.map(ep => ({ id: ep.name, title: `${ep.name} (v${ep.version})` })),
+    ],
+    [runtimeEndpoints]
+  );
   const gatewayItems: SelectableItem[] = useMemo(
-    () => existingGateways.map(g => ({ id: g, title: g })),
-    [existingGateways]
+    () =>
+      existingGateways.map(g => {
+        const isMcpOnly = isHttpRuntimeTarget && mcpGatewayNames.includes(g);
+        return {
+          id: g,
+          title: isMcpOnly ? `${g} (MCP — not compatible with HTTP Runtime)` : g,
+          disabled: isMcpOnly,
+        };
+      }),
+    [existingGateways, mcpGatewayNames, isHttpRuntimeTarget]
   );
   const targetTypeItems: SelectableItem[] = useMemo(
     () => TARGET_TYPE_OPTIONS.map(o => ({ id: o.id, title: o.title, description: o.description })),
@@ -153,6 +185,34 @@ export function AddGatewayTargetScreen({
     onSelect: item => wizard.setGateway(item.id),
     onExit: () => wizard.goBack(),
     isActive: isGatewayStep && !noGatewaysAvailable,
+  });
+
+  const runtimeNav = useListNavigation({
+    items: runtimeItems,
+    onSelect: item => wizard.setRuntime(item.id),
+    onExit: () => wizard.goBack(),
+    isActive: isRuntimeStep && runtimeItems.length > 0,
+  });
+
+  // Auto-skip runtime-endpoint step when the runtime has no endpoints defined.
+  // Must wait until endpoints have been loaded to avoid a race condition where the
+  // step is skipped before the async fetch completes.
+  const hasRuntimeEndpoints = runtimeEndpoints.length > 0;
+  React.useEffect(() => {
+    if (isRuntimeEndpointStep && runtimeEndpointsLoaded && !hasRuntimeEndpoints) {
+      // No endpoints defined — skip to gateway step (select DEFAULT implicitly)
+      wizard.setRuntimeEndpoint(undefined);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRuntimeEndpointStep, runtimeEndpointsLoaded, hasRuntimeEndpoints]);
+
+  const runtimeEndpointNav = useListNavigation({
+    items: runtimeEndpointItems,
+    onSelect: item => {
+      wizard.setRuntimeEndpoint(item.id === 'DEFAULT' ? undefined : item.id);
+    },
+    onExit: () => wizard.goBack(),
+    isActive: isRuntimeEndpointStep && hasRuntimeEndpoints,
   });
 
   // Outbound auth type selection (for mcpServer, openApiSchema)
@@ -246,6 +306,15 @@ export function AddGatewayTargetScreen({
           lambdaArn: c.lambdaArn!,
           toolSchemaFile: c.toolSchemaFile!,
         });
+      } else if (c.targetType === 'httpRuntime') {
+        onComplete({
+          targetType: 'httpRuntime',
+          name: c.name,
+          gateway: c.gateway!,
+          runtime: c.runtime!,
+          endpoint: c.endpoint,
+          outboundAuth: c.outboundAuth,
+        });
       } else {
         onComplete({
           targetType: 'mcpServer',
@@ -274,7 +343,8 @@ export function AddGatewayTargetScreen({
         isToolFiltersStep ||
         isSchemaSourceStep ||
         isLambdaArnStep ||
-        isToolSchemaStep
+        isToolSchemaStep ||
+        isRuntimeStep
       ? HELP_TEXT.TEXT_INPUT
       : HELP_TEXT.NAVIGATE_SELECT;
 
@@ -480,6 +550,39 @@ export function AddGatewayTargetScreen({
           />
         )}
 
+        {isRuntimeStep && runtimeItems.length > 0 && (
+          <WizardSelect
+            title="Select runtime"
+            description="Which runtime will this target route to?"
+            items={runtimeItems}
+            selectedIndex={runtimeNav.selectedIndex}
+          />
+        )}
+
+        {isRuntimeStep && runtimeItems.length === 0 && (
+          <TextInput
+            prompt="Runtime (name of a runtime from your project)"
+            placeholder="e.g. my-agent"
+            onSubmit={(value: string) => wizard.setRuntime(value)}
+            onCancel={() => wizard.goBack()}
+            customValidation={(value: string) => {
+              if (!value.trim()) return 'Runtime is required';
+              return true;
+            }}
+          />
+        )}
+
+        {isRuntimeEndpointStep && !runtimeEndpointsLoaded && <Text dimColor>Loading runtime endpoints...</Text>}
+
+        {isRuntimeEndpointStep && runtimeEndpointsLoaded && hasRuntimeEndpoints && (
+          <WizardSelect
+            title="Select runtime endpoint"
+            description="Which endpoint version should this target use?"
+            items={runtimeEndpointItems}
+            selectedIndex={runtimeEndpointNav.selectedIndex}
+          />
+        )}
+
         {isConfirmStep && (
           <ConfirmReview
             fields={[
@@ -506,6 +609,12 @@ export function AddGatewayTargetScreen({
                 ? [
                     { label: 'Lambda ARN', value: wizard.config.lambdaArn ?? '' },
                     { label: 'Tool Schema File', value: wizard.config.toolSchemaFile ?? '' },
+                  ]
+                : []),
+              ...(wizard.config.targetType === 'httpRuntime'
+                ? [
+                    { label: 'Runtime', value: wizard.config.runtime ?? '' },
+                    ...(wizard.config.endpoint ? [{ label: 'Runtime Endpoint', value: wizard.config.endpoint }] : []),
                   ]
                 : []),
               ...(wizard.config.targetType === 'mcpServer' && wizard.config.endpoint

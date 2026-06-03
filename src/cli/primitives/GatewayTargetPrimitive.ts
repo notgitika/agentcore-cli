@@ -265,15 +265,15 @@ export class GatewayTargetPrimitive extends BasePrimitive<AddGatewayTargetOption
   registerCommands(addCmd: Command, removeCmd: Command): void {
     addCmd
       .command('gateway-target')
-      .description('Add a target (API, MCP server, Lambda) to a gateway for tool routing')
+      .description('Add a target to a gateway for routing requests to backends')
       .option('--name <name>', 'Target name [non-interactive]')
       .option('--description <desc>', 'Target description [non-interactive]')
       .option('--gateway <name>', 'Gateway to attach this target to [non-interactive]')
       .option(
         '--type <type>',
-        'Target type (required): mcp-server, api-gateway, open-api-schema, smithy-model, lambda-function-arn [non-interactive]'
+        'Target type: mcp-server, api-gateway, open-api-schema, smithy-model, lambda-function-arn, http-runtime [non-interactive]'
       )
-      .option('--endpoint <url>', 'Server endpoint URL (for mcp-server type) [non-interactive]')
+      .option('--endpoint <endpoint>', 'Server endpoint URL (for mcp-server type) [non-interactive]')
       .option('--language <lang>', 'Language of target code: Python, TypeScript, Other [non-interactive]')
       .option('--host <host>', 'Where to run the target: Lambda or AgentCoreRuntime [non-interactive]')
       .option('--outbound-auth <type>', 'Outbound auth type: oauth, api-key, or none [non-interactive]')
@@ -308,7 +308,40 @@ export class GatewayTargetPrimitive extends BasePrimitive<AddGatewayTargetOption
         '--tool-schema-file <path>',
         'Tool schema JSON file path (for lambda-function-arn type) [non-interactive]'
       )
+      .option('--runtime <name>', 'Runtime from your project (for http-runtime type) [non-interactive]')
+      .option('--runtime-endpoint <name>', 'Runtime endpoint / version alias (for http-runtime type) [non-interactive]')
       .option('--json', 'Output as JSON [non-interactive]')
+      .addHelpText(
+        'after',
+        `
+Target types and their options:
+
+  http-runtime — Route to an AgentCore runtime
+    --runtime <name>               Runtime from your project
+    --runtime-endpoint <name>      Endpoint / version alias (optional)
+
+  mcp-server — Connect to an MCP-compatible server
+    --endpoint <url>               Server endpoint URL
+    --host <host>                  Lambda or AgentCoreRuntime
+    --language <lang>              Python, TypeScript, or Other
+
+  api-gateway — Connect to an Amazon API Gateway REST API
+    --rest-api-id <id>             REST API ID
+    --stage <stage>                Deployment stage
+
+  open-api-schema / smithy-model — Auto-derive tools from a schema
+    --schema <path>                Schema file path or S3 URI
+    --schema-s3-account <id>       S3 bucket owner account ID
+
+  lambda-function-arn — Connect to an AWS Lambda function
+    --lambda-arn <arn>             Lambda function ARN
+    --tool-schema-file <path>      Tool schema JSON file
+
+  Auth (mcp-server, open-api-schema, smithy-model, lambda-function-arn):
+    --outbound-auth <type>         oauth, api-key, or none
+    --credential-name <name>       Existing credential name
+`
+      )
       .action(async (rawOptions: Record<string, string | boolean | undefined>) => {
         // Commander camelCases --outbound-auth to outboundAuth, but our types use outboundAuthType
         if (rawOptions.outboundAuth && !rawOptions.outboundAuthType) {
@@ -440,6 +473,31 @@ export class GatewayTargetPrimitive extends BasePrimitive<AddGatewayTargetOption
               console.log(`Added gateway target '${result.toolName}'`);
             }
             return { ...telemetryAttrs };
+          }
+
+          // Handle HTTP runtime targets (no code generation)
+          if (cliOptions.type === 'httpRuntime') {
+            const result = await this.createHttpRuntimeTarget({
+              name: cliOptions.name!,
+              gateway: cliOptions.gateway!,
+              runtime: cliOptions.runtime!,
+              endpoint: cliOptions.runtimeEndpoint ?? cliOptions.endpoint,
+              outboundAuth:
+                cliOptions.outboundAuthType && cliOptions.outboundAuthType !== 'NONE'
+                  ? {
+                      type: outboundAuthMap[cliOptions.outboundAuthType.toLowerCase()] ?? 'NONE',
+                      credentialName: cliOptions.credentialName,
+                      scopes: cliOptions.oauthScopes?.split(',').map(s => s.trim()),
+                    }
+                  : undefined,
+            });
+            const output = { success: true, toolName: result.toolName };
+            if (cliOptions.json) {
+              console.log(JSON.stringify(output));
+            } else {
+              console.log(`Added gateway target '${result.toolName}'`);
+            }
+            return telemetryAttrs;
           }
 
           // Handle MCP server targets (existing endpoint, no code generation)
@@ -705,6 +763,55 @@ export class GatewayTargetPrimitive extends BasePrimitive<AddGatewayTargetOption
         lambdaArn: config.lambdaArn,
         toolSchemaFile: config.toolSchemaFile,
       },
+    };
+
+    gateway.targets.push(target);
+    await this.writeProjectSpec(project);
+
+    return { toolName: config.name };
+  }
+
+  /**
+   * Create an HTTP runtime target that references an existing agent runtime.
+   * No code generation — this registers a runtime reference for HTTP routing.
+   */
+  async createHttpRuntimeTarget(config: {
+    name: string;
+    gateway: string;
+    runtime: string;
+    endpoint?: string;
+    outboundAuth?: { type: string; credentialName?: string; scopes?: string[] };
+  }): Promise<{ toolName: string }> {
+    const project = await this.readProjectSpec();
+
+    const gateway = project.agentCoreGateways.find(g => g.name === config.gateway);
+    if (!gateway) {
+      throw new Error(`Gateway "${config.gateway}" not found.`);
+    }
+
+    if (!gateway.targets) {
+      gateway.targets = [];
+    }
+
+    if (gateway.targets.some(t => t.name === config.name)) {
+      throw new Error(`Target "${config.name}" already exists in gateway "${gateway.name}".`);
+    }
+
+    const target: AgentCoreGatewayTarget = {
+      name: config.name,
+      targetType: 'httpRuntime',
+      httpRuntime: {
+        runtime: config.runtime,
+        ...(config.endpoint && { runtimeEndpoint: config.endpoint }),
+      },
+      ...(config.outboundAuth &&
+        config.outboundAuth.type !== 'NONE' && {
+          outboundAuth: {
+            type: config.outboundAuth.type as 'OAUTH' | 'API_KEY',
+            credentialName: config.outboundAuth.credentialName!,
+            ...(config.outboundAuth.scopes && { scopes: config.outboundAuth.scopes }),
+          },
+        }),
     };
 
     gateway.targets.push(target);

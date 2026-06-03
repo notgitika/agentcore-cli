@@ -95,7 +95,6 @@ describe('createManagedOAuthCredential', () => {
     policyEngines: [],
     configBundles: [],
     abTests: [],
-    httpGateways: [],
     harnesses: [],
     datasets: [],
   };

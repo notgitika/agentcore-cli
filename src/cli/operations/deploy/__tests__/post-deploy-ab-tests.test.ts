@@ -67,7 +67,6 @@ function makeProjectSpec(abTests: AgentCoreProjectSpec['abTests'] = []): AgentCo
     agentCoreGateways: [],
     policyEngines: [],
     configBundles: [],
-    httpGateways: [],
     datasets: [],
     abTests,
     harnesses: [],
@@ -267,7 +266,7 @@ describe('setupABTests', () => {
         region: 'us-east-1',
         projectSpec: makeProjectSpec([testWithPlaceholder]),
         deployedResources: {
-          httpGateways: {
+          gateways: {
             'my-http-gw': {
               gatewayId: 'httpgw-001',
               gatewayArn: 'arn:aws:bedrock-agentcore:us-east-1:123:httpgateway/httpgw-001',

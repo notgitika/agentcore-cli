@@ -44,7 +44,6 @@ import {
   setupConfigBundles,
 } from '../../operations/deploy/post-deploy-config-bundles';
 import { syncDatasets } from '../../operations/deploy/post-deploy-datasets';
-import { setupHttpGateways } from '../../operations/deploy/post-deploy-http-gateways';
 import { enableOnlineEvalConfigs } from '../../operations/deploy/post-deploy-online-evals';
 import { toStackName } from '../import/import-utils';
 import type { DeployResult } from './types';
@@ -490,15 +489,30 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     const runtimeEndpoints = parseRuntimeEndpointOutputs(outputs, endpointSpecs);
 
     // Parse gateway outputs
-    const gatewaySpecs =
-      mcpSpec?.agentCoreGateways?.reduce(
-        (acc, gateway) => {
-          acc[gateway.name] = gateway;
-          return acc;
-        },
-        {} as Record<string, unknown>
-      ) ?? {};
-    const gateways = parseGatewayOutputs(outputs, gatewaySpecs);
+    const allGatewaySpecs = mcpSpec?.agentCoreGateways ?? [];
+    const gatewaySpecs = allGatewaySpecs.reduce(
+      (acc, gateway) => {
+        acc[gateway.name] = gateway;
+        return acc;
+      },
+      {} as Record<string, unknown>
+    );
+    const allGateways = parseGatewayOutputs(outputs, gatewaySpecs);
+
+    // Split into MCP and HTTP gateways based on protocolType
+    const httpGatewayNames = new Set(allGatewaySpecs.filter(g => g.protocolType === 'None').map(g => g.name));
+    const gateways: Record<string, { gatewayId: string; gatewayArn: string; gatewayUrl?: string }> = {};
+    const httpGateways: Record<
+      string,
+      { gatewayId: string; gatewayArn: string; gatewayUrl?: string; targets?: Record<string, { targetId: string }> }
+    > = {};
+    for (const [name, state] of Object.entries(allGateways)) {
+      if (httpGatewayNames.has(name)) {
+        httpGateways[name] = state;
+      } else {
+        gateways[name] = state;
+      }
+    }
 
     // Parse dataset outputs
     const datasetNames = (context.projectSpec.datasets ?? []).map(d => d.name);
@@ -561,6 +575,7 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       stackName,
       agents,
       gateways,
+      httpGateways: Object.keys(httpGateways).length > 0 ? httpGateways : undefined,
       existingState,
       identityKmsKeyArn,
       credentials: deployedCredentials,
@@ -698,37 +713,6 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
           await configIO.writeDeployedState(updatedState);
           deployedState = updatedState;
         }
-      }
-    }
-
-    // Post-deploy: Create/update HTTP gateways for AB tests (must run BEFORE config bundles
-    // because config bundle component keys may reference gateway ARNs)
-    const httpGatewaySpecs = context.projectSpec.httpGateways ?? [];
-    const existingHttpGateways = deployedState.targets?.[target.name]?.resources?.httpGateways;
-    if (httpGatewaySpecs.length > 0 || Object.keys(existingHttpGateways ?? {}).length > 0) {
-      const deployedResources = deployedState.targets?.[target.name]?.resources;
-      const httpGatewayResult = await setupHttpGateways({
-        region: target.region,
-        projectName: context.projectSpec.name,
-        projectSpec: context.projectSpec,
-        existingHttpGateways,
-        deployedResources,
-      });
-
-      // Always merge HTTP gateway state (even if empty, to clear deleted gateways)
-      const updatedState = await configIO.readDeployedState().catch(() => deployedState);
-      const targetResources = updatedState.targets[target.name]?.resources;
-      if (targetResources) {
-        targetResources.httpGateways = httpGatewayResult.httpGateways;
-        await configIO.writeDeployedState(updatedState);
-        deployedState = updatedState;
-      }
-
-      if (httpGatewayResult.hasErrors) {
-        const errors = httpGatewayResult.results.filter(r => r.status === 'error');
-        const errorMessages = errors.map(err => `"${err.gatewayName}": ${err.error}`).join('; ');
-        logger.log(`HTTP gateway setup warnings: ${errorMessages}`, 'warn');
-        postDeployWarnings.push(...errors.map(err => `HTTP gateway "${err.gatewayName}": ${err.error}`));
       }
     }
 

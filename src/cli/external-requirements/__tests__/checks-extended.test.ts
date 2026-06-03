@@ -55,7 +55,6 @@ describe('requiresUv', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -85,7 +84,6 @@ describe('requiresUv', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -106,7 +104,6 @@ describe('requiresUv', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -138,7 +135,6 @@ describe('requiresContainerRuntime', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -168,7 +164,6 @@ describe('requiresContainerRuntime', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -189,7 +184,6 @@ describe('requiresContainerRuntime', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -227,7 +221,6 @@ describe('requiresContainerRuntime', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -299,7 +292,6 @@ describe('checkDependencyVersions', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -324,7 +316,6 @@ describe('checkDependencyVersions', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };
@@ -357,7 +348,6 @@ describe('checkDependencyVersions', () => {
       policyEngines: [],
       configBundles: [],
       abTests: [],
-      httpGateways: [],
       harnesses: [],
       datasets: [],
     };

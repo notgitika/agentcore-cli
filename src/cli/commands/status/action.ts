@@ -143,9 +143,12 @@ function buildGatewayInvocationUrl(
         : undefined;
     })();
   if (!baseUrl) return undefined;
-  const gwSpec = (project.httpGateways ?? []).find(gw => gw.name === gwName);
+  const gwSpec = (project.agentCoreGateways ?? []).find(gw => gw.name === gwName);
   if (!gwSpec) return baseUrl;
-  return `${baseUrl}/${gwSpec.runtimeRef}/invocations`;
+  // For HTTP protocol gateways, append the first httpRuntime target's runtime
+  const httpTarget = gwSpec.targets.find(t => t.targetType === 'httpRuntime');
+  if (!httpTarget?.httpRuntime?.runtime) return baseUrl;
+  return `${baseUrl}/${httpTarget.httpRuntime.runtime}/invocations`;
 }
 
 export function computeResourceStatuses(
@@ -181,7 +184,7 @@ export function computeResourceStatuses(
   const gateways = diffResourceSet({
     resourceType: 'gateway',
     localItems: project.agentCoreGateways ?? [],
-    deployedRecord: resources?.mcp?.gateways ?? {},
+    deployedRecord: { ...(resources?.mcp?.gateways ?? {}), ...(resources?.gateways ?? {}) },
     getIdentifier: deployed => deployed.gatewayId,
     getLocalDetail: item => {
       const count = item.targets?.length ?? 0;
@@ -259,7 +262,7 @@ export function computeResourceStatuses(
   });
 
   // Enrich deployed AB tests with gateway invocation URL
-  const httpGatewayState = resources?.httpGateways ?? {};
+  const httpGatewayState = resources?.gateways ?? {};
   for (const entry of abTests) {
     if (entry.deploymentState !== 'deployed') continue;
     const testSpec = (project.abTests ?? []).find(t => t.name === entry.name);

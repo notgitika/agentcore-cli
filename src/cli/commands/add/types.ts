@@ -46,6 +46,7 @@ export interface AddAgentOptions extends VpcOptions {
 export interface AddGatewayOptions {
   name?: string;
   description?: string;
+  protocolType?: string;
   authorizerType?: GatewayAuthorizerType;
   discoveryUrl?: string;
   allowedAudience?: string;
@@ -85,6 +86,8 @@ export interface AddGatewayTargetOptions {
   toolFilterMethods?: string;
   schema?: string;
   schemaS3Account?: string;
+  runtime?: string;
+  runtimeEndpoint?: string;
   json?: boolean;
 }
 

@@ -112,7 +112,7 @@ function VariantColumn({
           fieldLabel(
             FIELD_TARGET,
             'Target',
-            targetInfo ? `${targetInfo.name} (${targetInfo.runtimeRef}/${targetInfo.qualifier})` : '(not set)'
+            targetInfo ? `${targetInfo.name} (${targetInfo.runtime}/${targetInfo.endpoint})` : '(not set)'
           )
         )}
 
@@ -289,7 +289,7 @@ export function TargetBasedABTestScreen({
           items.push({
             id: `existing:${t.name}`,
             title: t.name,
-            description: `${t.runtimeRef}/${t.qualifier}`,
+            description: `${t.runtime}/${t.endpoint}`,
           });
         }
       }
@@ -334,7 +334,7 @@ export function TargetBasedABTestScreen({
     (targetInfo: TargetInfo | null): SelectableItem[] => {
       if (!targetInfo) return [];
       return onlineEvalConfigDetails
-        .filter(c => c.agent === targetInfo.runtimeRef && (c.endpoint ?? 'DEFAULT') === targetInfo.qualifier)
+        .filter(c => c.agent === targetInfo.runtime && (c.endpoint ?? 'DEFAULT') === targetInfo.endpoint)
         .map(c => ({ id: c.name, title: c.name, description: `${c.agent}/${c.endpoint ?? 'DEFAULT'}` }));
     },
     [onlineEvalConfigDetails]
@@ -394,14 +394,14 @@ export function TargetBasedABTestScreen({
         const selectedGw = httpGatewayDetails.find(g => g.name === wizard.config.gateway);
         const target = selectedGw?.targets.find(t => t.name === targetName);
         if (target) {
-          setter({ name: target.name, runtimeRef: target.runtimeRef, qualifier: target.qualifier }, false);
+          setter({ name: target.name, runtime: target.runtime, endpoint: target.endpoint }, false);
         }
       } else if (item.id.startsWith('endpoint:')) {
         const path = item.id.replace('endpoint:', '');
         const [runtimeName, endpointName] = path.split('/');
         if (runtimeName && endpointName) {
           const autoName = `${runtimeName}-${endpointName}`;
-          setter({ name: autoName, runtimeRef: runtimeName, qualifier: endpointName }, true);
+          setter({ name: autoName, runtime: runtimeName, endpoint: endpointName }, true);
         }
       }
       panel.deactivate();
@@ -512,7 +512,7 @@ export function TargetBasedABTestScreen({
   const formatTargetDisplay = (info: TargetInfo | null, isNew: boolean): string => {
     if (!info) return '(not set)';
     const newLabel = isNew ? ' (new)' : '';
-    return `${info.name} endpoint=${info.qualifier} runtime=${info.runtimeRef}${newLabel}`;
+    return `${info.name} endpoint=${info.endpoint} runtime=${info.runtime}${newLabel}`;
   };
 
   // ── Weight submit handlers ──────────────────────────────────────────────

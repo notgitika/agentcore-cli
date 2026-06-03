@@ -2,8 +2,7 @@ import { ConfigIO } from '../../../../lib';
 import { getCredentialProvider } from '../../../aws/account';
 import { getABTest, updateABTest } from '../../../aws/agentcore-ab-tests';
 import type { GetABTestResult } from '../../../aws/agentcore-ab-tests';
-import { getOnlineEvaluationConfig } from '../../../aws/agentcore-control';
-import { getHttpGateway, listHttpGatewayTargets } from '../../../aws/agentcore-http-gateways';
+import { getGatewayDetail, getOnlineEvaluationConfig, listGatewayTargetsPage } from '../../../aws/agentcore-control';
 import { dnsSuffix } from '../../../aws/partition';
 import { getErrorMessage } from '../../../errors';
 import { GradientText, Screen } from '../../components';
@@ -114,7 +113,7 @@ async function runDebugChecks(test: GetABTestResult, region: string): Promise<De
   // 2b. Gateway Role
   const gatewayId = extractId(test.gatewayArn);
   try {
-    const gateway = await getHttpGateway({ region, gatewayId });
+    const gateway = await getGatewayDetail({ region, gatewayId });
     results.push({
       label: 'Gateway Role',
       status: gateway.roleArn ? 'pass' : 'warn',
@@ -295,7 +294,7 @@ export function ABTestDetailScreen({ abTestId, region, onExit }: ABTestDetailScr
         // Fetch gateway target name for invocation URL
         const gwId = extractId(result.gatewayArn);
         try {
-          const targets = await listHttpGatewayTargets({ region, gatewayId: gwId, maxResults: 1 });
+          const targets = await listGatewayTargetsPage({ region, gatewayId: gwId, maxResults: 1 });
           const firstTarget = targets.targets[0];
           if (firstTarget) setTargetName(firstTarget.name);
         } catch {

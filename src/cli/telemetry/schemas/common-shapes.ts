@@ -79,6 +79,7 @@ export const GatewayTargetType = z.enum([
   'open-api-schema',
   'smithy-model',
   'lambda-function-arn',
+  'http-runtime',
   'unknown',
 ]);
 
@@ -89,6 +90,7 @@ export const GATEWAY_TARGET_TYPE_MAP: Record<string, z.infer<typeof GatewayTarge
   smithyModel: 'smithy-model',
   lambdaFunctionArn: 'lambda-function-arn',
   mcpServer: 'mcp-server',
+  httpRuntime: 'http-runtime',
 };
 export const AgentLanguage = z.enum(['python', 'typescript', 'other']);
 export const EvaluatorLevel = z.enum(['session', 'trace', 'tool_call']);

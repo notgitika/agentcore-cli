@@ -27,7 +27,6 @@ import {
   setupConfigBundles,
 } from '../../../operations/deploy/post-deploy-config-bundles';
 import { syncDatasets } from '../../../operations/deploy/post-deploy-datasets';
-import { setupHttpGateways } from '../../../operations/deploy/post-deploy-http-gateways';
 import { enableOnlineEvalConfigs } from '../../../operations/deploy/post-deploy-online-evals';
 import { withCommandRunTelemetry } from '../../../telemetry/cli-command-run.js';
 import {
@@ -549,48 +548,6 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
         logger.log(`AB test orphan cleanup failed: ${message}`, 'warn');
         setPostDeployHasError(true);
         setPostDeployWarnings(prev => [...prev, `AB test orphan cleanup failed: ${message}`]);
-      }
-    }
-
-    // Post-deploy: Create/update HTTP gateways
-    const httpGatewaySpecs = ctx.projectSpec.httpGateways ?? [];
-    const existingHttpGateways = deployedState.targets?.[target.name]?.resources?.httpGateways;
-    if (httpGatewaySpecs.length > 0 || Object.keys(existingHttpGateways ?? {}).length > 0) {
-      try {
-        const deployedResources = deployedState.targets?.[target.name]?.resources;
-        const httpGatewayResult = await setupHttpGateways({
-          region: target.region,
-          projectName: ctx.projectSpec.name,
-          projectSpec: ctx.projectSpec,
-          existingHttpGateways,
-          deployedResources,
-        });
-
-        // Always merge HTTP gateway state (even if empty, to clear deleted gateways)
-        const updatedState = await configIO.readDeployedState().catch(() => deployedState);
-        const targetResources = updatedState.targets[target.name]?.resources;
-        if (targetResources) {
-          targetResources.httpGateways = httpGatewayResult.httpGateways;
-          await configIO.writeDeployedState(updatedState);
-          deployedState = updatedState;
-        }
-
-        if (httpGatewayResult.hasErrors) {
-          const errors = httpGatewayResult.results.filter(r => r.status === 'error');
-          for (const err of errors) {
-            logger.log(`HTTP gateway "${err.gatewayName}" setup error: ${err.error}`, 'warn');
-          }
-          setPostDeployHasError(true);
-          setPostDeployWarnings(prev => [
-            ...prev,
-            ...errors.map(err => `HTTP gateway "${err.gatewayName}": ${err.error}`),
-          ]);
-        }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        logger.log(`HTTP gateway setup failed: ${message}`, 'warn');
-        setPostDeployHasError(true);
-        setPostDeployWarnings(prev => [...prev, `HTTP gateway setup failed: ${message}`]);
       }
     }
 

@@ -206,7 +206,7 @@ describe('useTargetBasedWizard', () => {
       const ref = React.createRef<HarnessHandle>();
       const { lastFrame } = render(<ImperativeHarness ref={ref} />);
 
-      const target: TargetInfo = { name: 'ctrl-target', runtimeRef: 'arn:runtime:1', qualifier: 'DEFAULT' };
+      const target: TargetInfo = { name: 'ctrl-target', runtime: 'arn:runtime:1', endpoint: 'DEFAULT' };
       act(() => ref.current!.setControlTarget(target, false));
 
       expect(lastFrame()).toContain('controlTargetInfo:ctrl-target');
@@ -216,7 +216,7 @@ describe('useTargetBasedWizard', () => {
       const ref = React.createRef<HarnessHandle>();
       const { lastFrame } = render(<ImperativeHarness ref={ref} />);
 
-      const target: TargetInfo = { name: 'tt1', runtimeRef: 'arn:runtime:2', qualifier: 'v2' };
+      const target: TargetInfo = { name: 'tt1', runtime: 'arn:runtime:2', endpoint: 'v2' };
       act(() => ref.current!.setTreatmentTarget(target, true));
 
       const frame = lastFrame()!.replace(/\n/g, '');
@@ -258,8 +258,8 @@ describe('useTargetBasedWizard', () => {
       const ref = React.createRef<HarnessHandle>();
       render(<ImperativeHarness ref={ref} />);
 
-      const controlTarget: TargetInfo = { name: 'ctrl', runtimeRef: 'arn:runtime:1', qualifier: 'DEFAULT' };
-      const treatmentTarget: TargetInfo = { name: 'treat', runtimeRef: 'arn:runtime:2', qualifier: 'v2' };
+      const controlTarget: TargetInfo = { name: 'ctrl', runtime: 'arn:runtime:1', endpoint: 'DEFAULT' };
+      const treatmentTarget: TargetInfo = { name: 'treat', runtime: 'arn:runtime:2', endpoint: 'v2' };
 
       act(() => ref.current!.setName('TestAB'));
       act(() => ref.current!.setDescription('A/B test'));

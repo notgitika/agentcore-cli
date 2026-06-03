@@ -505,7 +505,6 @@ describe('resolveConfigBundleComponentKeys', () => {
       agentCoreGateways: [],
       policyEngines: [],
       configBundles,
-      httpGateways: [],
       datasets: [],
       abTests: [],
       harnesses: [],
@@ -548,7 +547,7 @@ describe('resolveConfigBundleComponentKeys', () => {
       { name: 'b1', components: { '{{gateway:my-gw}}': { configuration: { k: 'v' } } } } as any,
     ]);
     const deployedState = makeDeployedState('target1', {
-      httpGateways: { 'my-gw': { gatewayArn: 'arn:aws:bedrock-agentcore:us-east-1:123:gateway/gw-1' } },
+      gateways: { 'my-gw': { gatewayArn: 'arn:aws:bedrock-agentcore:us-east-1:123:gateway/gw-1' } },
     });
 
     const result = resolveConfigBundleComponentKeys(spec, deployedState, 'target1');
@@ -595,7 +594,7 @@ describe('resolveConfigBundleComponentKeys', () => {
     const spec = makeFullProjectSpec([
       { name: 'b1', components: { '{{gateway:missing}}': { configuration: {} } } } as any,
     ]);
-    const deployedState = makeDeployedState('target1', { httpGateways: {}, mcp: { gateways: {} } });
+    const deployedState = makeDeployedState('target1', { gateways: {}, mcp: { gateways: {} } });
 
     expect(() => resolveConfigBundleComponentKeys(spec, deployedState, 'target1')).toThrow(
       'Config bundle references gateway "missing" but it was not found in deployed resources'
@@ -636,18 +635,18 @@ describe('resolveConfigBundleComponentKeys', () => {
     expect(Object.keys(result.configBundles[0]!.components)).toEqual(['arn:resolved']);
   });
 
-  it('prefers HTTP gateway over MCP gateway when both exist with same name', () => {
+  it('prefers MCP gateway over HTTP gateway when both exist with same name', () => {
     const spec = makeFullProjectSpec([
       { name: 'b1', components: { '{{gateway:dupe-gw}}': { configuration: {} } } } as any,
     ]);
     const deployedState = makeDeployedState('target1', {
-      httpGateways: { 'dupe-gw': { gatewayArn: 'arn:http:gw' } },
+      gateways: { 'dupe-gw': { gatewayArn: 'arn:http:gw' } },
       mcp: { gateways: { 'dupe-gw': { gatewayArn: 'arn:mcp:gw' } } },
     });
 
     const result = resolveConfigBundleComponentKeys(spec, deployedState, 'target1');
     const keys = Object.keys(result.configBundles[0]!.components);
-    // HTTP gateway should take precedence (checked first in code)
-    expect(keys).toEqual(['arn:http:gw']);
+    // MCP gateway should take precedence (checked first in code)
+    expect(keys).toEqual(['arn:mcp:gw']);
   });
 });

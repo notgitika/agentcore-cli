@@ -15,7 +15,6 @@ const defaultProject: AgentCoreProjectSpec = {
   policyEngines: [],
   configBundles: [],
   abTests: [],
-  httpGateways: [],
   harnesses: [],
   datasets: [],
 };

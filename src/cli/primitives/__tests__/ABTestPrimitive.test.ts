@@ -31,11 +31,10 @@ function makeProject(abTests: { name: string; gatewayRef?: string }[] = []) {
     credentials: [],
     evaluators: [],
     onlineEvalConfigs: [],
-    agentCoreGateways: [],
+    agentCoreGateways: [] as { name: string; targets?: { name: string }[] }[],
     policyEngines: [],
     configBundles: [],
     abTests,
-    httpGateways: [] as { name: string; runtimeRef: string }[],
   };
 }
 
@@ -202,9 +201,9 @@ describe('ABTestPrimitive', () => {
       }
     });
 
-    it('cascade-deletes orphaned HTTP gateway when last referencing AB test is removed', async () => {
+    it('retains gateway by default when last referencing AB test is removed', async () => {
       const project = makeProject([{ name: 'TestA', gatewayRef: '{{gateway:TestA-gw}}' }]);
-      project.httpGateways = [{ name: 'TestA-gw', runtimeRef: 'my-agent' }];
+      project.agentCoreGateways = [{ name: 'TestA-gw' }];
       mockReadProjectSpec.mockResolvedValue(project);
       mockWriteProjectSpec.mockResolvedValue(undefined);
 
@@ -214,15 +213,15 @@ describe('ABTestPrimitive', () => {
       const writtenSpec = mockWriteProjectSpec.mock.calls[0]![0];
       expect(writtenSpec.abTests).toHaveLength(0);
       // Gateway is retained by default — cascade-delete only happens with deleteGateway: true
-      expect(writtenSpec.httpGateways).toHaveLength(1);
+      expect(writtenSpec.agentCoreGateways).toHaveLength(1);
     });
 
-    it('retains HTTP gateway when another AB test still references it', async () => {
+    it('retains gateway when another AB test still references it', async () => {
       const project = makeProject([
         { name: 'TestA', gatewayRef: '{{gateway:shared-gw}}' },
         { name: 'TestB', gatewayRef: '{{gateway:shared-gw}}' },
       ]);
-      project.httpGateways = [{ name: 'shared-gw', runtimeRef: 'my-agent' }];
+      project.agentCoreGateways = [{ name: 'shared-gw' }];
       mockReadProjectSpec.mockResolvedValue(project);
       mockWriteProjectSpec.mockResolvedValue(undefined);
 
@@ -231,8 +230,8 @@ describe('ABTestPrimitive', () => {
       expect(result.success).toBe(true);
       const writtenSpec = mockWriteProjectSpec.mock.calls[0]![0];
       expect(writtenSpec.abTests).toHaveLength(1);
-      expect(writtenSpec.httpGateways).toHaveLength(1);
-      expect(writtenSpec.httpGateways[0].name).toBe('shared-gw');
+      expect(writtenSpec.agentCoreGateways).toHaveLength(1);
+      expect(writtenSpec.agentCoreGateways[0].name).toBe('shared-gw');
     });
   });
 

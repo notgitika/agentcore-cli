@@ -27,6 +27,8 @@ export type AddGatewayStep =
 export interface AddGatewayConfig {
   name: string;
   description: string;
+  /** Protocol type for the gateway. Omit for MCP (default). */
+  protocolType?: 'MCP' | 'None';
   /** Authorization type for the gateway */
   authorizerType: GatewayAuthorizerType;
   /** JWT authorizer configuration (when authorizerType is 'CUSTOM_JWT') */
@@ -94,6 +96,8 @@ export type AddGatewayTargetStep =
   | 'schema-source'
   | 'lambda-arn'
   | 'tool-schema'
+  | 'runtime'
+  | 'runtime-endpoint'
   | 'confirm';
 
 export type TargetLanguage = 'Python' | 'TypeScript' | 'Other';
@@ -124,6 +128,8 @@ export interface GatewayTargetWizardState {
   schemaSource?: SchemaSource;
   lambdaArn?: string;
   toolSchemaFile?: string;
+  /** Runtime name reference for httpRuntime targets */
+  runtime?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -178,11 +184,21 @@ export interface LambdaFunctionArnTargetConfig {
   toolSchemaFile: string;
 }
 
+export interface HttpRuntimeTargetConfig {
+  targetType: 'httpRuntime';
+  name: string;
+  gateway: string;
+  runtime: string;
+  endpoint?: string;
+  outboundAuth?: { type: string; credentialName?: string; scopes?: string[] };
+}
+
 export type AddGatewayTargetConfig =
   | McpServerTargetConfig
   | ApiGatewayTargetConfig
   | SchemaBasedTargetConfig
-  | LambdaFunctionArnTargetConfig;
+  | LambdaFunctionArnTargetConfig
+  | HttpRuntimeTargetConfig;
 
 export const MCP_TOOL_STEP_LABELS: Record<AddGatewayTargetStep, string> = {
   name: 'Name',
@@ -199,6 +215,8 @@ export const MCP_TOOL_STEP_LABELS: Record<AddGatewayTargetStep, string> = {
   'schema-source': 'Schema Source',
   'lambda-arn': 'Lambda ARN',
   'tool-schema': 'Tool Schema File',
+  runtime: 'Runtime',
+  'runtime-endpoint': 'Endpoint',
   confirm: 'Confirm',
 };
 
@@ -218,6 +236,7 @@ export const SKIP_FOR_NOW = 'skip-for-now' as const;
 export const NONE_SELECTION = '__none__' as const;
 
 export const TARGET_TYPE_OPTIONS = [
+  // MCP targets
   { id: 'mcpServer', title: 'MCP Server endpoint', description: 'Connect to an existing MCP-compatible server' },
   {
     id: 'apiGateway',
@@ -230,6 +249,12 @@ export const TARGET_TYPE_OPTIONS = [
     id: 'lambdaFunctionArn',
     title: 'Lambda function',
     description: 'Connect to an existing AWS Lambda function',
+  },
+  // HTTP targets
+  {
+    id: 'httpRuntime',
+    title: 'HTTP Runtime',
+    description: 'Route HTTP traffic to an AgentCore runtime',
   },
 ] as const;
 

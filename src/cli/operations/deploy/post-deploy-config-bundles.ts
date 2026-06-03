@@ -325,10 +325,11 @@ function resolveComponentKey(
   const gwMatch = /^\{\{gateway:(.+)\}\}$/.exec(key);
   if (gwMatch) {
     const gwName = gwMatch[1]!;
-    const httpGw = resources.httpGateways?.[gwName];
-    if (httpGw) return httpGw.gatewayArn;
+    // Lookup order doesn't matter — gateway names are unique across both maps
     const mcpGw = resources.mcp?.gateways?.[gwName];
     if (mcpGw) return mcpGw.gatewayArn;
+    const httpGw = resources.gateways?.[gwName];
+    if (httpGw) return httpGw.gatewayArn;
     throw new Error(
       `Config bundle references gateway "${gwName}" but it was not found in deployed resources. Ensure the gateway is defined in agentcore.json and deploys successfully.`
     );

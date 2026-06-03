@@ -97,6 +97,3 @@ export {
   HarnessTruncationConfigSchema,
   HarnessTruncationStrategySchema,
 } from './harness';
-
-export type { HttpGateway } from './http-gateway';
-export { HttpGatewayNameSchema, HttpGatewaySchema } from './http-gateway';

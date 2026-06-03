@@ -36,14 +36,14 @@ export interface RuntimeInfo {
 /** Gateway target info passed from the parent flow. */
 export interface GatewayTargetInfo {
   name: string;
-  runtimeRef: string;
-  qualifier: string;
+  runtime: string;
+  endpoint: string;
 }
 
 /** HTTP gateway info with targets, passed from the parent flow. */
 export interface HttpGatewayInfo {
   name: string;
-  runtimeRef: string;
+  runtime: string;
   targets: GatewayTargetInfo[];
 }
 
@@ -275,7 +275,7 @@ export function AddABTestScreen({
           items.push({
             id: `existing:${t.name}`,
             title: t.name,
-            description: `endpoint=${t.qualifier}  runtime=${t.runtimeRef}`,
+            description: `endpoint=${t.endpoint}  runtime=${t.runtime}`,
           });
         }
       }
@@ -410,10 +410,7 @@ export function AddABTestScreen({
         const selectedGw = httpGatewayDetails.find(g => g.name === wizard.config.gateway);
         const target = selectedGw?.targets.find(t => t.name === targetName);
         if (target) {
-          wizard.setControlTarget(
-            { name: target.name, runtimeRef: target.runtimeRef, qualifier: target.qualifier },
-            false
-          );
+          wizard.setControlTarget({ name: target.name, runtime: target.runtime, endpoint: target.endpoint }, false);
         }
         return;
       }
@@ -422,7 +419,7 @@ export function AddABTestScreen({
         const [runtimeName, endpointName] = path.split('/');
         if (runtimeName && endpointName) {
           const autoName = `${runtimeName}-${endpointName}`;
-          wizard.setControlTarget({ name: autoName, runtimeRef: runtimeName, qualifier: endpointName }, true);
+          wizard.setControlTarget({ name: autoName, runtime: runtimeName, endpoint: endpointName }, true);
         }
       }
     },
@@ -442,12 +439,12 @@ export function AddABTestScreen({
     isActive: isControlTargetStep && controlSubFlow === 'selectRuntime',
   });
 
-  // Control sub-flow: select qualifier (auto-generates target name)
+  // Control sub-flow: select endpoint (auto-generates target name)
   const controlEndpointNav = useListNavigation({
     items: controlEndpointItems,
     onSelect: item => {
       const autoName = `${controlNewRuntime}-${item.id}`;
-      wizard.setControlTarget({ name: autoName, runtimeRef: controlNewRuntime, qualifier: item.id }, true);
+      wizard.setControlTarget({ name: autoName, runtime: controlNewRuntime, endpoint: item.id }, true);
     },
     onExit: () => setControlSubFlow('selectRuntime'),
     isActive: isControlTargetStep && controlSubFlow === 'selectQualifier',
@@ -466,10 +463,7 @@ export function AddABTestScreen({
         const selectedGw = httpGatewayDetails.find(g => g.name === wizard.config.gateway);
         const target = selectedGw?.targets.find(t => t.name === targetName);
         if (target) {
-          wizard.setTreatmentTarget(
-            { name: target.name, runtimeRef: target.runtimeRef, qualifier: target.qualifier },
-            false
-          );
+          wizard.setTreatmentTarget({ name: target.name, runtime: target.runtime, endpoint: target.endpoint }, false);
         }
         return;
       }
@@ -478,7 +472,7 @@ export function AddABTestScreen({
         const [runtimeName, endpointName] = path.split('/');
         if (runtimeName && endpointName) {
           const autoName = `${runtimeName}-${endpointName}`;
-          wizard.setTreatmentTarget({ name: autoName, runtimeRef: runtimeName, qualifier: endpointName }, true);
+          wizard.setTreatmentTarget({ name: autoName, runtime: runtimeName, endpoint: endpointName }, true);
         }
       }
     },
@@ -498,12 +492,12 @@ export function AddABTestScreen({
     isActive: isTreatmentTargetStep && treatmentSubFlow === 'selectRuntime',
   });
 
-  // Treatment sub-flow: select qualifier (auto-generates target name)
+  // Treatment sub-flow: select endpoint (auto-generates target name)
   const treatmentEndpointNav = useListNavigation({
     items: treatmentEndpointItems,
     onSelect: item => {
       const autoName = `${treatmentNewRuntime}-${item.id}`;
-      wizard.setTreatmentTarget({ name: autoName, runtimeRef: treatmentNewRuntime, qualifier: item.id }, true);
+      wizard.setTreatmentTarget({ name: autoName, runtime: treatmentNewRuntime, endpoint: item.id }, true);
     },
     onExit: () => setTreatmentSubFlow('selectRuntime'),
     isActive: isTreatmentTargetStep && treatmentSubFlow === 'selectQualifier',
@@ -543,11 +537,11 @@ export function AddABTestScreen({
   }, [wizard.step]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  // Filter online eval configs by runtime + endpoint (qualifier)
-  const controlRuntime = wizard.config.controlTargetInfo?.runtimeRef ?? '';
-  const controlEndpoint = wizard.config.controlTargetInfo?.qualifier ?? '';
-  const treatmentRuntime = wizard.config.treatmentTargetInfo?.runtimeRef ?? '';
-  const treatmentEndpoint = wizard.config.treatmentTargetInfo?.qualifier ?? '';
+  // Filter online eval configs by runtime + endpoint
+  const controlRuntime = wizard.config.controlTargetInfo?.runtime ?? '';
+  const controlEndpoint = wizard.config.controlTargetInfo?.endpoint ?? '';
+  const treatmentRuntime = wizard.config.treatmentTargetInfo?.runtime ?? '';
+  const treatmentEndpoint = wizard.config.treatmentTargetInfo?.endpoint ?? '';
 
   const controlEvalItems: SelectableItem[] = useMemo(() => {
     return onlineEvalConfigDetails
@@ -625,7 +619,7 @@ export function AddABTestScreen({
   const formatTargetDisplay = (info: TargetInfo | null, isNew: boolean): string => {
     if (!info) return '(not set)';
     const newLabel = isNew ? ' (new)' : '';
-    return `${info.name} endpoint=${info.qualifier} runtime=${info.runtimeRef}${newLabel}`;
+    return `${info.name} endpoint=${info.endpoint} runtime=${info.runtime}${newLabel}`;
   };
 
   return (
@@ -732,7 +726,7 @@ export function AddABTestScreen({
               <Box marginBottom={1}>
                 <Text color="green">
                   {'\u2713'} Control: {wizard.config.controlTargetInfo.name} endpoint=
-                  {wizard.config.controlTargetInfo.qualifier}
+                  {wizard.config.controlTargetInfo.endpoint}
                 </Text>
               </Box>
             )}

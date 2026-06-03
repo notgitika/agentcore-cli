@@ -28,8 +28,8 @@ export type GatewayChoice = { type: 'create-new' } | { type: 'existing-http'; na
 /** Rich target info for target-based AB testing. */
 export interface TargetInfo {
   name: string;
-  runtimeRef: string;
-  qualifier: string;
+  runtime: string;
+  endpoint: string;
 }
 
 export interface AddABTestConfig {

@@ -6,7 +6,6 @@ import { deleteConfigurationBundle } from '../../aws/agentcore-config-bundles';
 import { CdkToolkitWrapper, silentIoHost } from '../../cdk/toolkit-lib';
 import { type DiscoveredStack, findStack } from '../../cloudformation/stack-discovery';
 import { deleteOrphanedABTests } from './post-deploy-ab-tests';
-import { deleteOrphanedHttpGateways } from './post-deploy-http-gateways';
 import { StackSelectionStrategy } from '@aws-cdk/toolkit-lib';
 import { existsSync } from 'fs';
 import { join } from 'path';
@@ -119,7 +118,7 @@ export async function performStackTeardown(targetName: string): Promise<Result> 
     const deployedState = await configIO.readDeployedState();
     const resources = deployedState.targets?.[targetName]?.resources;
 
-    if (resources?.httpGateways || resources?.configBundles || resources?.abTests) {
+    if (resources?.configBundles || resources?.abTests) {
       let region = deployedTarget?.target.region;
       if (!region) {
         try {
@@ -135,7 +134,7 @@ export async function performStackTeardown(targetName: string): Promise<Result> 
       }
       if (region) {
         const projectSpec = await configIO.readProjectSpec();
-        const emptySpec = { ...projectSpec, abTests: [], httpGateways: [] };
+        const emptySpec = { ...projectSpec, abTests: [] };
 
         if (resources.abTests) {
           const abResult = await deleteOrphanedABTests({
@@ -148,21 +147,6 @@ export async function performStackTeardown(targetName: string): Promise<Result> 
               console.log(`Deleted AB test "${r.testName}"`);
             } else if (r.error) {
               console.warn(`Warning: Failed to delete AB test "${r.testName}": ${r.error}`);
-            }
-          }
-        }
-
-        if (resources.httpGateways) {
-          const gwResult = await deleteOrphanedHttpGateways({
-            region,
-            projectSpec: emptySpec,
-            existingHttpGateways: resources.httpGateways,
-          });
-          for (const r of gwResult.results) {
-            if (r.status === 'deleted') {
-              console.log(`Deleted HTTP gateway "${r.gatewayName}"`);
-            } else if (r.error) {
-              console.warn(`Warning: Failed to delete HTTP gateway "${r.gatewayName}": ${r.error}`);
             }
           }
         }
