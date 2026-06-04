@@ -215,6 +215,7 @@ describe('agentcore-recommendation', () => {
       expect(result.recommendationResult?.systemPromptRecommendationResult?.recommendedSystemPrompt).toBe(
         'Optimized prompt'
       );
+      expect(result.recommendationResult?.systemPromptRecommendationResult?.explanation).toBe('Made it better');
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining('/recommendations/rec-123'),
         expect.objectContaining({ method: 'GET' })

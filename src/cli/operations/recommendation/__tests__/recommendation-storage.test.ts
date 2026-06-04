@@ -125,6 +125,54 @@ describe('recommendation-storage', () => {
     });
   });
 
+  describe('explanation field persistence', () => {
+    it('persists system prompt explanation in saved record', () => {
+      const result = makeResult({
+        result: {
+          systemPromptRecommendationResult: {
+            recommendedSystemPrompt: 'Improved prompt',
+            explanation: 'Added domain constraints to improve accuracy.',
+          },
+        },
+      });
+
+      saveRecommendationRun('rec-explain', result, 'SYSTEM_PROMPT_RECOMMENDATION', 'agent', ['eval']);
+      const loaded = loadRecommendationRun('rec-explain');
+
+      expect(loaded.result?.systemPromptRecommendationResult?.explanation).toBe(
+        'Added domain constraints to improve accuracy.'
+      );
+    });
+
+    it('persists per-tool explanation in tool description result', () => {
+      const result: RunRecommendationCommandResult = {
+        success: true,
+        recommendationId: 'rec-tool-explain',
+        status: 'COMPLETED',
+        startedAt: '2026-05-20T10:00:00.000Z',
+        completedAt: '2026-05-20T10:05:00.000Z',
+        result: {
+          toolDescriptionRecommendationResult: {
+            tools: [
+              {
+                toolName: 'search',
+                recommendedToolDescription: 'Search the web',
+                explanation: 'Made description more specific to reduce false triggers.',
+              },
+            ],
+          },
+        },
+      };
+
+      saveRecommendationRun('rec-tool-explain', result, 'TOOL_DESCRIPTION_RECOMMENDATION', 'agent', []);
+      const loaded = loadRecommendationRun('rec-tool-explain');
+
+      expect(loaded.result?.toolDescriptionRecommendationResult?.tools?.[0]?.explanation).toBe(
+        'Made description more specific to reduce false triggers.'
+      );
+    });
+  });
+
   describe('error when no config root', () => {
     it('throws when findConfigRoot returns null', () => {
       mockFindConfigRoot.mockReturnValue(null);

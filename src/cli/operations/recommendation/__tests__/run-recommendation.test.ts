@@ -147,6 +147,7 @@ describe('runRecommendationCommand', () => {
     expect(result.recommendationId).toBe('rec-001');
     expect(result.status).toBe('COMPLETED');
     expect(result.result?.systemPromptRecommendationResult?.recommendedSystemPrompt).toBe('Optimized prompt');
+    expect(result.result?.systemPromptRecommendationResult?.explanation).toBe('Made clearer');
   });
 
   it('returns error on FAILED status', async () => {
@@ -716,5 +717,124 @@ describe('runRecommendationCommand', () => {
     const callArgs = mockStartRecommendation.mock.calls[0]![0];
     const evaluators = callArgs.recommendationConfig.systemPromptRecommendationConfig.evaluationConfig.evaluators;
     expect(evaluators[0].evaluatorArn).toBe(fullArn);
+  });
+
+  it('returns explanation field in system prompt recommendation result', async () => {
+    mockStartRecommendation.mockResolvedValue({
+      recommendationId: 'rec-explain-sys',
+      status: 'PENDING',
+    });
+
+    mockGetRecommendation.mockResolvedValue({
+      recommendationId: 'rec-explain-sys',
+      status: 'COMPLETED',
+      createdAt: '2026-05-20T00:00:00Z',
+      completedAt: '2026-05-20T00:01:00Z',
+      recommendationResult: {
+        systemPromptRecommendationResult: {
+          recommendedSystemPrompt: 'Improved prompt with better structure',
+          explanation:
+            'The original prompt lacked specificity. Added domain constraints and output format instructions to improve helpfulness scores.',
+        },
+      },
+    });
+
+    const result = await runRecommendationCommand({
+      type: 'SYSTEM_PROMPT_RECOMMENDATION',
+      agent: 'MyAgent',
+      evaluators: ['Builtin.Helpfulness'],
+      inputSource: 'inline',
+      inlineContent: 'You are helpful.',
+      traceSource: 'cloudwatch',
+      pollIntervalMs: 0,
+    });
+
+    assert(result.success);
+    expect(result.result?.systemPromptRecommendationResult?.explanation).toBe(
+      'The original prompt lacked specificity. Added domain constraints and output format instructions to improve helpfulness scores.'
+    );
+  });
+
+  it('returns per-tool explanation in tool description recommendation result', async () => {
+    mockStartRecommendation.mockResolvedValue({
+      recommendationId: 'rec-explain-tool',
+      status: 'PENDING',
+    });
+
+    mockGetRecommendation.mockResolvedValue({
+      recommendationId: 'rec-explain-tool',
+      status: 'COMPLETED',
+      createdAt: '2026-05-20T00:00:00Z',
+      completedAt: '2026-05-20T00:01:00Z',
+      recommendationResult: {
+        toolDescriptionRecommendationResult: {
+          tools: [
+            {
+              toolName: 'search',
+              recommendedToolDescription: 'Search the web for current information on any topic.',
+              explanation: 'Added specificity about searching current information to reduce hallucination.',
+            },
+            {
+              toolName: 'calculator',
+              recommendedToolDescription: 'Perform precise arithmetic and mathematical calculations.',
+              explanation: 'Emphasized precision to improve tool selection for math queries.',
+            },
+          ],
+        },
+      },
+    });
+
+    const result = await runRecommendationCommand({
+      type: 'TOOL_DESCRIPTION_RECOMMENDATION',
+      agent: 'MyAgent',
+      evaluators: [],
+      inputSource: 'inline',
+      tools: ['search:Search the web', 'calculator:Do math'],
+      traceSource: 'cloudwatch',
+      pollIntervalMs: 0,
+    });
+
+    assert(result.success);
+    const tools = result.result?.toolDescriptionRecommendationResult?.tools;
+    expect(tools).toHaveLength(2);
+    expect(tools![0]!.explanation).toBe(
+      'Added specificity about searching current information to reduce hallucination.'
+    );
+    expect(tools![1]!.explanation).toBe('Emphasized precision to improve tool selection for math queries.');
+  });
+
+  it('handles missing explanation field gracefully (backward compatibility)', async () => {
+    mockStartRecommendation.mockResolvedValue({
+      recommendationId: 'rec-no-explain',
+      status: 'PENDING',
+    });
+
+    mockGetRecommendation.mockResolvedValue({
+      recommendationId: 'rec-no-explain',
+      status: 'COMPLETED',
+      createdAt: '2026-05-20T00:00:00Z',
+      completedAt: '2026-05-20T00:01:00Z',
+      recommendationResult: {
+        systemPromptRecommendationResult: {
+          recommendedSystemPrompt: 'Optimized prompt without explanation',
+        },
+      },
+    });
+
+    const result = await runRecommendationCommand({
+      type: 'SYSTEM_PROMPT_RECOMMENDATION',
+      agent: 'MyAgent',
+      evaluators: ['Builtin.Helpfulness'],
+      inputSource: 'inline',
+      inlineContent: 'You are helpful.',
+      traceSource: 'cloudwatch',
+      pollIntervalMs: 0,
+    });
+
+    assert(result.success);
+    expect(result.result?.systemPromptRecommendationResult?.recommendedSystemPrompt).toBe(
+      'Optimized prompt without explanation'
+    );
+    expect(result.result?.systemPromptRecommendationResult?.explanation).toBeUndefined();
   });
 });

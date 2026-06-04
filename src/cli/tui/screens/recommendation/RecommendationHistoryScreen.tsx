@@ -140,6 +140,16 @@ function RecommendationDetailView({ record, onBack }: { record: RecommendationRu
 
         {sysResult && (
           <Box marginTop={1} flexDirection="column">
+            {sysResult.explanation && (
+              <Box marginTop={1} flexDirection="column">
+                <Text bold color="yellow">
+                  Explanation:
+                </Text>
+                <Box marginLeft={2} marginTop={1}>
+                  <Text>{sysResult.explanation}</Text>
+                </Box>
+              </Box>
+            )}
             {sysResult.recommendedSystemPrompt && (
               <Box marginTop={1} flexDirection="column">
                 <Text bold color="cyan">
@@ -161,6 +171,12 @@ function RecommendationDetailView({ record, onBack }: { record: RecommendationRu
             {toolResult.tools.map(tool => (
               <Box key={tool.toolName} marginTop={1} marginLeft={2} flexDirection="column">
                 <Text bold>{tool.toolName}</Text>
+                {tool.explanation && (
+                  <Box marginTop={1}>
+                    <Text color="yellow">Explanation: </Text>
+                    <Text>{tool.explanation}</Text>
+                  </Box>
+                )}
                 <Text>{tool.recommendedToolDescription}</Text>
               </Box>
             ))}

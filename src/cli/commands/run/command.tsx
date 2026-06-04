@@ -468,6 +468,10 @@ export const registerRun = (program: Command) => {
               const toolResult = result.result.toolDescriptionRecommendationResult;
 
               if (sysResult) {
+                if (sysResult.explanation) {
+                  console.log('\n--- Explanation ---');
+                  console.log(sysResult.explanation);
+                }
                 if (sysResult.recommendedSystemPrompt) {
                   console.log('\n+++ Recommended System Prompt +++');
                   console.log(sysResult.recommendedSystemPrompt);
@@ -475,6 +479,9 @@ export const registerRun = (program: Command) => {
               } else if (toolResult?.tools) {
                 for (const tool of toolResult.tools) {
                   console.log(`\nTool: ${tool.toolName}`);
+                  if (tool.explanation) {
+                    console.log(`Explanation: ${tool.explanation}`);
+                  }
                   console.log(`Recommended: ${tool.recommendedToolDescription}`);
                 }
               }
