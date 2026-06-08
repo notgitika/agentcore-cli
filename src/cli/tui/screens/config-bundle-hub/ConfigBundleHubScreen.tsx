@@ -118,6 +118,12 @@ function BundleRow({ bundle, selected }: { bundle: BundleWithMeta; selected: boo
           <Text dimColor>Description: {bundle.description}</Text>
         </Text>
       )}
+      {bundle.createdAt && (
+        <Text>
+          {'  '}
+          <Text dimColor>Created: {formatRelativeTime(String(bundle.createdAt))}</Text>
+        </Text>
+      )}
       {bundle.lastUpdated && (
         <Text>
           {'  '}

@@ -18,6 +18,7 @@ export interface BundleWithMeta {
   description?: string;
   versionCount: number;
   branches: string[];
+  createdAt?: number;
   lastUpdated?: string;
 }
 
@@ -142,6 +143,7 @@ export function useConfigBundleHub(): ConfigBundleHubState {
                     description: bundleSpec.description,
                     versionCount: versions.versions.length,
                     branches: [...branchSet],
+                    createdAt: match.createdAt,
                     lastUpdated: latestTs || undefined,
                   };
                 }
