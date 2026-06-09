@@ -1,5 +1,6 @@
 import type {
   AgentCoreDeployedState,
+  ConfigBundleDeployedState,
   DatasetDeployedState,
   DeployedState,
   EvaluatorDeployedState,
@@ -458,6 +459,35 @@ export function parseDatasetOutputs(
   return datasets;
 }
 
+export function parseConfigBundleOutputs(
+  outputs: StackOutputs,
+  bundleNames: string[]
+): Record<string, ConfigBundleDeployedState> {
+  const bundles: Record<string, ConfigBundleDeployedState> = {};
+  const outputKeys = Object.keys(outputs);
+
+  for (const bundleName of bundleNames) {
+    const pascal = toPascalId('ConfigBundle', bundleName);
+    const idPrefix = `Application${pascal}IdOutput`;
+    const arnPrefix = `Application${pascal}ArnOutput`;
+    const versionPrefix = `Application${pascal}VersionIdOutput`;
+
+    const idKey = outputKeys.find(k => k.startsWith(idPrefix));
+    const arnKey = outputKeys.find(k => k.startsWith(arnPrefix));
+    const versionKey = outputKeys.find(k => k.startsWith(versionPrefix));
+
+    if (idKey && arnKey && versionKey) {
+      bundles[bundleName] = {
+        bundleId: outputs[idKey]!,
+        bundleArn: outputs[arnKey]!,
+        versionId: outputs[versionKey]!,
+      };
+    }
+  }
+
+  return bundles;
+}
+
 export interface BuildDeployedStateOptions {
   targetName: string;
   stackName: string;
@@ -489,6 +519,7 @@ export interface BuildDeployedStateOptions {
     }
   >;
   datasets?: Record<string, DatasetDeployedState>;
+  configBundles?: Record<string, ConfigBundleDeployedState>;
 }
 
 /**
@@ -512,6 +543,7 @@ export function buildDeployedState(opts: BuildDeployedStateOptions): DeployedSta
     runtimeEndpoints,
     harnesses,
     datasets,
+    configBundles,
   } = opts;
   const targetState: TargetDeployedState = {
     resources: {
@@ -560,10 +592,14 @@ export function buildDeployedState(opts: BuildDeployedStateOptions): DeployedSta
     targetState.resources!.datasets = datasets;
   }
 
-  // Carry forward config bundles from existing state (managed post-deploy, not via CFN outputs)
-  const existingConfigBundles = existingState?.targets?.[targetName]?.resources?.configBundles;
-  if (existingConfigBundles && Object.keys(existingConfigBundles).length > 0) {
-    targetState.resources!.configBundles = existingConfigBundles;
+  // Config bundles from CFN outputs (preferred) or carry forward from existing state (legacy)
+  if (configBundles && Object.keys(configBundles).length > 0) {
+    targetState.resources!.configBundles = configBundles;
+  } else {
+    const existingConfigBundles = existingState?.targets?.[targetName]?.resources?.configBundles;
+    if (existingConfigBundles && Object.keys(existingConfigBundles).length > 0) {
+      targetState.resources!.configBundles = existingConfigBundles;
+    }
   }
 
   // Carry forward AB tests from existing state (managed post-deploy, not via CFN outputs)

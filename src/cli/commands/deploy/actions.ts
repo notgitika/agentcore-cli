@@ -8,6 +8,7 @@ import {
   buildDeployedState,
   getStackOutputs,
   parseAgentOutputs,
+  parseConfigBundleOutputs,
   parseDatasetOutputs,
   parseEvaluatorOutputs,
   parseGatewayOutputs,
@@ -39,10 +40,6 @@ import { computeProjectDeployHash } from '../../operations/deploy/change-detecti
 import { formatTargetStatus, getGatewayTargetStatuses } from '../../operations/deploy/gateway-status';
 import { type ImperativeDeployContext, createDeploymentManager } from '../../operations/deploy/imperative';
 import { deleteOrphanedABTests, setupABTests } from '../../operations/deploy/post-deploy-ab-tests';
-import {
-  resolveConfigBundleComponentKeys,
-  setupConfigBundles,
-} from '../../operations/deploy/post-deploy-config-bundles';
 import { syncDatasets } from '../../operations/deploy/post-deploy-datasets';
 import { enableOnlineEvalConfigs } from '../../operations/deploy/post-deploy-online-evals';
 import { toStackName } from '../import/import-utils';
@@ -518,6 +515,10 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     const datasetNames = (context.projectSpec.datasets ?? []).map(d => d.name);
     const datasets = parseDatasetOutputs(outputs, datasetNames);
 
+    // Parse config bundle outputs
+    const configBundleNames = (context.projectSpec.configBundles ?? []).map(b => b.name);
+    const configBundles = parseConfigBundleOutputs(outputs, configBundleNames);
+
     endStep('success');
 
     // Post-CDK: deploy imperative resources (harness) — preview mode only
@@ -587,6 +588,7 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       harnesses: deployedHarnesses,
       runtimeEndpoints,
       datasets,
+      configBundles,
     });
 
     if (deployHash) {
@@ -716,37 +718,8 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       }
     }
 
-    // Post-deploy: Create/update configuration bundles
-    const configBundleSpecs = context.projectSpec.configBundles ?? [];
-    if (configBundleSpecs.length > 0) {
-      // Resolve component key placeholders (e.g., {{gateway:name}} → real ARN)
-      const resolvedProjectSpec = resolveConfigBundleComponentKeys(context.projectSpec, deployedState, target.name);
-
-      const existingConfigBundles = deployedState.targets?.[target.name]?.resources?.configBundles;
-      const configBundleResult = await setupConfigBundles({
-        region: target.region,
-        projectSpec: resolvedProjectSpec,
-        existingBundles: existingConfigBundles,
-      });
-
-      // Merge config bundle state into deployed state
-      if (Object.keys(configBundleResult.configBundles).length > 0) {
-        const updatedState = await configIO.readDeployedState().catch(() => deployedState);
-        const targetResources = updatedState.targets[target.name]?.resources;
-        if (targetResources) {
-          targetResources.configBundles = configBundleResult.configBundles;
-          await configIO.writeDeployedState(updatedState);
-          deployedState = updatedState;
-        }
-      }
-
-      if (configBundleResult.hasErrors) {
-        const errors = configBundleResult.results.filter(r => r.status === 'error');
-        const errorMessages = errors.map(err => `"${err.bundleName}": ${err.error}`).join('; ');
-        logger.log(`Config bundle setup warnings: ${errorMessages}`, 'warn');
-        postDeployWarnings.push(...errors.map(err => `Config bundle "${err.bundleName}": ${err.error}`));
-      }
-    }
+    // Config bundles are now managed via CloudFormation (no post-deploy API step needed).
+    // State is extracted from stack outputs above.
 
     // Post-deploy: Create/update AB tests
     const abTestSpecs = context.projectSpec.abTests ?? [];

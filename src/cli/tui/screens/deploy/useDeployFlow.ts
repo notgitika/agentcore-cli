@@ -5,6 +5,7 @@ import {
   buildDeployedState,
   getStackOutputs,
   parseAgentOutputs,
+  parseConfigBundleOutputs,
   parseDatasetOutputs,
   parseEvaluatorOutputs,
   parseGatewayOutputs,
@@ -22,10 +23,6 @@ import { computeProjectDeployHash } from '../../../operations/deploy/change-dete
 import { getGatewayTargetStatuses } from '../../../operations/deploy/gateway-status';
 import { createDeploymentManager } from '../../../operations/deploy/imperative';
 import { deleteOrphanedABTests, setupABTests } from '../../../operations/deploy/post-deploy-ab-tests';
-import {
-  resolveConfigBundleComponentKeys,
-  setupConfigBundles,
-} from '../../../operations/deploy/post-deploy-config-bundles';
 import { syncDatasets } from '../../../operations/deploy/post-deploy-datasets';
 import { enableOnlineEvalConfigs } from '../../../operations/deploy/post-deploy-online-evals';
 import { withCommandRunTelemetry } from '../../../telemetry/cli-command-run.js';
@@ -318,6 +315,10 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     const datasetNames = (ctx.projectSpec.datasets ?? []).map((d: { name: string }) => d.name);
     const datasets = parseDatasetOutputs(outputs, datasetNames);
 
+    // Parse config bundle outputs
+    const configBundleNames = (ctx.projectSpec.configBundles ?? []).map((b: { name: string }) => b.name);
+    const configBundles = parseConfigBundleOutputs(outputs, configBundleNames);
+
     // Expose outputs to UI
     setStackOutputs(outputs);
 
@@ -368,6 +369,7 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
       policyEngines,
       policies,
       datasets,
+      configBundles,
       harnesses: deployedHarnesses,
     });
 
@@ -461,47 +463,8 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
       }
     }
 
-    // Post-deploy: Create/update configuration bundles
-    const configBundleSpecs = ctx.projectSpec.configBundles ?? [];
-    if (configBundleSpecs.length > 0) {
-      try {
-        // Resolve component key placeholders (e.g., {{runtime:name}} → real ARN)
-        const resolvedProjectSpec = resolveConfigBundleComponentKeys(ctx.projectSpec, deployedState, target.name);
-        const existingConfigBundles = deployedState.targets?.[target.name]?.resources?.configBundles;
-        const configBundleResult = await setupConfigBundles({
-          region: target.region,
-          projectSpec: resolvedProjectSpec,
-          existingBundles: existingConfigBundles,
-        });
-
-        // Merge config bundle state into deployed state
-        if (Object.keys(configBundleResult.configBundles).length > 0) {
-          const updatedState = await configIO.readDeployedState().catch(() => deployedState);
-          const targetResources = updatedState.targets[target.name]?.resources;
-          if (targetResources) {
-            targetResources.configBundles = configBundleResult.configBundles;
-            await configIO.writeDeployedState(updatedState);
-          }
-        }
-
-        if (configBundleResult.hasErrors) {
-          const errors = configBundleResult.results.filter(r => r.status === 'error');
-          for (const err of errors) {
-            logger.log(`Config bundle "${err.bundleName}" setup error: ${err.error}`, 'warn');
-          }
-          setPostDeployHasError(true);
-          setPostDeployWarnings(prev => [
-            ...prev,
-            ...errors.map(err => `Config bundle "${err.bundleName}": ${err.error}`),
-          ]);
-        }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        logger.log(`Config bundle setup failed: ${message}`, 'warn');
-        setPostDeployHasError(true);
-        setPostDeployWarnings(prev => [...prev, `Config bundle setup failed: ${message}`]);
-      }
-    }
+    // Config bundles are now managed via CloudFormation (no post-deploy API step needed).
+    // State is extracted from stack outputs above.
 
     // Pre-gateway: Delete orphaned AB tests so their gateway rules are cleaned up
     // before we attempt to delete orphaned HTTP gateways.
