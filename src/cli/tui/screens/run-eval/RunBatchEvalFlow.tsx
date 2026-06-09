@@ -1,4 +1,5 @@
 import { ConfigIO } from '../../../../lib';
+import { isValidKmsKeyArn } from '../../../../schema';
 import { validateAwsCredentials } from '../../../aws/account';
 import type { SessionMetadataEntry } from '../../../aws/agentcore-batch-evaluation';
 import { listEvaluators } from '../../../aws/agentcore-control';
@@ -46,7 +47,16 @@ const BATCH_INGESTION_DELAY_MS = 180_000;
 
 // 'source' is a breadcrumb-only step (the source-picker) — it is NOT part of the wizard's
 // navigable steps, only shown in the StepIndicator so the picker and wizard share one header.
-type BatchEvalStep = 'source' | 'agent' | 'evaluators' | 'days' | 'sessions' | 'ground-truth' | 'name' | 'confirm';
+type BatchEvalStep =
+  | 'source'
+  | 'agent'
+  | 'evaluators'
+  | 'days'
+  | 'sessions'
+  | 'ground-truth'
+  | 'kms-key-arn'
+  | 'name'
+  | 'confirm';
 
 interface BatchEvalConfig {
   agent: string;
@@ -56,6 +66,7 @@ interface BatchEvalConfig {
   sessionIds: string[];
   groundTruthFile: string;
   sessionMetadata?: SessionMetadataEntry[];
+  kmsKeyArn: string;
   name: string;
   dataset?: string;
   datasetVersion?: string;
@@ -68,6 +79,7 @@ const STEP_LABELS: Record<BatchEvalStep, string> = {
   days: 'Lookback',
   sessions: 'Sessions',
   'ground-truth': 'Ground Truth',
+  'kms-key-arn': 'KMS Key',
   name: 'Name',
   confirm: 'Confirm',
 };
@@ -313,6 +325,7 @@ export function RunBatchEvalFlow({ onExit, onViewJobs }: RunBatchEvalFlowProps) 
           sessionMetadata: config.sessionMetadata,
           source: config.dataset ? 'dataset' : 'traces',
           dataset: config.dataset ? { id: config.dataset, version: config.datasetVersion ?? 'LOCAL' } : undefined,
+          kmsKeyArn: config.kmsKeyArn || undefined,
         });
 
         if (cancelled) return;
@@ -521,11 +534,13 @@ function BatchEvalWizard({
   const isDatasetMode = source === 'dataset';
   const allSteps = useMemo<BatchEvalStep[]>(() => {
     if (isDatasetMode) {
-      return skipAgent ? ['evaluators', 'name', 'confirm'] : ['agent', 'evaluators', 'name', 'confirm'];
+      return skipAgent
+        ? ['evaluators', 'kms-key-arn', 'name', 'confirm']
+        : ['agent', 'evaluators', 'kms-key-arn', 'name', 'confirm'];
     }
     return skipAgent
-      ? ['evaluators', 'days', 'sessions', 'ground-truth', 'name', 'confirm']
-      : ['agent', 'evaluators', 'days', 'sessions', 'ground-truth', 'name', 'confirm'];
+      ? ['evaluators', 'days', 'sessions', 'ground-truth', 'kms-key-arn', 'name', 'confirm']
+      : ['agent', 'evaluators', 'days', 'sessions', 'ground-truth', 'kms-key-arn', 'name', 'confirm'];
   }, [skipAgent, isDatasetMode]);
 
   const [step, setStep] = useState<BatchEvalStep>(allSteps[0]!);
@@ -537,6 +552,7 @@ function BatchEvalWizard({
     sessionIds: [],
     groundTruthFile: '',
     sessionMetadata: undefined,
+    kmsKeyArn: '',
     name: '',
   });
 
@@ -584,6 +600,7 @@ function BatchEvalWizard({
   const isDaysStep = step === 'days';
   const isSessionsStep = step === 'sessions';
   const isGroundTruthStep = step === 'ground-truth';
+  const isKmsKeyArnStep = step === 'kms-key-arn';
   const isNameStep = step === 'name';
   const isConfirmStep = step === 'confirm';
 
@@ -910,6 +927,27 @@ function BatchEvalWizard({
           />
         )}
 
+        {isKmsKeyArnStep && (
+          <TextInput
+            key="kms-key-arn"
+            prompt="KMS key ARN for encryption (optional, press Enter to skip)"
+            initialValue=""
+            allowEmpty
+            onSubmit={value => {
+              setConfig(c => ({ ...c, kmsKeyArn: value }));
+              goNext();
+            }}
+            onCancel={() => goBack()}
+            customValidation={value => {
+              if (!value) return true;
+              if (!isValidKmsKeyArn(value)) {
+                return 'Invalid KMS key ARN (e.g. arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012)';
+              }
+              return true;
+            }}
+          />
+        )}
+
         {isNameStep && (
           <Box flexDirection="column">
             <Text dimColor>Optional — leave blank for auto-generated name.</Text>
@@ -949,6 +987,7 @@ function BatchEvalWizard({
                         ]
                       : []),
                   ]),
+              ...(config.kmsKeyArn ? [{ label: 'KMS Key ARN', value: config.kmsKeyArn }] : []),
               ...(config.name ? [{ label: 'Name', value: config.name }] : []),
             ]}
           />

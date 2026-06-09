@@ -172,7 +172,13 @@ export const recommendationHandler: RecommendationHandler = {
       logger?.startStep('Start recommendation');
       const name = opts.recommendationName ?? `${projectSpec.name}_${opts.agent}_${Date.now()}`;
       opts.onProgress?.('starting', `Starting recommendation "${name}"...`);
-      const startResult = await startRecommendation({ region, name, type: opts.type, recommendationConfig });
+      const startResult = await startRecommendation({
+        region,
+        name,
+        type: opts.type,
+        recommendationConfig,
+        kmsKeyArn: opts.kmsKeyArn,
+      });
       logger?.log(`Response: ${JSON.stringify(startResult, null, 2)}`);
       logger?.endStep('success');
       opts.onProgress?.('started', `Recommendation created: ${startResult.recommendationId} (${startResult.status})`);

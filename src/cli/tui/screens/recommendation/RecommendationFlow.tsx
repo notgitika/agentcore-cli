@@ -128,6 +128,7 @@ export function RecommendationFlow({ onExit, onViewJobs }: RecommendationFlowPro
           traceSource: config.traceSource,
           lookbackDays: config.days,
           sessionIds: config.sessionIds.length > 0 ? config.sessionIds : undefined,
+          kmsKeyArn: config.kmsKeyArn || undefined,
         });
 
         if (cancelled) return;

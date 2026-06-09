@@ -147,6 +147,7 @@ export const batchEvaluationHandler: BatchEvaluationHandler = {
         ...(opts.sessionMetadata && opts.sessionMetadata.length > 0
           ? { evaluationMetadata: { sessionMetadata: opts.sessionMetadata } }
           : {}),
+        ...(opts.kmsKeyArn ? { kmsKeyArn: opts.kmsKeyArn } : {}),
         clientToken: generateClientToken(),
       });
       logger?.log(`Response: ${JSON.stringify(startResult, null, 2)}`);

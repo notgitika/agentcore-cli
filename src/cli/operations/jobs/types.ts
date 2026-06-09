@@ -126,6 +126,8 @@ export interface StartRecommendationJobOptions {
   region?: string;
   /** Optional recommendation name. */
   recommendationName?: string;
+  /** KMS key ARN for encrypting recommendation results. */
+  kmsKeyArn?: string;
   /** Progress for the slow pre-start span fetch (sessions/spans-file). */
   onProgress?: (status: string, message: string) => void;
 }
@@ -147,6 +149,8 @@ export interface StartBatchEvaluationJobOptions {
   /** Recorded on the job for display; the engine does NOT run dataset Phase-1 (caller does). */
   source?: BatchEvaluationSource;
   dataset?: { id: string; version: string };
+  /** KMS key ARN for encrypting batch evaluation results. */
+  kmsKeyArn?: string;
   onProgress?: (status: string, message: string) => void;
 }
 
