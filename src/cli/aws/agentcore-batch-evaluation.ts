@@ -13,6 +13,7 @@
  *
  * Uses direct HTTP requests with SigV4 signing (service: bedrock-agentcore).
  */
+import { JobNotFoundError } from '../../lib';
 import { getCredentialProvider } from './account';
 import { dnsSuffix } from './partition';
 import { Sha256 } from '@aws-crypto/sha256-js';
@@ -266,7 +267,11 @@ async function signedRequest(options: {
 
   if (!response.ok) {
     const errorBody = await response.text();
-    throw new Error(`BatchEvaluation API error (${response.status}): ${errorBody}`);
+    const message = `BatchEvaluation API error (${response.status}): ${errorBody}`;
+    if (response.status === 404) {
+      throw new JobNotFoundError(message, { errorSource: 'service' });
+    }
+    throw new Error(message);
   }
 
   if (response.status === 204) return { data: {}, status: 204 };

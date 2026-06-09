@@ -15,6 +15,7 @@
  * StartRecommendation, poll via GetRecommendation, and stop via
  * DeleteRecommendation (stop-via-delete pattern).
  */
+import { JobNotFoundError } from '../../lib';
 import { getCredentialProvider } from './account';
 import { dnsSuffix } from './partition';
 import { Sha256 } from '@aws-crypto/sha256-js';
@@ -279,7 +280,11 @@ async function signedRequest(options: {
 
   if (!response.ok) {
     const errorBody = await response.text();
-    throw new Error(`Recommendation API error (${response.status}): ${errorBody} [requestId: ${requestId}]`);
+    const message = `Recommendation API error (${response.status}): ${errorBody} [requestId: ${requestId}]`;
+    if (response.status === 404) {
+      throw new JobNotFoundError(message, { errorSource: 'service' });
+    }
+    throw new Error(message);
   }
 
   if (response.status === 204) return { data: {}, status: 204, requestId };

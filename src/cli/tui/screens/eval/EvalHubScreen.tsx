@@ -27,8 +27,8 @@ export function EvalHubScreen({ onSelect, onExit }: EvalHubScreenProps) {
       },
       {
         id: 'batch-eval-history',
-        title: 'Batch Eval History',
-        description: 'View past batch evaluation results (local)',
+        title: 'Batch Eval Jobs',
+        description: 'View batch evaluation jobs and their results',
       },
       {
         id: 'online-dashboard',

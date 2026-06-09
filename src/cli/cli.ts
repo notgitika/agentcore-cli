@@ -3,6 +3,7 @@ import { registerABTestCommand } from './commands/abtest';
 import { registerAdd } from './commands/add';
 import { registerAddTool } from './commands/add/tool-command';
 import { registerArchive } from './commands/archive';
+import { registerBatchEvaluations } from './commands/batch-evaluations';
 import { registerConfigBundle } from './commands/config-bundle';
 import { registerCreate } from './commands/create';
 import { registerDataset } from './commands/dataset';
@@ -101,6 +102,7 @@ export function registerCommands(program: Command) {
   registerPackage(program);
   registerPause(program);
   registerRecommendations(program);
+  registerBatchEvaluations(program);
   const removeCmd = registerRemove(program);
   registerResume(program);
   registerRun(program);

@@ -80,6 +80,15 @@ export class ResourceNotFoundError extends BaseError {
 }
 
 /**
+ * Error indicating a job (recommendation / batch evaluation) was not found locally or on the service.
+ */
+export class JobNotFoundError extends BaseError {
+  constructor(message: string, options?: BaseErrorOptions) {
+    super(message, { defaultSource: 'user', ...options });
+  }
+}
+
+/**
  * Error indicating invalid input or configuration values.
  */
 export class ValidationError extends BaseError {

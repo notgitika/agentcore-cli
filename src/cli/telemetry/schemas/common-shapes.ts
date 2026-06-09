@@ -103,6 +103,11 @@ export const PolicyEngineMode = z.enum(['log_only', 'enforce']);
 export const AgentProtocol = z.enum(['http', 'mcp', 'a2a', 'agui']);
 export const RefType = z.enum(['arn', 'name']);
 export const ResourceType = z.enum(['gateway', 'agent']);
+export const JobType = z.enum(['recommendation', 'batch-evaluation']);
+export const RecommendationKind = z.enum(['system-prompt', 'tool-description']);
+export const RecommendationInputSource = z.enum(['config-bundle', 'inline', 'file']);
+export const RecommendationTraceSource = z.enum(['cloudwatch', 'sessions', 'spans-file']);
+export const BatchEvalSource = z.enum(['traces', 'dataset']);
 export const PolicyAttrSourceType = z.enum(['file', 'statement', 'generate']);
 export const PolicyValidationMode = z.enum(['fail_on_any_findings', 'ignore_all_findings']);
 
@@ -120,6 +125,7 @@ export const ErrorName = z.enum([
   'ConnectionError',
   'DependencyCheckError',
   'GitInitError',
+  'JobNotFoundError',
   'MissingDependencyError',
   'MissingProjectFileError',
   'NoProjectError',
@@ -203,6 +209,12 @@ export const ATTRIBUTES = {
   agent_protocol: AgentProtocol,
   ref_type: RefType,
   resource_type: ResourceType,
+  job_type: JobType,
+  recommendation_kind: RecommendationKind,
+  recommendation_input_source: RecommendationInputSource,
+  recommendation_trace_source: RecommendationTraceSource,
+  batch_eval_source: BatchEvalSource,
+  has_wait: z.boolean(),
   runtime_count: Count,
   semantic_search: z.boolean(),
   policy_attr_source_type: PolicyAttrSourceType,

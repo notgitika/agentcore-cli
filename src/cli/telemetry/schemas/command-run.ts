@@ -17,6 +17,7 @@ import {
   FilterType,
   GatewayTargetHost,
   GatewayTargetType,
+  JobType,
   MemoryType,
   Mode,
   ModelProvider,
@@ -137,6 +138,19 @@ const RunEvalAttrs = safeSchema({
 
 const FetchAccessAttrs = safeSchema({ resource_type: ResourceType });
 
+/**
+ * Async job commands (recommendation + batch-evaluation), keyed by verb with job_type to disambiguate.
+ * safeSchema only permits required enum/boolean/number/literal fields, so per-type detail enums
+ * (recommendation_kind, batch_eval_source, …) are recorded via the shared ATTRIBUTES set on the
+ * recorder when present rather than as required fields here.
+ */
+const RunJobAttrs = safeSchema({
+  job_type: JobType,
+  has_wait: z.boolean(),
+});
+
+const JobTypeOnlyAttrs = safeSchema({ job_type: JobType });
+
 const UpdateAttrs = safeSchema({ is_dry_run: z.boolean() });
 
 const FeedbackAttrs = safeSchema({
@@ -172,6 +186,12 @@ export const COMMAND_SCHEMAS = {
   logs: LogsAttrs,
   'logs.evals': LogsEvalsAttrs,
   'run.eval': RunEvalAttrs,
+  // Job engine commands — schema names may evolve as AB tests are added and the command surface stabilizes.
+  'run.job': RunJobAttrs,
+  'job.history': JobTypeOnlyAttrs,
+  'job.get': JobTypeOnlyAttrs,
+  'archive.job': JobTypeOnlyAttrs,
+  'stop.job': JobTypeOnlyAttrs,
   'fetch.access': FetchAccessAttrs,
   feedback: FeedbackAttrs,
   update: UpdateAttrs,

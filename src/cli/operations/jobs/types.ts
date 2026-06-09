@@ -1,0 +1,251 @@
+/**
+ * Job Engine type system (Design 2 — composed traits + type-narrowed signatures).
+ *
+ * A "job" is an async, fire-and-forget operation (recommendation or batch evaluation):
+ * `start` makes one API call + saves a local record; `get`/`list` refresh non-terminal
+ * records on read. Handlers are composed from small traits; the engine's public surface
+ * is type-narrowed so illegal operations (e.g. stopping a recommendation) are compile errors.
+ */
+import type { ConfigIO } from '../../../lib';
+import type { Result } from '../../../lib/result';
+import type {
+  BatchEvaluationResultEntry,
+  EvaluationResults,
+  SessionMetadataEntry,
+} from '../../aws/agentcore-batch-evaluation';
+import type { RecommendationResult, RecommendationType } from '../../aws/agentcore-recommendation';
+
+export type { RecommendationType } from '../../aws/agentcore-recommendation';
+
+// ============================================================================
+// Job types & statuses
+// ============================================================================
+
+/** The two job types this engine manages (AB tests come later). */
+export type JobType = 'recommendation' | 'batch-evaluation';
+
+/** CLI-facing input source for a recommendation. */
+export type RecommendationInputSource = 'config-bundle' | 'inline' | 'file';
+
+/** CLI-facing trace source for a recommendation. */
+export type RecommendationTraceSource = 'cloudwatch' | 'sessions' | 'spans-file';
+
+/** Where the batch evaluation sessions came from. */
+export type BatchEvaluationSource = 'traces' | 'dataset';
+
+/** Tool name → JSONPath pairs for config-bundle tool descriptions. */
+export interface ToolDescJsonPath {
+  toolName: string;
+  toolDescriptionJsonPath: string;
+}
+
+// ============================================================================
+// Records (discriminated union on `type`)
+// ============================================================================
+
+/** Fields every job record carries, regardless of type. Note: region is NOT stored — parse from `arn`. */
+export interface JobRecordBase {
+  /** Job type discriminator. */
+  type: JobType;
+  /** Service-assigned job id (also the storage filename). */
+  id: string;
+  /** Service ARN — region is parsed back out of this for refresh/stop/archive. */
+  arn: string;
+  /** Latest known status (raw service string; may be a value not in the JobStatus union). */
+  status: string;
+  /** ISO timestamp the job was created (API value, else local clock at create time). */
+  createdAt: string;
+  /** ISO timestamp the job reached a terminal state. */
+  completedAt?: string;
+  /** Agent the job ran against. */
+  agent: string;
+  /** Path to the local ExecLogger trace for the start call. */
+  logFilePath?: string;
+  /** Persistent error from the last failed refresh (after retries exhausted). Settles the record. */
+  error?: string;
+}
+
+export interface RecommendationJobRecord extends JobRecordBase {
+  type: 'recommendation';
+  recommendationType: RecommendationType;
+  /** Raw user-supplied evaluator display name(s) (resolved to ARNs only transiently for the API). */
+  evaluators: string[];
+  inputSource: RecommendationInputSource;
+  /** Source config-bundle identity (needed by the apply-to-bundle settle step). */
+  bundleName?: string;
+  bundleArn?: string;
+  bundleVersion?: string;
+  systemPromptJsonPath?: string;
+  toolDescJsonPaths?: ToolDescJsonPath[];
+  /** Optimized artifact, populated by refresh() once COMPLETED. */
+  result?: RecommendationResult;
+  /** Top-level failure reasons from the API (FAILED only). */
+  statusReasons?: string[];
+  /** Flattened failure detail (errorCode/errorMessage) for display (FAILED only). */
+  failureDetail?: string;
+  /** New config-bundle version already synced to agentcore.json (idempotency guard for settle). */
+  syncedVersionId?: string;
+}
+
+export interface BatchEvaluationJobRecord extends JobRecordBase {
+  type: 'batch-evaluation';
+  name: string;
+  /** Resolved evaluator ids sent to the API (short ids / Builtin.*). */
+  evaluators: string[];
+  source?: BatchEvaluationSource;
+  dataset?: { id: string; version: string };
+  /** Server-computed evaluator summaries (from GetBatchEvaluation). */
+  evaluationResults?: EvaluationResults;
+  /** Per-session scores fetched from CloudWatch output logs on terminal status. */
+  results?: BatchEvaluationResultEntry[];
+}
+
+export type JobRecord = RecommendationJobRecord | BatchEvaluationJobRecord;
+
+// ============================================================================
+// Start options (engine-facing; non-colliding with the AWS-layer Start* types)
+// ============================================================================
+
+export interface StartRecommendationJobOptions {
+  type: RecommendationType;
+  agent: string;
+  /** Evaluator name(s), Builtin.* ids, or ARNs (exactly one for system-prompt; none for tool-description). */
+  evaluators: string[];
+  inputSource: RecommendationInputSource;
+  bundleName?: string;
+  bundleVersion?: string;
+  systemPromptJsonPath?: string;
+  toolDescJsonPaths?: ToolDescJsonPath[];
+  inlineContent?: string;
+  promptFile?: string;
+  tools?: string[];
+  traceSource: RecommendationTraceSource;
+  lookbackDays?: number;
+  sessionIds?: string[];
+  spansFile?: string;
+  region?: string;
+  /** Optional recommendation name. */
+  recommendationName?: string;
+  /** Progress for the slow pre-start span fetch (sessions/spans-file). */
+  onProgress?: (status: string, message: string) => void;
+}
+
+export interface StartBatchEvaluationJobOptions {
+  agent: string;
+  /** Evaluator name(s) / Builtin.* ids (resolved to short ids in create()). */
+  evaluators: string[];
+  name?: string;
+  region?: string;
+  /** Sessions to evaluate (caller resolves these from a dataset Phase-1 run when applicable). */
+  sessionIds?: string[];
+  /** Lookback window (used only when no sessionIds are given). */
+  lookbackDays?: number;
+  /** Ground-truth metadata (explicit or dataset-derived; caller supplies). */
+  sessionMetadata?: SessionMetadataEntry[];
+  /** Runtime endpoint name (e.g. PROMPT_V1). */
+  endpoint?: string;
+  /** Recorded on the job for display; the engine does NOT run dataset Phase-1 (caller does). */
+  source?: BatchEvaluationSource;
+  dataset?: { id: string; version: string };
+  onProgress?: (status: string, message: string) => void;
+}
+
+export interface ListOptions {
+  type?: JobType;
+  limit?: number;
+  agent?: string;
+}
+
+// ============================================================================
+// Traits — small focused capabilities composed per job type
+// ============================================================================
+
+/** Create the job on the service and return the initial record. configIO is injected ONLY here. */
+export interface Startable<O, J extends JobRecord> {
+  create(opts: O, configIO: ConfigIO): Promise<Result<{ record: J }>>;
+}
+
+/** Fetch latest state from the service. Returns Result so the engine handles retries/error-persist. */
+export interface Refreshable<J extends JobRecord> {
+  refresh(record: J): Promise<Result<{ record: J }>>;
+}
+
+/** Stop a running job. */
+export interface Stoppable<J extends JobRecord> {
+  stop(record: J): Promise<Result>;
+}
+
+/** Delete the job from the service. */
+export interface Archivable<J extends JobRecord> {
+  archive(record: J): Promise<Result>;
+}
+
+/**
+ * Optional per-type "settle" step the engine runs SEQUENTIALLY after a record first
+ * reaches a terminal status — separate from the parallel refresh() because it may mutate
+ * project config (and therefore needs configIO and must not race). Only recommendation
+ * composes this (apply-to-bundle sync).
+ */
+export interface Settles<J extends JobRecord> {
+  settle(record: J, configIO: ConfigIO): Promise<J>;
+}
+
+// ============================================================================
+// Composed handlers + registries
+// ============================================================================
+
+export type RecommendationHandler = Startable<StartRecommendationJobOptions, RecommendationJobRecord> &
+  Refreshable<RecommendationJobRecord> &
+  Settles<RecommendationJobRecord> &
+  Archivable<RecommendationJobRecord>;
+
+export type BatchEvaluationHandler = Startable<StartBatchEvaluationJobOptions, BatchEvaluationJobRecord> &
+  Refreshable<BatchEvaluationJobRecord> &
+  Stoppable<BatchEvaluationJobRecord> &
+  Archivable<BatchEvaluationJobRecord>;
+
+export interface RecordByType {
+  recommendation: RecommendationJobRecord;
+  'batch-evaluation': BatchEvaluationJobRecord;
+}
+
+export interface StartOptionsByType {
+  recommendation: StartRecommendationJobOptions;
+  'batch-evaluation': StartBatchEvaluationJobOptions;
+}
+
+export interface HandlerByType {
+  recommendation: RecommendationHandler;
+  'batch-evaluation': BatchEvaluationHandler;
+}
+
+/** Job types whose handler composes Stoppable — derived so it tracks trait composition automatically. */
+export type StoppableJobType = {
+  [K in JobType]: HandlerByType[K] extends Stoppable<RecordByType[K]> ? K : never;
+}[JobType];
+
+// ============================================================================
+// Engine
+// ============================================================================
+
+/** Runtime capability flags for TUI affordances (display only — legality is enforced by types). */
+export interface JobCapabilities {
+  canStop: boolean;
+}
+
+export interface JobEngine {
+  /** Resolve + ONE API call + save. configIO is read only here. */
+  start<T extends JobType>(type: T, opts: StartOptionsByType[T]): Promise<Result<{ record: RecordByType[T] }>>;
+  /** Read one record; refresh (+ settle) if non-terminal. */
+  get<T extends JobType>(type: T, id: string): Promise<RecordByType[T] | undefined>;
+  /** List records of one type; refresh non-terminal in parallel, settle sequentially. */
+  list<T extends JobType>(opts: ListOptions & { type: T }): Promise<RecordByType[T][]>;
+  /** List across all types (union return). */
+  list(opts?: ListOptions): Promise<JobRecord[]>;
+  /** Stop a running job — only stoppable types accepted (compile-time narrowed). */
+  stop(type: StoppableJobType, id: string): Promise<Result>;
+  /** Delete from the service + remove the local file. */
+  archive(type: JobType, id: string): Promise<Result>;
+  /** Display-only capability flags for the TUI. */
+  capabilities(type: JobType): JobCapabilities;
+}

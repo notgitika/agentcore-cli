@@ -1,10 +1,13 @@
-import type { RecommendationRunRecord } from '../../../operations/recommendation/recommendation-storage';
-import { listAllRecommendations } from '../../../operations/recommendation/recommendation-storage';
-import { Panel, Screen } from '../../components';
+import { ConfigIO } from '../../../../lib';
+import { validateAwsCredentials } from '../../../aws/account';
+import { getErrorMessage } from '../../../errors';
+import { createJobEngine } from '../../../operations/jobs';
+import type { RecommendationJobRecord } from '../../../operations/jobs';
+import { ErrorPrompt, Panel, Screen } from '../../components';
 import { HELP_TEXT } from '../../constants';
 import { useListNavigation } from '../../hooks';
 import { Box, Text, useInput, useStdout } from 'ink';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -28,7 +31,7 @@ function shortTypeName(type: string): string {
 function statusColor(status: string): string {
   if (status === 'COMPLETED' || status === 'SUCCEEDED') return 'green';
   if (status === 'FAILED') return 'red';
-  if (status === 'IN_PROGRESS' || status === 'PENDING') return 'yellow';
+  if (status === 'IN_PROGRESS' || status === 'RUNNING' || status === 'PENDING') return 'yellow';
   return 'gray';
 }
 
@@ -44,8 +47,8 @@ function RecommendationListView({
   onExit,
   availableHeight,
 }: {
-  records: RecommendationRunRecord[];
-  onSelect: (record: RecommendationRunRecord) => void;
+  records: RecommendationJobRecord[];
+  onSelect: (record: RecommendationJobRecord) => void;
   onExit: () => void;
   availableHeight: number;
 }) {
@@ -68,7 +71,7 @@ function RecommendationListView({
   return (
     <Panel fullWidth>
       <Box flexDirection="column">
-        <Text bold>Recommendation History</Text>
+        <Text bold>Recommendation Jobs</Text>
         <Text dimColor>
           {records.length} recommendation{records.length !== 1 ? 's' : ''}
         </Text>
@@ -76,14 +79,14 @@ function RecommendationListView({
           {visible.items.map((rec, vIdx) => {
             const idx = visible.startIdx + vIdx;
             const selected = idx === nav.selectedIndex;
-            const date = rec.startedAt ? formatShortDate(rec.startedAt) : 'unknown';
+            const date = rec.createdAt ? formatShortDate(rec.createdAt) : 'unknown';
 
             return (
-              <Text key={rec.recommendationId} wrap="truncate-end">
+              <Text key={rec.id} wrap="truncate-end">
                 <Text color={selected ? 'cyan' : undefined}>{selected ? '❯' : ' '} </Text>
                 <Text dimColor>{date.padEnd(16)}</Text>
                 <Text color={statusColor(rec.status)}>{rec.status.padEnd(12)}</Text>
-                <Text>{shortTypeName(rec.type).padEnd(18)}</Text>
+                <Text>{shortTypeName(rec.recommendationType).padEnd(18)}</Text>
                 <Text dimColor>{rec.agent}</Text>
               </Text>
             );
@@ -101,7 +104,7 @@ function RecommendationListView({
 // Detail view
 // ─────────────────────────────────────────────────────────────────────────────
 
-function RecommendationDetailView({ record, onBack }: { record: RecommendationRunRecord; onBack: () => void }) {
+function RecommendationDetailView({ record, onBack }: { record: RecommendationJobRecord; onBack: () => void }) {
   useInput((input, key) => {
     if (key.escape || input === 'b') {
       onBack();
@@ -110,26 +113,27 @@ function RecommendationDetailView({ record, onBack }: { record: RecommendationRu
 
   const sysResult = record.result?.systemPromptRecommendationResult;
   const toolResult = record.result?.toolDescriptionRecommendationResult;
+  const isFailed = record.status === 'FAILED';
 
   return (
     <Panel fullWidth>
       <Box flexDirection="column">
         <Text>
-          <Text bold>ID:</Text> {record.recommendationId}
+          <Text bold>ID:</Text> {record.id}
         </Text>
         <Text>
-          <Text bold>Type:</Text> {shortTypeName(record.type)}
+          <Text bold>Type:</Text> {shortTypeName(record.recommendationType)}
           {'  '}
           <Text bold>Agent:</Text> {record.agent}
           {'  '}
           <Text bold>Status:</Text> <Text color={statusColor(record.status)}>{record.status}</Text>
         </Text>
         <Text>
-          <Text bold>Evaluators:</Text> {record.evaluators.join(', ')}
+          <Text bold>Evaluators:</Text> {record.evaluators.join(', ') || '(none)'}
         </Text>
-        {record.startedAt && (
+        {record.createdAt && (
           <Text>
-            <Text bold>Started:</Text> {new Date(record.startedAt).toLocaleString()}
+            <Text bold>Created:</Text> {new Date(record.createdAt).toLocaleString()}
           </Text>
         )}
         {record.completedAt && (
@@ -138,28 +142,36 @@ function RecommendationDetailView({ record, onBack }: { record: RecommendationRu
           </Text>
         )}
 
-        {sysResult && (
+        {isFailed && record.failureDetail && (
           <Box marginTop={1} flexDirection="column">
-            {sysResult.explanation && (
-              <Box marginTop={1} flexDirection="column">
-                <Text bold color="yellow">
-                  Explanation:
-                </Text>
-                <Box marginLeft={2} marginTop={1}>
-                  <Text>{sysResult.explanation}</Text>
-                </Box>
-              </Box>
-            )}
-            {sysResult.recommendedSystemPrompt && (
-              <Box marginTop={1} flexDirection="column">
-                <Text bold color="cyan">
-                  Recommended System Prompt:
-                </Text>
-                <Box marginLeft={2} marginTop={1}>
-                  <Text>{sysResult.recommendedSystemPrompt}</Text>
-                </Box>
-              </Box>
-            )}
+            <Text bold color="red">
+              Failure:
+            </Text>
+            <Box marginLeft={2}>
+              <Text color="red">{record.failureDetail}</Text>
+            </Box>
+          </Box>
+        )}
+
+        {sysResult?.explanation && (
+          <Box marginTop={1} flexDirection="column">
+            <Text bold color="yellow">
+              Explanation:
+            </Text>
+            <Box marginLeft={2} marginTop={1}>
+              <Text>{sysResult.explanation}</Text>
+            </Box>
+          </Box>
+        )}
+
+        {sysResult?.recommendedSystemPrompt && (
+          <Box marginTop={1} flexDirection="column">
+            <Text bold color="cyan">
+              Recommended System Prompt:
+            </Text>
+            <Box marginLeft={2} marginTop={1}>
+              <Text>{sysResult.recommendedSystemPrompt}</Text>
+            </Box>
           </Box>
         )}
 
@@ -183,9 +195,9 @@ function RecommendationDetailView({ record, onBack }: { record: RecommendationRu
           </Box>
         )}
 
-        {!sysResult && !toolResult && (
+        {!isFailed && !sysResult?.recommendedSystemPrompt && !(toolResult?.tools && toolResult.tools.length > 0) && (
           <Box marginTop={1}>
-            <Text dimColor>No recommendation results available.</Text>
+            <Text dimColor>No recommendation results available yet.</Text>
           </Box>
         )}
 
@@ -201,46 +213,74 @@ function RecommendationDetailView({ record, onBack }: { record: RecommendationRu
 // Main screen
 // ─────────────────────────────────────────────────────────────────────────────
 
+type FlowState =
+  | { name: 'loading' }
+  | { name: 'creds-error'; message: string }
+  | { name: 'error'; message: string }
+  | { name: 'loaded'; records: RecommendationJobRecord[] };
+
 interface RecommendationHistoryScreenProps {
   onExit: () => void;
 }
 
 export function RecommendationHistoryScreen({ onExit }: RecommendationHistoryScreenProps) {
+  const engine = useMemo(() => createJobEngine(new ConfigIO()), []);
   const { stdout } = useStdout();
   const terminalHeight = stdout?.rows ?? 24;
   const availableHeight = Math.max(6, terminalHeight - CHROME_LINES);
 
-  const [selectedRecord, setSelectedRecord] = useState<RecommendationRunRecord | null>(null);
+  const [flow, setFlow] = useState<FlowState>({ name: 'loading' });
+  const [selectedRecord, setSelectedRecord] = useState<RecommendationJobRecord | null>(null);
 
-  const [records, loaded, error] = useMemo(() => {
-    try {
-      return [listAllRecommendations(), true, null] as const;
-    } catch (err) {
-      return [[] as RecommendationRunRecord[], true, err instanceof Error ? err.message : String(err)] as const;
-    }
-  }, []);
+  useEffect(() => {
+    let cancelled = false;
 
-  if (!loaded) {
+    void (async () => {
+      try {
+        await validateAwsCredentials();
+      } catch (err) {
+        if (!cancelled) setFlow({ name: 'creds-error', message: getErrorMessage(err) });
+        return;
+      }
+
+      try {
+        const records = await engine.list({ type: 'recommendation' });
+        if (!cancelled) setFlow({ name: 'loaded', records });
+      } catch (err) {
+        if (!cancelled) setFlow({ name: 'error', message: getErrorMessage(err) });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [engine]);
+
+  if (flow.name === 'loading') {
     return (
-      <Screen title="Recommendation History [preview]" onExit={onExit}>
-        <Text dimColor>Loading...</Text>
+      <Screen title="Recommendation Jobs [preview]" onExit={onExit}>
+        <Text dimColor>Loading recommendation jobs...</Text>
       </Screen>
     );
   }
 
-  if (error) {
+  if (flow.name === 'creds-error') {
+    return <ErrorPrompt message="AWS credentials required" detail={flow.message} onBack={onExit} onExit={onExit} />;
+  }
+
+  if (flow.name === 'error') {
     return (
-      <Screen title="Recommendation History [preview]" onExit={onExit}>
-        <Text color="red">{error}</Text>
+      <Screen title="Recommendation Jobs [preview]" onExit={onExit}>
+        <Text color="red">{flow.message}</Text>
       </Screen>
     );
   }
 
-  if (records.length === 0) {
+  if (flow.records.length === 0) {
     return (
-      <Screen title="Recommendation History [preview]" onExit={onExit}>
+      <Screen title="Recommendation Jobs [preview]" onExit={onExit}>
         <Box flexDirection="column">
-          <Text dimColor>No recommendation runs found.</Text>
+          <Text dimColor>No recommendation jobs found.</Text>
           <Text dimColor>Run `agentcore run recommendation` to create one.</Text>
         </Box>
       </Screen>
@@ -250,12 +290,12 @@ export function RecommendationHistoryScreen({ onExit }: RecommendationHistoryScr
   const helpText = selectedRecord ? 'Esc/B back to list' : HELP_TEXT.NAVIGATE_SELECT;
 
   return (
-    <Screen title="Recommendation History [preview]" onExit={onExit} helpText={helpText} exitEnabled={!selectedRecord}>
+    <Screen title="Recommendation Jobs [preview]" onExit={onExit} helpText={helpText} exitEnabled={!selectedRecord}>
       {selectedRecord ? (
         <RecommendationDetailView record={selectedRecord} onBack={() => setSelectedRecord(null)} />
       ) : (
         <RecommendationListView
-          records={records}
+          records={flow.records}
           onSelect={setSelectedRecord}
           onExit={onExit}
           availableHeight={availableHeight}

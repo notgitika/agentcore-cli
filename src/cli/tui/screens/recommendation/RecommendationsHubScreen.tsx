@@ -21,8 +21,8 @@ export function RecommendationsHubScreen({ onSelect, onExit }: RecommendationsHu
       },
       {
         id: 'recommendation-history',
-        title: 'Recommendation History',
-        description: 'View past recommendation results (local)',
+        title: 'Recommendation Jobs',
+        description: 'View recommendation jobs and their results',
       },
     ],
     []

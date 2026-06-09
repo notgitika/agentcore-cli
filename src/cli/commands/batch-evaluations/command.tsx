@@ -1,57 +1,57 @@
 import { ConfigIO, JobNotFoundError, serializeResult } from '../../../lib';
 import { createJobEngine } from '../../operations/jobs';
-import { printRecommendationDetail, printRecommendationHistory } from '../../operations/jobs/recommendation/format';
+import { printBatchEvaluationDetail, printBatchEvaluationHistory } from '../../operations/jobs/batch-evaluation/format';
 import { runCliCommand } from '../../telemetry/cli-command-run';
 import { COMMAND_DESCRIPTIONS } from '../../tui/copy';
 import { requireProject } from '../../tui/guards';
 import type { Command } from '@commander-js/extra-typings';
 
-export const registerRecommendations = (program: Command) => {
-  const recCmd = program.command('recommendations').description(COMMAND_DESCRIPTIONS.recommendations);
+export const registerBatchEvaluations = (program: Command) => {
+  const cmd = program.command('batch-evaluations').description(COMMAND_DESCRIPTIONS.batchEvaluations);
 
-  recCmd
+  cmd
     .command('history')
-    .description('List recommendation jobs (running jobs are refreshed from the service)')
+    .description('List batch evaluation jobs (running jobs are refreshed from the service)')
     .option('--json', 'Output as JSON')
     .action((cliOptions: { json?: boolean }) => {
       requireProject();
       return runCliCommand('job.history', !!cliOptions.json, async () => {
         const engine = createJobEngine(new ConfigIO());
-        const records = await engine.list({ type: 'recommendation' });
+        const records = await engine.list({ type: 'batch-evaluation' });
         if (cliOptions.json) {
           console.log(
             JSON.stringify({
               success: true,
-              recommendations: records.map(r => serializeResult({ success: true, ...r })),
+              batchEvaluations: records.map(r => serializeResult({ success: true, ...r })),
             })
           );
         } else {
-          printRecommendationHistory(records);
+          printBatchEvaluationHistory(records);
         }
-        return { job_type: 'recommendation' };
+        return { job_type: 'batch-evaluation' };
       });
     });
 
-  // Bare positional on the group: `agentcore recommendations <id>` shows one job.
+  // Bare positional on the group: `agentcore batch-evaluations <id>` shows one job.
   // (No .description() here — that would override the group description shown in the command list.)
-  recCmd
-    .argument('<id>', 'Recommendation job ID to view')
+  cmd
+    .argument('<id>', 'Batch evaluation job ID to view')
     .option('--json', 'Output as JSON')
     .action((id: string, cliOptions: { json?: boolean }) => {
       requireProject();
       return runCliCommand('job.get', !!cliOptions.json, async () => {
         const engine = createJobEngine(new ConfigIO());
-        const record = await engine.get('recommendation', id);
+        const record = await engine.get('batch-evaluation', id);
         if (!record) {
           // Throw only — runCliCommand owns error output (single JSON line in --json, stderr otherwise).
-          throw new JobNotFoundError(`Recommendation "${id}" not found.`);
+          throw new JobNotFoundError(`Batch evaluation "${id}" not found.`);
         }
         if (cliOptions.json) {
           console.log(JSON.stringify(serializeResult({ success: true, ...record })));
         } else {
-          printRecommendationDetail(record);
+          printBatchEvaluationDetail(record);
         }
-        return { job_type: 'recommendation' };
+        return { job_type: 'batch-evaluation' };
       });
     });
 };

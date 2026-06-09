@@ -307,7 +307,12 @@ function AppContent({
 
   if (route.name === 'run-batch-eval') {
     const backRoute = route.from ?? 'run';
-    return <RunBatchEvalFlow onExit={() => setRoute({ name: backRoute } as Route)} />;
+    return (
+      <RunBatchEvalFlow
+        onExit={() => setRoute({ name: backRoute } as Route)}
+        onViewJobs={() => setRoute({ name: 'batch-eval-history' })}
+      />
+    );
   }
 
   if (route.name === 'batch-eval-history') {
@@ -328,7 +333,12 @@ function AppContent({
 
   if (route.name === 'recommend') {
     const backRoute = route.from ?? 'recommendations-hub';
-    return <RecommendationFlow onExit={() => setRoute({ name: backRoute } as Route)} />;
+    return (
+      <RecommendationFlow
+        onExit={() => setRoute({ name: backRoute } as Route)}
+        onViewJobs={() => setRoute({ name: 'recommendation-history' })}
+      />
+    );
   }
 
   if (route.name === 'recommendation-history') {
