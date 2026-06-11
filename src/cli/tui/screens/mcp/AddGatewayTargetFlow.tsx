@@ -2,6 +2,7 @@ import { gatewayTargetPrimitive } from '../../../primitives/registry';
 import { ErrorPrompt } from '../../components';
 import {
   useExistingGateways,
+  useExistingKnowledgeBases,
   useExistingRuntimeNames,
   useExistingToolNames,
   useMcpGatewayNames,
@@ -17,7 +18,14 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 type FlowState =
   | { name: 'create-wizard'; resumeConfig?: GatewayTargetWizardState; resumeStep?: AddGatewayTargetStep }
   | { name: 'creating-credential'; pendingConfig: GatewayTargetWizardState }
-  | { name: 'create-success'; toolName: string; projectPath: string; loading?: boolean; loadingMessage?: string }
+  | {
+      name: 'create-success';
+      toolName: string;
+      projectPath: string;
+      detail?: string;
+      loading?: boolean;
+      loadingMessage?: string;
+    }
   | { name: 'error'; message: string };
 
 interface AddGatewayTargetFlowProps {
@@ -42,6 +50,7 @@ export function AddGatewayTargetFlow({
   const { mcpGateways: mcpGatewayNames } = useMcpGatewayNames();
   const { runtimeNames: existingRuntimeNames } = useExistingRuntimeNames();
   const { toolNames: existingToolNames } = useExistingToolNames();
+  const { knowledgeBases: existingKnowledgeBases } = useExistingKnowledgeBases();
   const { credentials } = useExistingCredentials();
   const { names: existingIdentityNames } = useExistingIdentityNames();
   const { createIdentity } = useCreateIdentity();
@@ -126,6 +135,21 @@ export function AddGatewayTargetFlow({
         .catch((err: unknown) => {
           setFlow({ name: 'error', message: err instanceof Error ? err.message : 'Unknown error' });
         });
+    } else if (config.targetType === 'connector') {
+      void gatewayTargetPrimitive
+        .createConnectorGatewayTarget(config)
+        .then((result: { toolName: string }) => {
+          // For single-KB Retrieve adds, the primitive also upserts the
+          // gateway's shared agentic-retrieve target. Surface that to the user.
+          const detail =
+            config.connectorId === 'bedrock-knowledge-bases'
+              ? `Also wired KB '${config.knowledgeBaseId}' into '${config.gateway}-agentic' (bedrock-agentic-retrieve fan-out)`
+              : undefined;
+          setFlow({ name: 'create-success', toolName: result.toolName, projectPath: '', detail });
+        })
+        .catch((err: unknown) => {
+          setFlow({ name: 'error', message: err instanceof Error ? err.message : 'Unknown error' });
+        });
     } else {
       setFlow({ name: 'error', message: `Unsupported target type: ${(config as { targetType: string }).targetType}` });
     }
@@ -187,6 +211,7 @@ export function AddGatewayTargetFlow({
         existingToolNames={existingToolNames}
         existingOAuthCredentialNames={oauthCredentialNames}
         existingApiKeyCredentialNames={apiKeyCredentialNames}
+        existingKnowledgeBases={existingKnowledgeBases}
         onComplete={handleCreateComplete}
         onCreateCredential={handleCreateCredential}
         onExit={onBack}
@@ -223,7 +248,7 @@ export function AddGatewayTargetFlow({
       <AddSuccessScreen
         isInteractive={isInteractive}
         message={`Added gateway target: ${flow.toolName}`}
-        detail={flow.projectPath ? `Project created at ${flow.projectPath}` : undefined}
+        detail={flow.projectPath ? `Project created at ${flow.projectPath}` : flow.detail}
         loading={flow.loading}
         loadingMessage={flow.loadingMessage}
         showDevOption={false}

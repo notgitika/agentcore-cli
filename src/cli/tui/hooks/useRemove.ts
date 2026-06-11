@@ -3,6 +3,7 @@ import type { ResourceType } from '../../commands/remove/types';
 import { RemoveLogger } from '../../logging';
 import type { RemovableGatewayTarget, RemovalPreview } from '../../operations/remove';
 import type { RemovableCredential } from '../../primitives/CredentialPrimitive';
+import type { RemovableKnowledgeBase } from '../../primitives/KnowledgeBasePrimitive';
 import type { RemovableMemory } from '../../primitives/MemoryPrimitive';
 import type { RemovablePolicyResource } from '../../primitives/PolicyPrimitive';
 import type { RemovableRuntimeEndpoint } from '../../primitives/RuntimeEndpointPrimitive';
@@ -16,8 +17,11 @@ import {
   gatewayPrimitive,
   gatewayTargetPrimitive,
   harnessPrimitive,
+  knowledgeBasePrimitive,
   memoryPrimitive,
   onlineEvalConfigPrimitive,
+  paymentConnectorPrimitive,
+  paymentManagerPrimitive,
   policyEnginePrimitive,
   policyPrimitive,
   runtimeEndpointPrimitive,
@@ -31,6 +35,7 @@ export type {
   RemovableMemory,
   RemovableCredential as RemovableIdentity,
   RemovableGatewayTarget,
+  RemovableKnowledgeBase,
   RemovablePolicyResource,
   RemovableRuntimeEndpoint,
 };
@@ -158,6 +163,11 @@ export function useRemovableDatasets() {
   return { datasets, ...rest };
 }
 
+export function useRemovableKnowledgeBases() {
+  const { items: knowledgeBases, ...rest } = useRemovableResources(() => knowledgeBasePrimitive.getRemovable());
+  return { knowledgeBases, ...rest };
+}
+
 export function useRemovableOnlineEvalConfigs() {
   const { items: onlineEvalConfigs, ...rest } = useRemovableResources(() => onlineEvalConfigPrimitive.getRemovable());
   return { onlineEvalConfigs, ...rest };
@@ -196,6 +206,16 @@ export function useRemovableRuntimeEndpoints() {
     runtimeEndpointPrimitive.getRemovable()
   );
   return { endpoints, ...rest };
+}
+
+export function useRemovablePaymentManagers() {
+  const { items: paymentManagers, ...rest } = useRemovableResources(() => paymentManagerPrimitive.getRemovable());
+  return { paymentManagers, ...rest };
+}
+
+export function useRemovablePaymentConnectors() {
+  const { items: paymentConnectors, ...rest } = useRemovableResources(() => paymentConnectorPrimitive.getRemovable());
+  return { paymentConnectors, ...rest };
 }
 
 // ============================================================================
@@ -265,6 +285,10 @@ export function useRemovalPreview() {
     (name: string) => loadPreview(n => datasetPrimitive.previewRemove(n), name),
     [loadPreview]
   );
+  const loadKnowledgeBasePreview = useCallback(
+    (name: string) => loadPreview(n => knowledgeBasePrimitive.previewRemove(n), name),
+    [loadPreview]
+  );
   const loadOnlineEvalPreview = useCallback(
     (name: string) => loadPreview(n => onlineEvalConfigPrimitive.previewRemove(n), name),
     [loadPreview]
@@ -306,6 +330,7 @@ export function useRemovalPreview() {
     loadIdentityPreview,
     loadEvaluatorPreview,
     loadDatasetPreview,
+    loadKnowledgeBasePreview,
     loadOnlineEvalPreview,
     loadPolicyEnginePreview,
     loadPolicyPreview,
@@ -387,6 +412,14 @@ export function useRemoveDataset() {
   return useRemoveResource(
     (name: string) => datasetPrimitive.remove(name),
     'dataset',
+    name => name
+  );
+}
+
+export function useRemoveKnowledgeBase() {
+  return useRemoveResource(
+    (name: string) => knowledgeBasePrimitive.remove(name),
+    'knowledge-base',
     name => name
   );
 }

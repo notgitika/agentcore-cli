@@ -1,4 +1,5 @@
 import {
+  AgentEnvironment,
   AgentFramework,
   AgentLanguage,
   AgentProtocol,
@@ -34,13 +35,14 @@ import {
 import { z } from 'zod';
 
 const CreateAttrs = safeSchema({
-  agent_language: AgentLanguage,
-  agent_framework: AgentFramework,
+  agent_environment: AgentEnvironment,
+  agent_language: AgentLanguage.optional(),
+  agent_framework: AgentFramework.optional(),
   model_provider: ModelProvider,
   memory_type: MemoryType,
-  agent_protocol: AgentProtocol,
-  build_type: BuildType,
-  agent_source: AgentSource,
+  agent_protocol: AgentProtocol.optional(),
+  build_type: BuildType.optional(),
+  agent_source: AgentSource.optional(),
   network_mode: NetworkMode,
   has_agent: z.boolean(),
 });
@@ -55,6 +57,8 @@ const AddAgentAttrs = safeSchema({
   network_mode: NetworkMode,
   authorizer_type: AuthorizerType,
   memory_type: MemoryType,
+  efs_mount_count: Count,
+  s3_mount_count: Count,
 });
 
 const AddMemoryAttrs = safeSchema({
@@ -89,6 +93,13 @@ const AddGatewayTargetAttrs = safeSchema({
 
 const AddPolicyEngineAttrs = safeSchema({ attach_gateway_count: Count, attach_mode: AttachMode });
 
+const AddKnowledgeBaseAttrs = safeSchema({
+  data_source_count: Count,
+  has_description: z.boolean(),
+  has_gateway: z.boolean(),
+  is_append: z.boolean(),
+});
+
 const AddPolicyAttrs = safeSchema({
   policy_attr_source_type: PolicyAttrSourceType,
   policy_validation_mode: PolicyValidationMode,
@@ -96,6 +107,7 @@ const AddPolicyAttrs = safeSchema({
 
 const DeployAttrs = safeSchema({
   runtime_count: Count,
+  harness_count: Count,
   memory_count: Count,
   credential_count: Count,
   evaluator_count: Count,
@@ -108,18 +120,33 @@ const DeployAttrs = safeSchema({
 });
 
 const DevAttrs = safeSchema({
+  agent_environment: AgentEnvironment,
   dev_action: DevAction,
   ui_mode: UiMode,
   has_stream: z.boolean(),
-  agent_protocol: AgentProtocol,
+  agent_protocol: AgentProtocol.optional(),
   invoke_count: Count,
 });
 
 const InvokeAttrs = safeSchema({
+  agent_environment: AgentEnvironment,
   has_stream: z.boolean(),
   has_session_id: z.boolean(),
   auth_type: AuthType,
-  agent_protocol: AgentProtocol,
+  agent_protocol: AgentProtocol.optional(),
+});
+
+const ExecAttrs = safeSchema({
+  interactive: z.boolean(),
+  has_runtime: z.boolean(),
+  has_shell_id: z.boolean(),
+  has_session_id: z.boolean(),
+  is_one_shot: z.boolean(),
+  auth_type: AuthType,
+  is_reconnect: z.boolean(),
+  exit_code: Count,
+  reconnect_attempts: Count,
+  was_kicked: z.boolean(),
 });
 
 const StatusAttrs = safeSchema({ filter_type: FilterType, filter_state: FilterState });
@@ -134,6 +161,10 @@ const RunEvalAttrs = safeSchema({
   has_assertions: z.boolean(),
   has_expected_trajectory: z.boolean(),
   has_expected_response: z.boolean(),
+});
+
+const RunIngestAttrs = safeSchema({
+  data_source_count: Count,
 });
 
 const FetchAccessAttrs = safeSchema({ resource_type: ResourceType });
@@ -179,9 +210,17 @@ export const COMMAND_SCHEMAS = {
   'add.policy-engine': AddPolicyEngineAttrs,
   'add.policy': AddPolicyAttrs,
   'add.runtime-endpoint': NoAttrs,
+  'add.knowledge-base': AddKnowledgeBaseAttrs,
+  'add.payment-manager': NoAttrs,
+  'add.payment-connector': NoAttrs,
   deploy: DeployAttrs,
+
+  // dev / invoke / exec
   dev: DevAttrs,
   invoke: InvokeAttrs,
+  exec: ExecAttrs,
+
+  // status / logs
   status: StatusAttrs,
   logs: LogsAttrs,
   'logs.evals': LogsEvalsAttrs,
@@ -192,6 +231,7 @@ export const COMMAND_SCHEMAS = {
   'job.get': JobTypeOnlyAttrs,
   'archive.job': JobTypeOnlyAttrs,
   'stop.job': JobTypeOnlyAttrs,
+  'run.ingest': RunIngestAttrs,
   'fetch.access': FetchAccessAttrs,
   feedback: FeedbackAttrs,
   update: UpdateAttrs,
@@ -225,9 +265,12 @@ export const COMMAND_SCHEMAS = {
   'remove.runtime-endpoint': NoAttrs,
   'remove.config-bundle': NoAttrs,
   'remove.ab-test': NoAttrs,
+  'remove.knowledge-base': NoAttrs,
   'dataset.download': NoAttrs,
   'dataset.publish-version': NoAttrs,
   'dataset.remove-version': NoAttrs,
+  'remove.payment-manager': NoAttrs,
+  'remove.payment-connector': NoAttrs,
   'telemetry.disable': NoAttrs,
   'telemetry.enable': NoAttrs,
   'telemetry.status': NoAttrs,

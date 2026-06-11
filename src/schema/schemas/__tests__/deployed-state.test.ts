@@ -6,6 +6,7 @@ import {
   DeployedStateSchema,
   GatewayDeployedStateSchema,
   HarnessDeployedStateSchema,
+  KnowledgeBaseDeployedStateSchema,
   McpDeployedStateSchema,
   McpLambdaDeployedStateSchema,
   McpRuntimeDeployedStateSchema,
@@ -106,6 +107,40 @@ describe('MemoryDeployedStateSchema', () => {
 
   it('rejects missing required fields', () => {
     expect(MemoryDeployedStateSchema.safeParse({ memoryId: 'mem-123' }).success).toBe(false);
+  });
+});
+
+describe('KnowledgeBaseDeployedStateSchema', () => {
+  it('accepts valid KB state with no sourcesHash', () => {
+    expect(
+      KnowledgeBaseDeployedStateSchema.safeParse({
+        knowledgeBaseId: 'KB1',
+        knowledgeBaseArn: 'arn:aws:bedrock:us-east-1:123:knowledge-base/KB1',
+        dataSources: [],
+      }).success
+    ).toBe(true);
+  });
+
+  it('accepts valid KB state with sourcesHash', () => {
+    expect(
+      KnowledgeBaseDeployedStateSchema.safeParse({
+        knowledgeBaseId: 'KB1',
+        knowledgeBaseArn: 'arn:aws:bedrock:us-east-1:123:knowledge-base/KB1',
+        dataSources: [{ dataSourceId: 'DS1', uri: 's3://b/d/' }],
+        sourcesHash: 'a'.repeat(64),
+      }).success
+    ).toBe(true);
+  });
+
+  it('rejects empty sourcesHash', () => {
+    expect(
+      KnowledgeBaseDeployedStateSchema.safeParse({
+        knowledgeBaseId: 'KB1',
+        knowledgeBaseArn: 'arn:aws:bedrock:us-east-1:123:knowledge-base/KB1',
+        dataSources: [],
+        sourcesHash: '',
+      }).success
+    ).toBe(false);
   });
 });
 

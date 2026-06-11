@@ -61,6 +61,7 @@ function makeProjectSpec(abTests: AgentCoreProjectSpec['abTests'] = []): AgentCo
     managedBy: 'CDK' as const,
     runtimes: [],
     memories: [],
+    knowledgeBases: [],
     credentials: [],
     evaluators: [],
     onlineEvalConfigs: [],
@@ -70,6 +71,7 @@ function makeProjectSpec(abTests: AgentCoreProjectSpec['abTests'] = []): AgentCo
     datasets: [],
     abTests,
     harnesses: [],
+    payments: [],
   };
 }
 

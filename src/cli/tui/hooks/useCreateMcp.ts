@@ -2,6 +2,7 @@ import {
   agentPrimitive,
   gatewayPrimitive,
   gatewayTargetPrimitive,
+  knowledgeBasePrimitive,
   policyEnginePrimitive,
 } from '../../primitives/registry';
 import { withCommandRunTelemetry } from '../../telemetry/cli-command-run.js';
@@ -204,6 +205,33 @@ export function useExistingToolNames() {
   }, []);
 
   return { toolNames, refresh };
+}
+
+export function useExistingKnowledgeBases() {
+  const [knowledgeBases, setKnowledgeBases] = useState<string[]>([]);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const removable = await knowledgeBasePrimitive.getRemovable();
+        setKnowledgeBases(removable.map(kb => kb.name));
+      } catch {
+        setKnowledgeBases([]);
+      }
+    }
+    void load();
+  }, []);
+
+  const refresh = useCallback(async () => {
+    try {
+      const removable = await knowledgeBasePrimitive.getRemovable();
+      setKnowledgeBases(removable.map(kb => kb.name));
+    } catch {
+      setKnowledgeBases([]);
+    }
+  }, []);
+
+  return { knowledgeBases, refresh };
 }
 
 export function useUnassignedTargets() {

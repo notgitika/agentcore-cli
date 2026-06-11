@@ -190,6 +190,7 @@ Projects use JSON schema files in the `agentcore/` directory:
 - [Config Bundles](docs/config-bundles.md) - Versioned runtime configurations [preview]
 - [Frameworks](docs/frameworks.md) - Supported frameworks and model providers
 - [Gateway](docs/gateway.md) - Gateway setup, targets, and authentication
+- [Knowledge Bases](docs/knowledge-bases.md) - Managed Bedrock Knowledge Bases wired to gateways [preview]
 - [Memory](docs/memory.md) - Memory strategies and sharing
 - [Local Development](docs/local-development.md) - Dev server and debugging
 - [Feedback](docs/feedback.md) - Submit feedback from your terminal

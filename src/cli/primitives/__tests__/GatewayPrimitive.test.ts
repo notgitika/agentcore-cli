@@ -8,6 +8,7 @@ const defaultProject: AgentCoreProjectSpec = {
   managedBy: 'CDK' as const,
   runtimes: [],
   memories: [],
+  knowledgeBases: [],
   credentials: [],
   evaluators: [],
   onlineEvalConfigs: [],
@@ -17,6 +18,7 @@ const defaultProject: AgentCoreProjectSpec = {
   abTests: [],
   harnesses: [],
   datasets: [],
+  payments: [],
 };
 
 const { mockConfigExists, mockReadProjectSpec, mockWriteProjectSpec } = vi.hoisted(() => ({

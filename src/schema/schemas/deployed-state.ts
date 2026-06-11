@@ -210,6 +210,41 @@ export const DatasetDeployedStateSchema = z.object({
 export type DatasetDeployedState = z.infer<typeof DatasetDeployedStateSchema>;
 
 // ============================================================================
+// Knowledge Base Deployed State
+// ============================================================================
+
+export const KnowledgeBaseDataSourceDeployedStateSchema = z.object({
+  dataSourceId: z.string().min(1),
+  uri: z.string().min(1),
+});
+
+export type KnowledgeBaseDataSourceDeployedState = z.infer<typeof KnowledgeBaseDataSourceDeployedStateSchema>;
+
+/**
+ * Per-target deployed state for a knowledge base. Captures the IDs the
+ * status command needs to call bedrock-agent for live KB and ingestion state.
+ *
+ * `dataSources` is an array (not a record) because the deploy step writes
+ * them in the same order as the local `dataSources[]` array; the index
+ * lets us correlate local sources with deployed DSs without extra IDs.
+ *
+ * `sourcesHash` is a SHA-256 of the data-source URIs (joined with newlines)
+ * captured at the time auto-ingestion last fired. The post-deploy ingestion
+ * hook computes a fresh hash from the current spec and compares — if equal,
+ * skip ingestion (no changes to ingest). Optional so projects deployed
+ * before the hook shipped don't fail validation; treated as "ingest needed"
+ * when absent.
+ */
+export const KnowledgeBaseDeployedStateSchema = z.object({
+  knowledgeBaseId: z.string().min(1),
+  knowledgeBaseArn: z.string().min(1),
+  dataSources: z.array(KnowledgeBaseDataSourceDeployedStateSchema).default([]),
+  sourcesHash: z.string().min(1).optional(),
+});
+
+export type KnowledgeBaseDeployedState = z.infer<typeof KnowledgeBaseDeployedStateSchema>;
+
+// ============================================================================
 // Configuration Bundle Deployed State
 // ============================================================================
 
@@ -228,11 +263,8 @@ export type ConfigBundleDeployedState = z.infer<typeof ConfigBundleDeployedState
 export const ABTestDeployedStateSchema = z.object({
   abTestId: z.string().min(1),
   abTestArn: z.string().min(1),
-  /** IAM role ARN used by this AB test. */
   roleArn: z.string().min(1).optional(),
-  /** Whether the CLI auto-created this role (true = CLI should delete on cleanup). */
   roleCreatedByCli: z.boolean().optional(),
-  /** SHA-256 hash of the AB test configuration for change detection. */
   configHash: z.string().optional(),
 });
 
@@ -250,6 +282,36 @@ export const RuntimeEndpointDeployedStateSchema = z.object({
 export type RuntimeEndpointDeployedState = z.infer<typeof RuntimeEndpointDeployedStateSchema>;
 
 // ============================================================================
+// Payment Connector Deployed State
+// ============================================================================
+
+export const PaymentConnectorDeployedStateSchema = z.object({
+  connectorId: z.string().min(1),
+  credentialProviderArn: z.string().min(1),
+  credentialProviderName: z.string().optional(),
+});
+
+export type PaymentConnectorDeployedState = z.infer<typeof PaymentConnectorDeployedStateSchema>;
+
+// ============================================================================
+// Payment Deployed State
+// ============================================================================
+
+export const PaymentDeployedStateSchema = z.object({
+  managerId: z.string().min(1),
+  managerArn: z.string().min(1),
+  connectors: z.record(z.string(), PaymentConnectorDeployedStateSchema).default({}),
+  processPaymentRoleArn: z.string().min(1),
+  resourceRetrievalRoleArn: z.string().min(1),
+  authorizerType: z.enum(['AWS_IAM', 'CUSTOM_JWT']).optional(),
+  autoPayment: z.boolean().optional(),
+  paymentToolAllowlist: z.array(z.string()).optional(),
+  networkPreferences: z.array(z.string()).optional(),
+});
+
+export type PaymentDeployedState = z.infer<typeof PaymentDeployedStateSchema>;
+
+// ============================================================================
 // Deployed Resource State
 // ============================================================================
 
@@ -263,12 +325,14 @@ export const DeployedResourceStateSchema = z.object({
   evaluators: z.record(z.string(), EvaluatorDeployedStateSchema).optional(),
   onlineEvalConfigs: z.record(z.string(), OnlineEvalDeployedStateSchema).optional(),
   datasets: z.record(z.string(), DatasetDeployedStateSchema).optional(),
+  knowledgeBases: z.record(z.string(), KnowledgeBaseDeployedStateSchema).optional(),
   configBundles: z.record(z.string(), ConfigBundleDeployedStateSchema).optional(),
   abTests: z.record(z.string(), ABTestDeployedStateSchema).optional(),
   policyEngines: z.record(z.string(), PolicyEngineDeployedStateSchema).optional(),
   policies: z.record(z.string(), PolicyDeployedStateSchema).optional(),
   harnesses: z.record(z.string(), HarnessDeployedStateSchema).optional(),
   runtimeEndpoints: z.record(z.string(), RuntimeEndpointDeployedStateSchema).optional(),
+  payments: z.record(z.string(), PaymentDeployedStateSchema).optional(),
   stackName: z.string().optional(),
   identityKmsKeyArn: z.string().optional(),
   deployHash: z.string().optional(),

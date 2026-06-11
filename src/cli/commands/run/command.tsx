@@ -1,5 +1,6 @@
-import { ConfigIO, serializeResult } from '../../../lib';
+import { ConfigIO, ValidationError, findConfigRoot, serializeResult } from '../../../lib';
 import type { RecommendationType } from '../../aws/agentcore-recommendation';
+import { COMMAND_DESCRIPTIONS } from '../../constants';
 import { getErrorMessage } from '../../errors';
 import { handleRunEval } from '../../operations/eval';
 import type { RunEvalOptions } from '../../operations/eval';
@@ -9,8 +10,8 @@ import type {
   RecommendationJobRecord,
   StartBatchEvaluationJobOptions,
 } from '../../operations/jobs';
+import { runKbIngestionByName } from '../../operations/ingest';
 import { runCliCommand } from '../../telemetry/cli-command-run';
-import { COMMAND_DESCRIPTIONS } from '../../tui/copy';
 import { requireProject } from '../../tui/guards';
 import type { Command } from '@commander-js/extra-typings';
 import { Text, render } from 'ink';
@@ -468,6 +469,86 @@ export const registerRun = (program: Command) => {
         });
       }
     );
+
+  // ──────────────────────────────────────────────────────────────────────
+  // run ingest — manually trigger ingestion for a deployed knowledge base.
+  //
+  // Drift correction #4 from Plan C: 2-deep nesting (`run ingest`), not
+  // `run ingest knowledge-base`. KBs are the only ingestible resource for
+  // now; future ingestible types could add a --type flag.
+  // ──────────────────────────────────────────────────────────────────────
+  runCmd
+    .command('ingest')
+    .description('Start a fresh ingestion job for every data source on a deployed knowledge base.')
+    .option('--name <name>', 'Knowledge base name (must exist in agentcore.json)')
+    .option('--target <target>', 'Deployment target name (defaults to "default")', 'default')
+    .option('--data-source <uri>', 'Ingest only the data source with this URI (default: all sources)')
+    .option('--json', 'Output as JSON [non-interactive]')
+    .action(async (cliOptions: { name?: string; target?: string; dataSource?: string; json?: boolean }) => {
+      if (!findConfigRoot()) {
+        console.error('No agentcore project found. Run `agentcore create` first.');
+        process.exit(1);
+      }
+      await runCliCommand('run.ingest', !!cliOptions.json, async () => {
+        if (!cliOptions.name) {
+          throw new ValidationError('A --name is required for `agentcore run ingest`.');
+        }
+        const targetName = cliOptions.target ?? 'default';
+
+        const configIO = new ConfigIO();
+        const [project, awsTargets, deployedState] = await Promise.all([
+          configIO.readProjectSpec(),
+          configIO.readAWSDeploymentTargets(),
+          configIO.readDeployedState().catch(() => ({ targets: {} })),
+        ]);
+
+        const kbExists = (project.knowledgeBases ?? []).some(kb => kb.name === cliOptions.name);
+        if (!kbExists) {
+          throw new ValidationError(`Knowledge base '${cliOptions.name}' is not in agentcore.json.`);
+        }
+        const target = awsTargets.find(t => t.name === targetName);
+        if (!target) {
+          throw new ValidationError(`Deployment target '${targetName}' is not in aws-targets.json.`);
+        }
+
+        // Wire Ctrl+C → AbortController so the user can bail out of long
+        // retry sleeps cleanly. Progress lines go to stderr so --json stdout
+        // remains a single parseable object.
+        const abortController = new AbortController();
+        const onSigint = () => abortController.abort();
+        process.once('SIGINT', onSigint);
+        let result;
+        try {
+          result = await runKbIngestionByName({
+            knowledgeBaseName: cliOptions.name,
+            deployedState,
+            targetName,
+            region: target.region,
+            dataSourceUri: cliOptions.dataSource,
+            signal: abortController.signal,
+            onProgress: cliOptions.json ? undefined : msg => process.stderr.write(`${msg}\n`),
+          });
+        } finally {
+          process.off('SIGINT', onSigint);
+        }
+
+        if (!result.success) {
+          throw result.error;
+        }
+
+        if (cliOptions.json) {
+          console.log(JSON.stringify({ success: true, startedJobs: result.startedJobs }));
+        } else {
+          console.log(`Started ingestion for '${cliOptions.name}' (${result.startedJobs.length} data source(s)):`);
+          for (const job of result.startedJobs) {
+            console.log(`  ${job.uri}  →  ${job.ingestionJobId}`);
+          }
+          console.log(`\nRun 'agentcore status' to track progress.`);
+        }
+
+        return { data_source_count: result.startedJobs.length };
+      });
+    });
 };
 
 /** Print a recommendation's optimized artifact (system prompt / tool descriptions) when available. */

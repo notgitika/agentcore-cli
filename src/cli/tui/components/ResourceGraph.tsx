@@ -25,6 +25,8 @@ const ICONS = {
   dataset: '▤',
   harness: '⬢',
   'runtime-endpoint': '◉',
+  'knowledge-base': '✚',
+  payment: '₿',
 } as const;
 
 interface ResourceGraphProps {
@@ -126,6 +128,7 @@ export function ResourceGraph({ project, mcp, agentName, resourceStatuses }: Res
   const allAgents = project.runtimes ?? [];
   const agents = agentName ? allAgents.filter(a => a.name === agentName) : allAgents;
   const memories = project.memories ?? [];
+  const knowledgeBases = project.knowledgeBases ?? [];
   const credentials = project.credentials ?? [];
   const evaluators = project.evaluators ?? [];
   const onlineEvalConfigs = project.onlineEvalConfigs ?? [];
@@ -136,6 +139,7 @@ export function ResourceGraph({ project, mcp, agentName, resourceStatuses }: Res
   const configBundles = project.configBundles ?? [];
   const datasets = project.datasets ?? [];
   const abTests = project.abTests ?? [];
+  const payments = project.payments ?? [];
 
   // Build lookup map and collect pending-removal resources in a single pass
   const { statusMap, pendingRemovals } = useMemo(() => {
@@ -161,6 +165,7 @@ export function ResourceGraph({ project, mcp, agentName, resourceStatuses }: Res
   const hasContent =
     agents.length > 0 ||
     memories.length > 0 ||
+    knowledgeBases.length > 0 ||
     credentials.length > 0 ||
     evaluators.length > 0 ||
     onlineEvalConfigs.length > 0 ||
@@ -168,6 +173,7 @@ export function ResourceGraph({ project, mcp, agentName, resourceStatuses }: Res
     policyEngines.length > 0 ||
     mcpRuntimeTools.length > 0 ||
     unassignedTargets.length > 0 ||
+    payments.length > 0 ||
     pendingRemovals.length > 0;
 
   return (
@@ -235,6 +241,31 @@ export function ResourceGraph({ project, mcp, agentName, resourceStatuses }: Res
                 color="blue"
                 name={memory.name}
                 detail={rsEntry?.detail ?? strategies}
+                deploymentState={rsEntry?.deploymentState}
+                identifier={rsEntry?.identifier}
+              />
+            );
+          })}
+        </Box>
+      )}
+
+      {/* Knowledge Bases */}
+      {knowledgeBases.length > 0 && (
+        <Box flexDirection="column">
+          <SectionHeader>Knowledge Bases</SectionHeader>
+          {knowledgeBases.map(kb => {
+            const rsEntry = statusMap.get(`knowledge-base:${kb.name}`);
+            const dsCount = kb.dataSources.length;
+            const fallbackDetail = `${dsCount} data source${dsCount === 1 ? '' : 's'}`;
+            return (
+              <ResourceRow
+                key={kb.name}
+                icon={ICONS['knowledge-base']}
+                color="blue"
+                name={kb.name}
+                detail={rsEntry?.detail ?? fallbackDetail}
+                status={rsEntry?.error ? 'error' : undefined}
+                statusColor={rsEntry?.error ? 'red' : undefined}
                 deploymentState={rsEntry?.deploymentState}
                 identifier={rsEntry?.identifier}
               />
@@ -377,6 +408,36 @@ export function ResourceGraph({ project, mcp, agentName, resourceStatuses }: Res
         </Box>
       )}
 
+      {/* Payments — manager (parent) with its connectors (children) */}
+      {payments.length > 0 && (
+        <Box flexDirection="column">
+          <SectionHeader>Payments</SectionHeader>
+          {payments.map(manager => {
+            const rsEntry = statusMap.get(`payment:${manager.name}`);
+            const localDetail = `${manager.authorizerType} — auto-pay ${manager.autoPayment ? 'on' : 'off'}`;
+            return (
+              <Box key={manager.name} flexDirection="column">
+                <ResourceRow
+                  icon={ICONS.payment}
+                  color="green"
+                  name={manager.name}
+                  detail={rsEntry?.detail ?? localDetail}
+                  deploymentState={rsEntry?.deploymentState}
+                  identifier={rsEntry?.identifier}
+                />
+                {manager.connectors.map(connector => (
+                  <Text key={connector.name}>
+                    {'    '}
+                    <Text color="cyan">{ICONS.tool}</Text> {connector.name}
+                    <Text color="gray"> [{connector.provider}]</Text>
+                  </Text>
+                ))}
+              </Box>
+            );
+          })}
+        </Box>
+      )}
+
       {/* Removed locally — still deployed in AWS, will be torn down on next deploy */}
       {pendingRemovals.length > 0 && (
         <Box flexDirection="column">
@@ -503,6 +564,7 @@ export function ResourceGraph({ project, mcp, agentName, resourceStatuses }: Res
         <Text>
           <Text color="green">{ICONS.agent}</Text> agent{'  '}
           <Text color="blue">{ICONS.memory}</Text> memory{'  '}
+          <Text color="blue">{ICONS['knowledge-base']}</Text> knowledge base{'  '}
           <Text color="yellow">{ICONS.credential}</Text> credential{'  '}
           <Text color="cyan">{ICONS.evaluator}</Text> evaluator{'  '}
           <Text color="magenta">{ICONS['online-eval']}</Text> online-eval{'  '}

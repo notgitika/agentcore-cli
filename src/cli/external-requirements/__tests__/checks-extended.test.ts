@@ -48,6 +48,7 @@ describe('requiresUv', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -57,6 +58,7 @@ describe('requiresUv', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
     expect(requiresUv(project)).toBe(true);
   });
@@ -77,6 +79,7 @@ describe('requiresUv', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -86,6 +89,7 @@ describe('requiresUv', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
     expect(requiresUv(project)).toBe(false);
   });
@@ -97,6 +101,7 @@ describe('requiresUv', () => {
       managedBy: 'CDK' as const,
       runtimes: [],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -106,6 +111,7 @@ describe('requiresUv', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
     expect(requiresUv(project)).toBe(false);
   });
@@ -128,6 +134,7 @@ describe('requiresContainerRuntime', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -137,6 +144,7 @@ describe('requiresContainerRuntime', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
     expect(requiresContainerRuntime(project)).toBe(true);
   });
@@ -157,6 +165,7 @@ describe('requiresContainerRuntime', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -166,6 +175,7 @@ describe('requiresContainerRuntime', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
     expect(requiresContainerRuntime(project)).toBe(false);
   });
@@ -177,6 +187,7 @@ describe('requiresContainerRuntime', () => {
       managedBy: 'CDK' as const,
       runtimes: [],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -186,6 +197,7 @@ describe('requiresContainerRuntime', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
     expect(requiresContainerRuntime(project)).toBe(false);
   });
@@ -214,6 +226,7 @@ describe('requiresContainerRuntime', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -223,6 +236,7 @@ describe('requiresContainerRuntime', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
     expect(requiresContainerRuntime(project)).toBe(true);
   });
@@ -285,6 +299,7 @@ describe('checkDependencyVersions', () => {
       managedBy: 'CDK' as const,
       runtimes: [],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -294,6 +309,7 @@ describe('checkDependencyVersions', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     const result = await checkDependencyVersions(project);
@@ -309,6 +325,7 @@ describe('checkDependencyVersions', () => {
       managedBy: 'CDK' as const,
       runtimes: [],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -318,6 +335,7 @@ describe('checkDependencyVersions', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     const result = await checkDependencyVersions(project);
@@ -341,6 +359,7 @@ describe('checkDependencyVersions', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -350,6 +369,7 @@ describe('checkDependencyVersions', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     const result = await checkDependencyVersions(project);

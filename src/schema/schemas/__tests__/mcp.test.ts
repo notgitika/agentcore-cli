@@ -31,6 +31,7 @@ describe('GatewayTargetTypeSchema', () => {
       'apiGateway',
       'lambdaFunctionArn',
       'httpRuntime',
+      'connector',
     ]);
   });
 

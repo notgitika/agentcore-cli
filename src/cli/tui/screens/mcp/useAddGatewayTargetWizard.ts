@@ -50,6 +50,12 @@ export function useAddGatewayTargetWizard(
         case 'httpRuntime':
           baseSteps.push('runtime', 'runtime-endpoint', 'gateway', 'outbound-auth');
           break;
+        case 'connector':
+          // Connector (Knowledge Base) flow: select a KB (project name or
+          // literal 10-char ID), then attach to a gateway. No outbound auth —
+          // connector targets are managed by the gateway IAM role.
+          baseSteps.push('kb-select', 'gateway');
+          break;
         case 'mcpServer':
         default:
           baseSteps.push('endpoint', 'gateway', 'outbound-auth');
@@ -60,10 +66,15 @@ export function useAddGatewayTargetWizard(
     return baseSteps;
   }, [config.targetType]);
 
-  const currentIndex = steps.indexOf(step);
+  // The 'kb-id' step is a sub-step of 'kb-select' for manual literal-KB-ID entry.
+  // It is not part of the canonical step list, so map it onto kb-select for
+  // navigation/index purposes.
+  const stepForIndex: AddGatewayTargetStep = step === 'kb-id' ? 'kb-select' : step;
+  const currentIndex = steps.indexOf(stepForIndex);
 
   const goToNextStep = useCallback(() => {
-    const idx = steps.indexOf(step);
+    const lookup = step === 'kb-id' ? 'kb-select' : step;
+    const idx = steps.indexOf(lookup);
     const next = steps[idx + 1];
     if (idx >= 0 && next) {
       setStep(next);
@@ -71,9 +82,14 @@ export function useAddGatewayTargetWizard(
   }, [steps, step]);
 
   const goBack = useCallback(() => {
+    // From the manual KB-ID entry, fall back to the KB selection picker.
+    if (step === 'kb-id') {
+      setStep('kb-select');
+      return;
+    }
     const prevStep = steps[currentIndex - 1];
     if (prevStep) setStep(prevStep);
-  }, [currentIndex, steps]);
+  }, [currentIndex, steps, step]);
 
   const setName = useCallback(
     (name: string) => {
@@ -90,7 +106,14 @@ export function useAddGatewayTargetWizard(
   );
 
   const setTargetType = useCallback((targetType: GatewayTargetType) => {
-    setConfig(c => ({ ...c, targetType }));
+    setConfig(c => ({
+      ...c,
+      targetType,
+      // Default the connector kind to single-KB Retrieve. We deliberately do NOT
+      // expose `bedrock-agentic-retrieve` in the TUI — that target is automatically
+      // managed by the Add Knowledge Base flow when wiring a KB to a gateway.
+      ...(targetType === 'connector' ? { connectorId: 'bedrock-knowledge-bases' as const } : {}),
+    }));
     // Cannot use goToNextStep() here — config.targetType is changing, which triggers
     // useMemo to recompute steps, but goToNextStep captures the OLD steps via closure.
     // Must explicitly set the first type-specific step.
@@ -107,6 +130,9 @@ export function useAddGatewayTargetWizard(
         break;
       case 'httpRuntime':
         setStep('runtime');
+        break;
+      case 'connector':
+        setStep('kb-select');
         break;
       case 'mcpServer':
       default:
@@ -222,6 +248,28 @@ export function useAddGatewayTargetWizard(
     [goToNextStep]
   );
 
+  /**
+   * Set the Knowledge Base reference (a project KB name or a literal 10-char
+   * external KB ID) and advance to the gateway step. The wizard's `name`
+   * field defaults to the KB reference if the user hasn't typed one yet.
+   */
+  const setKnowledgeBaseId = useCallback(
+    (knowledgeBaseId: string) => {
+      setConfig(c => ({
+        ...c,
+        knowledgeBaseId,
+        name: c.name || knowledgeBaseId,
+      }));
+      goToNextStep();
+    },
+    [goToNextStep]
+  );
+
+  /** Switch from the kb-select picker to the manual literal-ID entry step. */
+  const beginManualKbId = useCallback(() => {
+    setStep('kb-id');
+  }, []);
+
   return {
     config,
     step,
@@ -243,6 +291,8 @@ export function useAddGatewayTargetWizard(
     setToolSchemaFile,
     setRuntime,
     setRuntimeEndpoint,
+    setKnowledgeBaseId,
+    beginManualKbId,
     reset,
   };
 }

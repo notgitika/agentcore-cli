@@ -2,6 +2,7 @@ import { ConfigIO, findConfigRoot } from '../../../lib';
 import {
   AgentNameSchema,
   BuildTypeSchema,
+  CONNECTOR_ID_VALUES,
   DatasetNameSchema,
   DatasetSchemaTypeSchema,
   GatewayAuthorizerTypeSchema,
@@ -19,6 +20,7 @@ import {
   getSupportedModelProviders,
   isValidKmsKeyArn,
   matchEnumValue,
+  validateApiFormat,
 } from '../../../schema';
 import { ARN_VALIDATION_MESSAGE, isValidArn } from '../shared/arn-utils';
 import { validateHeaderAllowlist } from '../shared/header-utils';
@@ -397,7 +399,7 @@ export async function validateAddGatewayTargetOptions(options: AddGatewayTargetO
     return {
       valid: false,
       error:
-        '--type is required. Valid options: mcp-server, api-gateway, open-api-schema, smithy-model, lambda-function-arn, http-runtime',
+        '--type is required. Valid options: mcp-server, api-gateway, open-api-schema, smithy-model, lambda-function-arn, http-runtime, connector',
     };
   }
 
@@ -408,12 +410,13 @@ export async function validateAddGatewayTargetOptions(options: AddGatewayTargetO
     'smithy-model': 'smithyModel',
     'lambda-function-arn': 'lambdaFunctionArn',
     'http-runtime': 'httpRuntime',
+    connector: 'connector',
   };
   const mappedType = typeMap[options.type];
   if (!mappedType) {
     return {
       valid: false,
-      error: `Invalid type: ${options.type}. Valid options: mcp-server, api-gateway, open-api-schema, smithy-model, lambda-function-arn, http-runtime`,
+      error: `Invalid type: ${options.type}. Valid options: mcp-server, api-gateway, open-api-schema, smithy-model, lambda-function-arn, http-runtime, connector`,
     };
   }
   options.type = mappedType;
@@ -599,6 +602,59 @@ export async function validateAddGatewayTargetOptions(options: AddGatewayTargetO
       options.endpoint = options.runtimeEndpoint;
     }
 
+    options.language = 'Other';
+    return { valid: true };
+  }
+
+  // Connector targets (Bedrock KB, agentic-retrieve): validate early and return
+  if (mappedType === 'connector') {
+    const validConnectors = CONNECTOR_ID_VALUES.join(', ');
+    if (!options.connector) {
+      return {
+        valid: false,
+        error: `--connector is required for connector type. Valid: ${validConnectors}`,
+      };
+    }
+    if (!(CONNECTOR_ID_VALUES as readonly string[]).includes(options.connector)) {
+      return {
+        valid: false,
+        error: `Invalid --connector "${options.connector}". Valid: ${validConnectors}`,
+      };
+    }
+    if (!options.knowledgeBaseId || options.knowledgeBaseId.length === 0) {
+      return { valid: false, error: '--knowledge-base-id is required for connector type' };
+    }
+    if (options.connector === 'bedrock-knowledge-bases' && options.knowledgeBaseId.length > 1) {
+      return {
+        valid: false,
+        error:
+          '--knowledge-base-id may only be specified once for --connector bedrock-knowledge-bases. Use --connector bedrock-agentic-retrieve for fan-out.',
+      };
+    }
+    const irrelevant: [string, string][] = [
+      ['endpoint', '--endpoint'],
+      ['host', '--host'],
+      ['restApiId', '--rest-api-id'],
+      ['stage', '--stage'],
+      ['lambdaArn', '--lambda-arn'],
+      ['toolSchemaFile', '--tool-schema-file'],
+      ['toolFilterPath', '--tool-filter-path'],
+      ['toolFilterMethods', '--tool-filter-methods'],
+      ['outboundAuthType', '--outbound-auth'],
+      ['credentialName', '--credential-name'],
+      ['oauthClientId', '--oauth-client-id'],
+      ['oauthClientSecret', '--oauth-client-secret'],
+      ['oauthDiscoveryUrl', '--oauth-discovery-url'],
+      ['oauthScopes', '--oauth-scopes'],
+    ];
+    for (const [key, flag] of irrelevant) {
+      if ((options as unknown as Record<string, unknown>)[key]) {
+        return { valid: false, error: `${flag} is not applicable for connector type` };
+      }
+    }
+    if (options.language && options.language !== 'Other') {
+      return { valid: false, error: '--language is not applicable for connector type' };
+    }
     options.language = 'Other';
     return { valid: true };
   }
@@ -931,6 +987,14 @@ const VALID_HARNESS_TOOLS = [
 const VALID_GATEWAY_OUTBOUND_AUTH = ['awsIam', 'none', 'oauth'] as const;
 
 export function validateAddHarnessOptions(options: AddHarnessCliOptions): ValidationResult {
+  if (options.apiFormat) {
+    const provider = options.modelProvider ?? 'bedrock';
+    const formatResult = validateApiFormat(options.apiFormat, provider);
+    if (!formatResult.valid) {
+      return { valid: false, error: formatResult.error };
+    }
+  }
+
   if (options.tools) {
     const toolNames = options.tools.split(',').map(s => s.trim());
     for (const tool of toolNames) {

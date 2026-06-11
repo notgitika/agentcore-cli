@@ -6,6 +6,7 @@ export type AddResourceType =
   | 'harness'
   | 'agent'
   | 'memory'
+  | 'knowledge-base'
   | 'credential'
   | 'evaluator'
   | 'online-eval'
@@ -15,11 +16,14 @@ export type AddResourceType =
   | 'policy'
   | 'config-bundle'
   | 'ab-test'
-  | 'dataset';
+  | 'dataset'
+  | 'payment-manager'
+  | 'payment-connector';
 
 const BASE_ADD_RESOURCES: { id: AddResourceType; title: string; description: string }[] = [
   { id: 'agent', title: 'Agent', description: 'Deploy an HTTP, MCP, A2A, or AG-UI agent' },
   { id: 'memory', title: 'Memory', description: 'Persistent context storage' },
+  { id: 'knowledge-base', title: 'Knowledge Base', description: 'Create a managed knowledge base for retrieval' },
   { id: 'credential', title: 'Credential', description: 'API key credential providers' },
   { id: 'evaluator', title: 'Evaluator', description: 'Custom LLM-as-a-Judge evaluator' },
   { id: 'online-eval', title: 'Online Eval Config', description: 'Continuous evaluation pipeline' },
@@ -30,6 +34,12 @@ const BASE_ADD_RESOURCES: { id: AddResourceType; title: string; description: str
   { id: 'dataset', title: 'Dataset', description: 'Evaluation dataset for testing agents' },
   { id: 'config-bundle', title: 'Configuration Bundle [preview]', description: 'Versioned component configurations' },
   { id: 'ab-test', title: 'AB Test [preview]', description: 'Compare agent configurations with traffic splitting' },
+  { id: 'payment-manager', title: 'Payment Manager', description: 'x402 crypto microtransactions config' },
+  {
+    id: 'payment-connector',
+    title: 'Payment Connector',
+    description: 'Link payment provider credentials to a manager',
+  },
 ];
 
 const ADD_RESOURCES: { id: AddResourceType; title: string; description: string }[] = [
@@ -57,7 +67,12 @@ export function AddScreen({ onSelect, onExit }: AddScreenProps) {
     <SelectScreen
       title="Add Resource"
       items={ADD_RESOURCE_ITEMS}
-      onSelect={item => onSelect(item.id as AddResourceType)}
+      onSelect={item => {
+        // Safe: ADD_RESOURCE_ITEMS is built from ADD_RESOURCES whose ids are
+        // typed as AddResourceType.
+        const resource = ADD_RESOURCES.find(r => r.id === item.id);
+        if (resource) onSelect(resource.id);
+      }}
       onExit={onExit}
       isDisabled={isDisabled}
     />

@@ -55,6 +55,7 @@ describe('resolveAgentContext', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -64,6 +65,7 @@ describe('resolveAgentContext', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     },
     deployedState: {
       targets: {
@@ -120,6 +122,7 @@ describe('resolveAgentContext', () => {
           },
         ],
         memories: [],
+        knowledgeBases: [],
         credentials: [],
         evaluators: [],
         onlineEvalConfigs: [],
@@ -129,6 +132,7 @@ describe('resolveAgentContext', () => {
         abTests: [],
         harnesses: [],
         datasets: [],
+        payments: [],
       },
     });
     const result = resolveAgentContext(context, {});
@@ -165,6 +169,7 @@ describe('resolveAgentContext', () => {
           },
         ],
         memories: [],
+        knowledgeBases: [],
         credentials: [],
         evaluators: [],
         onlineEvalConfigs: [],
@@ -174,6 +179,7 @@ describe('resolveAgentContext', () => {
         abTests: [],
         harnesses: [],
         datasets: [],
+        payments: [],
       },
       deployedState: {
         targets: {
@@ -220,6 +226,7 @@ describe('resolveAgentContext', () => {
         managedBy: 'CDK' as const,
         runtimes: [],
         memories: [],
+        knowledgeBases: [],
         credentials: [],
         evaluators: [],
         onlineEvalConfigs: [],
@@ -229,6 +236,7 @@ describe('resolveAgentContext', () => {
         abTests: [],
         harnesses: [],
         datasets: [],
+        payments: [],
       },
     });
     const result = resolveAgentContext(context, {});

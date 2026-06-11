@@ -12,8 +12,10 @@ import {
   parseDatasetOutputs,
   parseEvaluatorOutputs,
   parseGatewayOutputs,
+  parseKnowledgeBaseOutputs,
   parseMemoryOutputs,
   parseOnlineEvalOutputs,
+  parsePaymentOutputs,
   parsePolicyEngineOutputs,
   parsePolicyOutputs,
   parseRuntimeEndpointOutputs,
@@ -22,10 +24,12 @@ import { getErrorMessage } from '../../errors';
 import { isPreviewEnabled } from '../../feature-flags';
 import { ExecLogger } from '../../logging';
 import {
+  assertEnvFileExists,
   bootstrapEnvironment,
   buildCdkProject,
   checkBootstrapNeeded,
   checkStackDeployability,
+  ensureDefaultDeploymentTarget,
   getAllCredentials,
   hasIdentityApiProviders,
   hasIdentityOAuthProviders,
@@ -41,7 +45,14 @@ import { formatTargetStatus, getGatewayTargetStatuses } from '../../operations/d
 import { type ImperativeDeployContext, createDeploymentManager } from '../../operations/deploy/imperative';
 import { deleteOrphanedABTests, setupABTests } from '../../operations/deploy/post-deploy-ab-tests';
 import { syncDatasets } from '../../operations/deploy/post-deploy-datasets';
+import { autoIngestKnowledgeBases } from '../../operations/deploy/post-deploy-knowledge-bases';
 import { enableOnlineEvalConfigs } from '../../operations/deploy/post-deploy-online-evals';
+import {
+  cleanupPaymentCredentialProviders,
+  hasPaymentCredentialProviders,
+  setupPaymentCredentialProviders,
+} from '../../operations/deploy/pre-deploy-identity';
+import { hydrateKnowledgeBaseDataSources } from '../../operations/knowledge-base/hydrate-data-sources';
 import { toStackName } from '../import/import-utils';
 import type { DeployResult } from './types';
 import { StackSelectionStrategy } from '@aws-cdk/toolkit-lib';
@@ -113,8 +124,13 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
   try {
     const configIO = new ConfigIO();
 
-    // Load targets and find the specified one
+    // Load targets and find the specified one.
+    // Freshly-created projects have an empty aws-targets.json (populated at deploy
+    // time). The interactive flow prompts for the target; for non-interactive
+    // deploys (`--yes`/`--json`/`--target`) auto-populate a default from the
+    // detected AWS context so deploy doesn't fail with "target not found".
     startStep('Load deployment target');
+    await ensureDefaultDeploymentTarget(configIO);
     const targets = await configIO.resolveAWSDeploymentTargets();
     const target = targets.find(t => t.name === options.target);
     if (!target) {
@@ -151,7 +167,7 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       logger.finalize(false);
       return {
         success: false,
-        error: new Error(
+        error: new ValidationError(
           'This will delete all deployed resources and the CloudFormation stack. Run with --yes to confirm teardown.'
         ),
         logPath: logger.getRelativeLogPath(),
@@ -172,6 +188,14 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
 
     // Set up identity providers before CDK synth (CDK needs credential ARNs)
     let identityKmsKeyArn: string | undefined;
+
+    // Unified .env.local existence check across ApiKey, OAuth2, and Payment credentials.
+    // Lists every required env var upfront so the user can populate the file in one shot.
+    const envFileError = assertEnvFileExists(context.projectSpec, configIO.getConfigRoot());
+    if (envFileError) {
+      logger.finalize(false);
+      return { success: false, error: new Error(envFileError), logPath: logger.getRelativeLogPath() };
+    }
 
     // Read runtime credentials from process.env (enables non-interactive deploy with -y)
     const neededCredentials = getAllCredentials(context.projectSpec);
@@ -255,6 +279,40 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       endStep('success');
     }
 
+    // Set up payment credential providers before CDK synth (secrets stay imperative)
+    // PaymentManager, PaymentConnector, and IAM roles are created by CDK constructs
+    if (hasPaymentCredentialProviders(context.projectSpec)) {
+      startStep('Setting up payment credentials...');
+
+      const paymentPreDeployResult = await setupPaymentCredentialProviders({
+        projectSpec: context.projectSpec,
+        configBaseDir: configIO.getConfigRoot(),
+        region: target.region,
+        runtimeCredentials,
+      });
+
+      if (paymentPreDeployResult.hasErrors) {
+        const errorMsgs = paymentPreDeployResult.errors.join('; ');
+        endStep('error', errorMsgs);
+        logger.log(`Payment credential setup errors: ${errorMsgs}`, 'error');
+        logger.finalize(false);
+        return {
+          success: false,
+          error: new Error(`Payment setup failed: ${errorMsgs}`),
+          logPath: logger.getRelativeLogPath(),
+        };
+      }
+
+      // Merge payment credential provider ARNs into deployedCredentials (same as identity credentials)
+      for (const [name, result] of Object.entries(paymentPreDeployResult.credentialProviders)) {
+        deployedCredentials[name] = {
+          credentialProviderArn: result.credentialProviderArn,
+        };
+      }
+
+      endStep('success');
+    }
+
     // Write credential ARNs to deployed state before CDK synth so the template can read them
     if (Object.keys(deployedCredentials).length > 0) {
       const existingPreSynthState = await configIO.readDeployedState().catch(() => ({ targets: {} }) as DeployedState);
@@ -271,10 +329,10 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     // Synthesize CloudFormation templates
     startStep('Synthesize CloudFormation');
     const switchableIoHost = options.verbose || options.onDeployMessage ? createSwitchableIoHost() : undefined;
-    const synthResult = await synthesizeCdk(
-      context.cdkProject,
-      switchableIoHost ? { ioHost: switchableIoHost.ioHost } : undefined
-    );
+    const synthResult = await synthesizeCdk(context.cdkProject, {
+      ...(switchableIoHost && { ioHost: switchableIoHost.ioHost }),
+      region: target.region,
+    });
     toolkitWrapper = synthResult.toolkitWrapper;
     const stackNames = synthResult.stackNames;
     if (stackNames.length === 0) {
@@ -410,6 +468,21 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
         }
       }
 
+      // Clean up imperative payment credential providers (CFN stack delete handles manager/connector/roles)
+      const existingDeployedState = await configIO.readDeployedState().catch(() => undefined);
+      const existingPayments = existingDeployedState?.targets?.[target.name]?.resources?.payments;
+      if (existingPayments && Object.keys(existingPayments).length > 0) {
+        startStep('Clean up payment credentials');
+        try {
+          await cleanupPaymentCredentialProviders({ region: target.region, payments: existingPayments });
+          endStep('success');
+        } catch (cleanupErr) {
+          endStep('error', `Payment cleanup: ${getErrorMessage(cleanupErr)}`);
+          // Continue with teardown -- payment cleanup is best-effort
+        }
+      }
+
+      // After deploying the empty spec, destroy the stack entirely
       startStep('Tear down stack');
       const teardown = await performStackTeardown(target.name);
       if (!teardown.success) {
@@ -519,6 +592,49 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     const configBundleNames = (context.projectSpec.configBundles ?? []).map(b => b.name);
     const configBundles = parseConfigBundleOutputs(outputs, configBundleNames);
 
+    // Parse knowledge base outputs (CFN emits id+arn; DSes hydrated next via SDK).
+    const knowledgeBaseSpecs = context.projectSpec.knowledgeBases ?? [];
+    const knowledgeBaseNames = knowledgeBaseSpecs.map(kb => kb.name);
+    const knowledgeBases = parseKnowledgeBaseOutputs(outputs, knowledgeBaseNames);
+
+    if (knowledgeBaseNames.length > 0 && Object.keys(knowledgeBases).length !== knowledgeBaseNames.length) {
+      logger.log(
+        `Deployed-state missing outputs for ${
+          knowledgeBaseNames.length - Object.keys(knowledgeBases).length
+        } knowledge base(s).`,
+        'warn'
+      );
+    }
+
+    // Hydrate dataSources[] for each KB by listing DSes via bedrock-agent
+    // (the L3 doesn't emit per-DS CFN outputs).
+    if (Object.keys(knowledgeBases).length > 0) {
+      try {
+        await hydrateKnowledgeBaseDataSources({
+          knowledgeBases,
+          knowledgeBaseSpecs,
+          region: target.region,
+        });
+      } catch (err) {
+        logger.log(`Failed to hydrate knowledge base data sources: ${getErrorMessage(err)}`, 'warn');
+      }
+    }
+
+    // Parse payment outputs from CFN stack
+    const paymentSpecs = (context.projectSpec.payments ?? []).map(p => ({
+      name: p.name,
+      authorizerType: p.authorizerType,
+      autoPayment: p.autoPayment,
+      paymentToolAllowlist: p.paymentToolAllowlist,
+      networkPreferences: p.networkPreferences,
+      connectors: p.connectors.map(c => ({
+        name: c.name,
+        credentialProviderArn: deployedCredentials[c.credentialName]?.credentialProviderArn ?? '',
+        credentialProviderName: c.credentialName,
+      })),
+    }));
+    const payments = paymentSpecs.length > 0 ? parsePaymentOutputs(outputs, paymentSpecs) : undefined;
+
     endStep('success');
 
     // Post-CDK: deploy imperative resources (harness) — preview mode only
@@ -589,6 +705,8 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       runtimeEndpoints,
       datasets,
       configBundles,
+      knowledgeBases,
+      payments,
     });
 
     if (deployHash) {
@@ -598,7 +716,25 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       }
     }
 
-    await configIO.writeDeployedState(deployedState);
+    // CFN succeeded by this point — failing to persist deployed-state.json
+    // would leave AWS resources without a local pointer for teardown. Surface
+    // a recovery message that names the stack + region so the user can
+    // either teardown manually or re-run `agentcore status` once the local
+    // I/O issue is resolved.
+    try {
+      await configIO.writeDeployedState(deployedState);
+    } catch (writeErr) {
+      const msg = writeErr instanceof Error ? writeErr.message : String(writeErr);
+      logger.log(
+        `WARNING: deploy succeeded but writing agentcore/deployed-state.json failed: ${msg}.\n` +
+          `  Stack: ${stackName} (region: ${target.region})\n` +
+          `  AWS resources are running but the CLI cannot track them locally.\n` +
+          `  Recovery options:\n` +
+          `    1) Fix the local I/O problem (disk space / permissions on agentcore/) and run \`agentcore status\` to refresh.\n` +
+          `    2) If you want to teardown what was deployed: \`aws cloudformation delete-stack --stack-name ${stackName} --region ${target.region}\``
+      );
+      throw writeErr;
+    }
 
     // Show gateway URLs and target sync status
     if (Object.keys(gateways).length > 0) {
@@ -677,6 +813,49 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
           logger.log(`Dataset "${r.datasetName}": +${r.added} added, ~${r.updated} updated, -${r.deleted} deleted`);
         }
       }
+    }
+
+    // Post-deploy: auto-trigger ingestion for any KB whose data-source URIs
+    // changed since the last deploy (or has never been ingested before).
+    const knowledgeBaseSpecsForIngest = context.projectSpec.knowledgeBases ?? [];
+    if (knowledgeBaseSpecsForIngest.length > 0) {
+      startStep('Auto-ingest knowledge bases');
+      const ingestResult = await autoIngestKnowledgeBases({
+        region: target.region,
+        knowledgeBases: knowledgeBaseSpecsForIngest,
+        deployedKnowledgeBases: deployedState.targets?.[target.name]?.resources?.knowledgeBases ?? {},
+        previousKnowledgeBases: existingState?.targets?.[target.name]?.resources?.knowledgeBases,
+        targetName: target.name,
+        deployedState,
+        onProgress: msg => logger.log(msg),
+      });
+
+      // Persist new sourcesHash values for KBs whose ingestion fired.
+      const targetResources = deployedState.targets[target.name]?.resources;
+      if (targetResources?.knowledgeBases) {
+        for (const r of ingestResult.results) {
+          if (r.status === 'started' && r.newSourcesHash) {
+            const record = targetResources.knowledgeBases[r.knowledgeBaseName];
+            if (record) record.sourcesHash = r.newSourcesHash;
+          }
+        }
+        await configIO.writeDeployedState(deployedState);
+      }
+
+      // Log per-KB result so the user sees what happened.
+      for (const r of ingestResult.results) {
+        if (r.status === 'started') {
+          logger.log(
+            `Knowledge base "${r.knowledgeBaseName}": ingestion started for ${r.startedJobCount} data source(s)`
+          );
+        } else if (r.status === 'skipped') {
+          logger.log(`Knowledge base "${r.knowledgeBaseName}": skipped (${r.reason})`);
+        } else {
+          logger.log(`Knowledge base "${r.knowledgeBaseName}": ${r.error}`, 'warn');
+          postDeployWarnings.push(`Knowledge base "${r.knowledgeBaseName}": ${r.error}`);
+        }
+      }
+      endStep(ingestResult.hasErrors ? 'error' : 'success');
     }
 
     // Pre-gateway: Delete orphaned AB tests so their gateway rules are cleaned up
@@ -802,12 +981,3 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
   }
 }
 
-/**
- * Resolve config bundle component key placeholders to real ARNs.
- *
- * Component keys like {{gateway:name}} or {{runtime:name}} are replaced
- * with the actual ARNs from deployed state. Keys that are already ARNs or
- * don't match a placeholder pattern are left unchanged.
- */
-// resolveConfigBundleComponentKeys and resolveComponentKey moved to
-// src/cli/operations/deploy/post-deploy-config-bundles.ts

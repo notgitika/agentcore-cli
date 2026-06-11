@@ -1,5 +1,5 @@
 import type { ApiGatewayHttpMethod, GatewayTargetType } from '../../../../schema';
-import { ToolNameSchema } from '../../../../schema';
+import { REAL_KB_ID_PATTERN, ToolNameSchema } from '../../../../schema';
 import { ConfirmReview, Panel, Screen, StepIndicator, TextInput, WizardSelect } from '../../components';
 import type { SelectableItem } from '../../components';
 import { HELP_TEXT } from '../../constants';
@@ -13,7 +13,13 @@ import type {
   GatewayTargetWizardState,
   SchemaBasedTargetConfig,
 } from './types';
-import { API_GATEWAY_AUTH_OPTIONS, MCP_TOOL_STEP_LABELS, TARGET_TYPE_OPTIONS, getOutboundAuthOptions } from './types';
+import {
+  API_GATEWAY_AUTH_OPTIONS,
+  ENTER_KB_ID_MANUALLY,
+  MCP_TOOL_STEP_LABELS,
+  TARGET_TYPE_OPTIONS,
+  getOutboundAuthOptions,
+} from './types';
 import { useAddGatewayTargetWizard } from './useAddGatewayTargetWizard';
 import { Box, Text } from 'ink';
 import React, { useCallback, useMemo, useState } from 'react';
@@ -47,6 +53,7 @@ interface AddGatewayTargetScreenProps {
   existingToolNames: string[];
   existingOAuthCredentialNames: string[];
   existingApiKeyCredentialNames: string[];
+  existingKnowledgeBases: string[];
   onComplete: (config: AddGatewayTargetConfig) => void;
   onCreateCredential: (pendingConfig: GatewayTargetWizardState) => void;
   onExit: () => void;
@@ -61,6 +68,7 @@ export function AddGatewayTargetScreen({
   existingToolNames,
   existingOAuthCredentialNames,
   existingApiKeyCredentialNames,
+  existingKnowledgeBases,
   onComplete,
   onCreateCredential,
   onExit,
@@ -91,6 +99,8 @@ export function AddGatewayTargetScreen({
   const isToolSchemaStep = wizard.step === 'tool-schema';
   const isRuntimeStep = wizard.step === 'runtime';
   const isRuntimeEndpointStep = wizard.step === 'runtime-endpoint';
+  const isKbSelectStep = wizard.step === 'kb-select';
+  const isKbIdStep = wizard.step === 'kb-id';
   const isConfirmStep = wizard.step === 'confirm';
   const isAuthStep = isOutboundAuthStep || isApiGatewayAuthStep;
   const noGatewaysAvailable = isGatewayStep && existingGateways.length === 0;
@@ -144,6 +154,21 @@ export function AddGatewayTargetScreen({
   const apiKeyCredItems: SelectableItem[] = useMemo(
     () => buildCredentialItems(existingApiKeyCredentialNames, 'API key credential'),
     [existingApiKeyCredentialNames]
+  );
+  const knowledgeBaseItems: SelectableItem[] = useMemo(
+    () => [
+      ...existingKnowledgeBases.map(name => ({
+        id: name,
+        title: name,
+        description: 'Project Knowledge Base (resolved at synth)',
+      })),
+      {
+        id: ENTER_KB_ID_MANUALLY,
+        title: 'Enter an existing KB ID manually...',
+        description: 'Provide a 10-character Bedrock Knowledge Base ID',
+      },
+    ],
+    [existingKnowledgeBases]
   );
 
   // ── Auth completion callbacks ──
@@ -213,6 +238,23 @@ export function AddGatewayTargetScreen({
     },
     onExit: () => wizard.goBack(),
     isActive: isRuntimeEndpointStep && hasRuntimeEndpoints,
+  });
+
+  // Knowledge Base selection (connector branch). Selecting a project KB stores
+  // its name on the wizard (resolved at synth from application.knowledgeBases).
+  // Selecting "Enter an existing KB ID manually..." advances to the kb-id
+  // text-input sub-step for an external KB.
+  const knowledgeBaseNav = useListNavigation({
+    items: knowledgeBaseItems,
+    onSelect: item => {
+      if (item.id === ENTER_KB_ID_MANUALLY) {
+        wizard.beginManualKbId();
+      } else {
+        wizard.setKnowledgeBaseId(item.id);
+      }
+    },
+    onExit: () => wizard.goBack(),
+    isActive: isKbSelectStep,
   });
 
   // Outbound auth type selection (for mcpServer, openApiSchema)
@@ -315,6 +357,16 @@ export function AddGatewayTargetScreen({
           endpoint: c.endpoint,
           outboundAuth: c.outboundAuth,
         });
+      } else if (c.targetType === 'connector') {
+        // Only `bedrock-knowledge-bases` is exposed in the TUI — agentic-retrieve
+        // targets are managed by the Add Knowledge Base flow's gateway wiring.
+        onComplete({
+          targetType: 'connector',
+          connectorId: 'bedrock-knowledge-bases',
+          name: c.name,
+          gateway: c.gateway!,
+          knowledgeBaseId: c.knowledgeBaseId!,
+        });
       } else {
         onComplete({
           targetType: 'mcpServer',
@@ -344,7 +396,8 @@ export function AddGatewayTargetScreen({
         isSchemaSourceStep ||
         isLambdaArnStep ||
         isToolSchemaStep ||
-        isRuntimeStep
+        isRuntimeStep ||
+        isKbIdStep
       ? HELP_TEXT.TEXT_INPUT
       : HELP_TEXT.NAVIGATE_SELECT;
 
@@ -572,6 +625,31 @@ export function AddGatewayTargetScreen({
           />
         )}
 
+        {isKbSelectStep && (
+          <WizardSelect
+            title="Select Knowledge Base"
+            description="Pick a project Knowledge Base, or enter an existing KB ID manually"
+            items={knowledgeBaseItems}
+            selectedIndex={knowledgeBaseNav.selectedIndex}
+          />
+        )}
+
+        {isKbIdStep && (
+          <TextInput
+            prompt="Knowledge Base ID"
+            placeholder="10-character Bedrock KB ID, e.g. ABCDE12345"
+            onSubmit={wizard.setKnowledgeBaseId}
+            onCancel={() => wizard.goBack()}
+            customValidation={(value: string) => {
+              if (!value.trim()) return 'KB ID is required';
+              if (!REAL_KB_ID_PATTERN.test(value)) {
+                return 'Must be a 10-character uppercase alphanumeric Bedrock KB ID (e.g. ABCDE12345)';
+              }
+              return true;
+            }}
+          />
+        )}
+
         {isRuntimeEndpointStep && !runtimeEndpointsLoaded && <Text dimColor>Loading runtime endpoints...</Text>}
 
         {isRuntimeEndpointStep && runtimeEndpointsLoaded && hasRuntimeEndpoints && (
@@ -615,6 +693,12 @@ export function AddGatewayTargetScreen({
                 ? [
                     { label: 'Runtime', value: wizard.config.runtime ?? '' },
                     ...(wizard.config.endpoint ? [{ label: 'Runtime Endpoint', value: wizard.config.endpoint }] : []),
+                  ]
+                : []),
+              ...(wizard.config.targetType === 'connector'
+                ? [
+                    { label: 'Connector', value: wizard.config.connectorId ?? 'bedrock-knowledge-bases' },
+                    { label: 'Knowledge Base', value: wizard.config.knowledgeBaseId ?? '' },
                   ]
                 : []),
               ...(wizard.config.targetType === 'mcpServer' && wizard.config.endpoint

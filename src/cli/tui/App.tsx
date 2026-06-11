@@ -21,7 +21,7 @@ import { OnlineEvalDashboard } from './screens/online-eval';
 import { PackageScreen } from './screens/package';
 import { RecommendationFlow, RecommendationHistoryScreen, RecommendationsHubScreen } from './screens/recommendation';
 import { RemoveFlow } from './screens/remove';
-import { BatchEvalHistoryScreen, RunBatchEvalFlow, RunEvalFlow, RunScreen } from './screens/run-eval';
+import { BatchEvalHistoryScreen, RunBatchEvalFlow, RunEvalFlow, RunIngestFlow, RunScreen } from './screens/run-eval';
 import { StatusScreen } from './screens/status/StatusScreen';
 import { UpdateScreen } from './screens/update';
 import { ValidateScreen } from './screens/validate';
@@ -35,7 +35,18 @@ type Route =
   | { name: 'home' }
   | { name: 'help'; initialQuery?: string }
   | { name: 'deploy'; diffMode?: boolean }
-  | { name: 'invoke'; sessionId?: string; userId?: string; headers?: Record<string, string>; bearerToken?: string }
+  | {
+      name: 'invoke';
+      sessionId?: string;
+      userId?: string;
+      headers?: Record<string, string>;
+      bearerToken?: string;
+      isResume?: boolean;
+      paymentInstrumentId?: string;
+      paymentSessionId?: string;
+      paymentUserId?: string;
+      autoSession?: boolean;
+    }
   | { name: 'logs' }
   | { name: 'create' }
   | { name: 'add' }
@@ -44,6 +55,7 @@ type Route =
   | { name: 'run' }
   | { name: 'run-eval'; from?: 'run' | 'evals' }
   | { name: 'run-batch-eval'; from?: 'run' | 'evals' }
+  | { name: 'run-ingest'; from?: 'run' }
   | { name: 'batch-eval-history' }
   | { name: 'recommendations-hub' }
   | { name: 'recommend'; from?: 'recommendations-hub' | 'run' }
@@ -122,6 +134,10 @@ function AppContent({
 
     if (id === 'dev') {
       setExitAction({ type: 'dev' });
+      exit();
+      return;
+    } else if (id === 'exec') {
+      setExitAction({ type: 'exec' });
       exit();
       return;
     } else if (id === 'deploy') {
@@ -215,9 +231,23 @@ function AppContent({
         isInteractive={isInteractive}
         onExit={handleBack}
         initialSessionId={route.sessionId}
+        isResume={route.isResume}
         initialUserId={route.userId}
         initialHeaders={route.headers}
         initialBearerToken={route.bearerToken}
+        onExec={result => {
+          setExitAction({
+            type: 'exec-shell',
+            runtimeArn: result.runtimeArn,
+            region: result.region,
+            sessionId: result.sessionId,
+          });
+          exit();
+        }}
+        initialPaymentInstrumentId={route.paymentInstrumentId}
+        initialPaymentSessionId={route.paymentSessionId}
+        initialPaymentUserId={route.paymentUserId}
+        initialAutoSession={route.autoSession}
       />
     );
   }
@@ -275,6 +305,7 @@ function AppContent({
         onRunEval={() => setRoute({ name: 'run-eval', from: 'run' })}
         onRunBatchEval={() => setRoute({ name: 'run-batch-eval', from: 'run' })}
         onRunRecommendation={() => setRoute({ name: 'recommend', from: 'run' })}
+        onRunIngest={() => setRoute({ name: 'run-ingest', from: 'run' })}
         onExit={handleBack}
       />
     );
@@ -313,6 +344,11 @@ function AppContent({
         onViewJobs={() => setRoute({ name: 'batch-eval-history' })}
       />
     );
+  }
+
+  if (route.name === 'run-ingest') {
+    const backRoute = route.from ?? 'run';
+    return <RunIngestFlow onExit={() => setRoute({ name: backRoute } as Route)} />;
   }
 
   if (route.name === 'batch-eval-history') {

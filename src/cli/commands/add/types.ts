@@ -38,6 +38,10 @@ export interface AddAgentOptions extends VpcOptions {
   idleTimeout?: number | string;
   maxLifetime?: number | string;
   sessionStorageMountPath?: string;
+  efsAccessPointArn?: string[];
+  efsMountPath?: string[];
+  s3AccessPointArn?: string[];
+  s3MountPath?: string[];
   withConfigBundle?: boolean;
   json?: boolean;
 }
@@ -88,6 +92,15 @@ export interface AddGatewayTargetOptions {
   schemaS3Account?: string;
   runtime?: string;
   runtimeEndpoint?: string;
+  /** Connector id (for --type connector): bedrock-knowledge-bases | bedrock-agentic-retrieve. */
+  connector?: string;
+  /**
+   * KB reference for --type connector — either a project KB name (entry in
+   * knowledgeBases[]) or a literal 10-char external KB ID. Repeatable when
+   * --connector is bedrock-agentic-retrieve (fan-out); single-valued for
+   * bedrock-knowledge-bases.
+   */
+  knowledgeBaseId?: string[];
   json?: boolean;
 }
 
@@ -96,6 +109,7 @@ export interface AddHarnessCliOptions {
   name?: string;
   modelProvider?: string;
   modelId?: string;
+  apiFormat?: string;
   apiKeyArn?: string;
   container?: string;
   memory?: boolean;

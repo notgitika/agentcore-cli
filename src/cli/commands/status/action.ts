@@ -3,12 +3,20 @@ import type { Result } from '../../../lib/result';
 import type { AgentCoreProjectSpec, AwsDeploymentTargets, DeployedResourceState, DeployedState } from '../../../schema';
 import { getAgentRuntimeStatus } from '../../aws';
 import { getEvaluator, getOnlineEvaluationConfig } from '../../aws/agentcore-control';
+import { getPaymentManager } from '../../aws/agentcore-payments';
+import { getKnowledgeBase, getLatestIngestionJob } from '../../aws/bedrock-agent';
 import { dnsSuffix } from '../../aws/partition';
 import { getErrorMessage } from '../../errors';
 import { isPreviewEnabled } from '../../feature-flags';
 import { ExecLogger } from '../../logging';
 import type { ResourceDeploymentState } from './constants';
 import { buildRuntimeInvocationUrl } from './constants';
+import {
+  type KbDataSourceDetail,
+  type KbStatusDetail,
+  formatKnowledgeBaseDetail,
+  formatKnowledgeBaseSummaryLine,
+} from './format-knowledge-base';
 
 export type { ResourceDeploymentState };
 
@@ -26,7 +34,9 @@ export interface ResourceStatusEntry {
     | 'ab-test'
     | 'dataset'
     | 'harness'
-    | 'runtime-endpoint';
+    | 'runtime-endpoint'
+    | 'knowledge-base'
+    | 'payment';
   name: string;
   deploymentState: ResourceDeploymentState;
   identifier?: string;
@@ -187,8 +197,20 @@ export function computeResourceStatuses(
     deployedRecord: { ...(resources?.mcp?.gateways ?? {}), ...(resources?.gateways ?? {}) },
     getIdentifier: deployed => deployed.gatewayId,
     getLocalDetail: item => {
-      const count = item.targets?.length ?? 0;
-      return count > 0 ? `${count} target${count !== 1 ? 's' : ''}` : undefined;
+      const targets = item.targets ?? [];
+      if (targets.length === 0) return undefined;
+      const retrieveCount = targets.filter(
+        t => t.targetType === 'connector' && t.connectorId === 'bedrock-knowledge-bases'
+      ).length;
+      const agentic = targets.find(t => t.targetType === 'connector' && t.connectorId === 'bedrock-agentic-retrieve');
+      const base = `${targets.length} target${targets.length !== 1 ? 's' : ''}`;
+      const parts: string[] = [];
+      if (retrieveCount > 0) parts.push(`${retrieveCount} retrieve`);
+      if (agentic) {
+        const fanOut = agentic.knowledgeBaseIds?.length ?? 0;
+        parts.push(`agentic ×${fanOut}`);
+      }
+      return parts.length > 0 ? `${base} (${parts.join(', ')})` : base;
     },
   });
 
@@ -253,6 +275,43 @@ export function computeResourceStatuses(
     getLocalDetail: item => item.schemaType,
   });
 
+  // Reverse-index: KB name -> list of gateways with a connector target referencing it.
+  // Walks both knowledgeBaseId (single-KB Retrieve) and knowledgeBaseIds[]
+  // (agentic-retrieve fan-out) so a KB shows its wiring no matter which
+  // connector kind references it.
+  const kbToGateways = new Map<string, Set<string>>();
+  const recordKbWiring = (kbRef: string, gatewayName: string): void => {
+    const set = kbToGateways.get(kbRef) ?? new Set<string>();
+    set.add(gatewayName);
+    kbToGateways.set(kbRef, set);
+  };
+  for (const gw of project.agentCoreGateways ?? []) {
+    for (const t of gw.targets ?? []) {
+      if (t.targetType !== 'connector') continue;
+      if (t.knowledgeBaseId) recordKbWiring(t.knowledgeBaseId, gw.name);
+      for (const ref of t.knowledgeBaseIds ?? []) recordKbWiring(ref, gw.name);
+    }
+  }
+
+  const knowledgeBases = diffResourceSet({
+    resourceType: 'knowledge-base',
+    localItems: project.knowledgeBases ?? [],
+    deployedRecord: resources?.knowledgeBases ?? {},
+    getIdentifier: deployed => deployed.knowledgeBaseArn,
+    getLocalDetail: item => {
+      const dsPart = `${item.dataSources.length} data source${item.dataSources.length === 1 ? '' : 's'}`;
+      // Wave 2: connector target binds the KB to a gateway. Project-owned
+      // KBs are stored by name on the connector target; external KBs are
+      // stored as a literal id (which won't match a knowledgeBases[] entry).
+      // Either way, we look up by name here — any extra hit (the spec's own
+      // gateway field) is fine to fold in.
+      const wiredGateways = new Set<string>(kbToGateways.get(item.name) ?? []);
+      if (item.gateway) wiredGateways.add(item.gateway);
+      if (wiredGateways.size === 0) return dsPart;
+      return `${dsPart} → gw:${[...wiredGateways].join(',')}`;
+    },
+  });
+
   const abTests = diffResourceSet({
     resourceType: 'ab-test',
     localItems: project.abTests ?? [],
@@ -311,6 +370,15 @@ export function computeResourceStatuses(
       })
     : [];
 
+  const payments = diffResourceSet({
+    resourceType: 'payment',
+    localItems: project.payments ?? [],
+    deployedRecord: resources?.payments ?? {},
+    getIdentifier: deployed => deployed.managerArn,
+    getLocalDetail: item =>
+      `${item.authorizerType} — auto-pay ${item.autoPayment ? 'on' : 'off'} (${item.connectors.length} connector(s))`,
+  });
+
   return [
     ...agents,
     ...runtimeEndpoints,
@@ -322,15 +390,17 @@ export function computeResourceStatuses(
     ...policyEngines,
     ...policies,
     ...datasets,
+    ...knowledgeBases,
     ...configBundles,
     ...abTests,
     ...harnesses,
+    ...payments,
   ];
 }
 
 export async function handleProjectStatus(
   context: StatusContext,
-  options: { targetName?: string } = {}
+  options: { targetName?: string; knowledgeBaseName?: string } = {}
 ): Promise<ProjectStatusResult> {
   const logger = new ExecLogger({ command: 'status' });
   const { project, deployedState, awsTargets } = context;
@@ -497,6 +567,173 @@ export async function handleProjectStatus(
 
       const hasOnlineEvalErrors = resources.some(r => r.resourceType === 'online-eval' && r.error);
       logger.endStep(hasOnlineEvalErrors ? 'error' : 'success');
+    }
+
+    // Enrich deployed knowledge bases with live KB status + latest ingestion job stats
+    const kbStates = targetResources?.knowledgeBases ?? {};
+    const deployedKbs = resources.filter(
+      e => e.resourceType === 'knowledge-base' && e.deploymentState === 'deployed' && kbStates[e.name]
+    );
+
+    if (deployedKbs.length > 0) {
+      logger.startStep(`Fetch knowledge base status (${deployedKbs.length} KB${deployedKbs.length !== 1 ? 's' : ''})`);
+
+      // Reverse-index: KB spec name -> gateways whose connector targets
+      // reference it. Project-owned KBs are stored by *name* on connector
+      // targets (single-KB Retrieve on `knowledgeBaseId`, agentic-retrieve
+      // fan-out on `knowledgeBaseIds[]`), so we key by the spec name
+      // (entry.name) below.
+      const kbNameToGateways = new Map<string, Set<string>>();
+      const recordKbWiring = (kbRef: string, gatewayName: string): void => {
+        const set = kbNameToGateways.get(kbRef) ?? new Set<string>();
+        set.add(gatewayName);
+        kbNameToGateways.set(kbRef, set);
+      };
+      for (const gw of project.agentCoreGateways ?? []) {
+        for (const t of gw.targets ?? []) {
+          if (t.targetType !== 'connector') continue;
+          if (t.knowledgeBaseId) recordKbWiring(t.knowledgeBaseId, gw.name);
+          for (const ref of t.knowledgeBaseIds ?? []) recordKbWiring(ref, gw.name);
+        }
+      }
+
+      await Promise.all(
+        resources.map(async (entry, i) => {
+          if (entry.resourceType !== 'knowledge-base' || entry.deploymentState !== 'deployed') return;
+
+          const kbState = kbStates[entry.name];
+          if (!kbState) return;
+
+          try {
+            const live = await getKnowledgeBase({
+              region: targetConfig.region,
+              knowledgeBaseId: kbState.knowledgeBaseId,
+            });
+            if (!live) {
+              const outOfSync = 'out of sync (KB deleted out of band)';
+              const detail = entry.detail ? `${entry.detail} — ${outOfSync}` : outOfSync;
+              resources[i] = { ...entry, detail };
+              logger.log(`  ${entry.name}: KB ${kbState.knowledgeBaseId} not found`, 'error');
+              return;
+            }
+
+            // Fetch the latest ingestion job for EVERY data source, in parallel,
+            // and map each into a per-DS detail for the rich formatter.
+            const dataSources: KbDataSourceDetail[] = await Promise.all(
+              kbState.dataSources.map(async ds => {
+                const job = await getLatestIngestionJob({
+                  region: targetConfig.region,
+                  knowledgeBaseId: kbState.knowledgeBaseId,
+                  dataSourceId: ds.dataSourceId,
+                });
+                if (!job) {
+                  return { uri: ds.uri, dataSourceId: ds.dataSourceId };
+                }
+                const stats = job.statistics ?? {};
+                // 'COMPLETE' is the SDK's terminal success status for ingestion
+                // jobs; treat it as completed so the formatter shows a finish time.
+                const succeeded = job.status === 'COMPLETE';
+                return {
+                  uri: ds.uri,
+                  dataSourceId: ds.dataSourceId,
+                  ingestion: {
+                    status: job.status,
+                    startedAt: job.startedAt?.toISOString(),
+                    updatedAt: job.updatedAt?.toISOString(),
+                    completedAt: succeeded ? job.updatedAt?.toISOString() : undefined,
+                    scanned: stats.numberOfDocumentsScanned,
+                    indexed: stats.numberOfNewDocumentsIndexed,
+                    modified: stats.numberOfModifiedDocumentsIndexed,
+                    failed: stats.numberOfDocumentsFailed,
+                    deleted: stats.numberOfDocumentsDeleted,
+                  },
+                };
+              })
+            );
+
+            const gatewayNames = [...(kbNameToGateways.get(entry.name) ?? new Set<string>())];
+
+            const kbDetail: KbStatusDetail = {
+              name: entry.name,
+              knowledgeBaseId: kbState.knowledgeBaseId,
+              status: live.status,
+              gatewayNames,
+              dataSources,
+            };
+
+            // Render branch: with --name (knowledgeBaseName) we drill into the
+            // full multi-line block for the matched KB only; without it we emit a
+            // single summary rollup line per KB so `agentcore status` stays
+            // uncluttered when several KBs are deployed. Either way the structured
+            // `detail` below stays a concise one-liner because it is both rendered
+            // inline in the TUI and serialized in `--json` mode.
+            if (options.knowledgeBaseName) {
+              if (entry.name === options.knowledgeBaseName) {
+                for (const line of formatKnowledgeBaseDetail(kbDetail)) {
+                  logger.log(line);
+                }
+              }
+            } else {
+              logger.log(formatKnowledgeBaseSummaryLine(kbDetail));
+            }
+
+            const firstWithJob = dataSources.find(ds => ds.ingestion);
+            const ingestionSummary = firstWithJob?.ingestion?.status
+              ? `Ingestion: ${firstWithJob.ingestion.status}`
+              : 'Ingestion: never run';
+            const enriched = `Status: ${live.status ?? 'UNKNOWN'} — ${ingestionSummary}`;
+            const detail = entry.detail ? `${entry.detail} — ${enriched}` : enriched;
+            resources[i] = { ...entry, detail };
+          } catch (error) {
+            const errorMsg = getErrorMessage(error);
+            resources[i] = { ...entry, error: errorMsg };
+            logger.log(`  ${entry.name}: ERROR - ${errorMsg}`, 'error');
+          }
+        })
+      );
+
+      const hasKbErrors = resources.some(r => r.resourceType === 'knowledge-base' && r.error);
+      logger.endStep(hasKbErrors ? 'error' : 'success');
+    }
+
+    // Enrich deployed payment managers with live status
+    const paymentStates = targetResources?.payments ?? {};
+    const deployedPayments = resources.filter(
+      e => e.resourceType === 'payment' && e.deploymentState === 'deployed' && paymentStates[e.name]
+    );
+
+    if (deployedPayments.length > 0) {
+      logger.startStep(
+        `Fetch payment status (${deployedPayments.length} manager${deployedPayments.length !== 1 ? 's' : ''})`
+      );
+
+      await Promise.all(
+        resources.map(async (entry, i) => {
+          if (entry.resourceType !== 'payment' || entry.deploymentState !== 'deployed') return;
+
+          const paymentState = paymentStates[entry.name];
+          if (!paymentState) return;
+
+          const connectorCount = Object.keys(paymentState.connectors ?? {}).length;
+
+          try {
+            const managerDetail = await getPaymentManager({
+              region: targetConfig.region,
+              paymentManagerId: paymentState.managerId,
+            });
+            const status = managerDetail?.status ?? 'unknown';
+            resources[i] = { ...entry, detail: `${status} — ${connectorCount} connector(s)` };
+            logger.log(`  ${entry.name}: ${status} (${paymentState.managerId})`);
+          } catch (error) {
+            const errorMsg = getErrorMessage(error);
+            resources[i] = { ...entry, detail: `unknown — ${connectorCount} connector(s)`, error: errorMsg };
+            logger.log(`  ${entry.name}: unknown (fetch failed) - ${errorMsg}`, 'error');
+          }
+        })
+      );
+
+      const hasPaymentErrors = resources.some(r => r.resourceType === 'payment' && r.error);
+      logger.endStep(hasPaymentErrors ? 'error' : 'success');
     }
   }
 

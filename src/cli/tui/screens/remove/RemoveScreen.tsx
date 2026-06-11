@@ -14,10 +14,12 @@ export type RemoveResourceType =
   | 'policy'
   | 'gateway'
   | 'gateway-target'
+  | 'knowledge-base'
   | 'config-bundle'
   | 'ab-test'
   | 'runtime-endpoint'
   | 'dataset'
+  | 'payment'
   | 'all';
 
 const REMOVE_RESOURCES: { id: RemoveResourceType; title: string; description: string }[] = [
@@ -31,8 +33,14 @@ const REMOVE_RESOURCES: { id: RemoveResourceType; title: string; description: st
   { id: 'online-eval', title: 'Online Eval Config', description: 'Remove an online eval config' },
   { id: 'policy-engine', title: 'Policy Engine', description: 'Remove a policy engine' },
   { id: 'policy', title: 'Policy', description: 'Remove a policy from a policy engine' },
+  { id: 'payment', title: 'Payment', description: 'Remove a payment manager' },
   { id: 'gateway', title: 'Gateway', description: 'Remove a gateway' },
   { id: 'gateway-target', title: 'Gateway Target', description: 'Remove a gateway target' },
+  {
+    id: 'knowledge-base',
+    title: 'Knowledge Base',
+    description: 'Remove a knowledge base (cascade-prunes connector gateway targets)',
+  },
   { id: 'config-bundle', title: 'Configuration Bundle [preview]', description: 'Remove a configuration bundle' },
   { id: 'ab-test', title: 'AB Test [preview]', description: 'Remove an A/B test' },
   { id: 'runtime-endpoint', title: 'Runtime Endpoint', description: 'Remove a runtime endpoint' },
@@ -71,6 +79,10 @@ interface RemoveScreenProps {
   runtimeEndpointCount: number;
   /** Number of datasets available for removal */
   datasetCount: number;
+  /** Number of knowledge bases available for removal */
+  knowledgeBaseCount: number;
+  /** Number of payment managers available for removal */
+  paymentCount: number;
 }
 
 export function RemoveScreen({
@@ -90,6 +102,8 @@ export function RemoveScreen({
   abTestCount,
   runtimeEndpointCount,
   datasetCount,
+  knowledgeBaseCount,
+  paymentCount,
 }: RemoveScreenProps) {
   const items: SelectableItem[] = useMemo(() => {
     return REMOVE_RESOURCES.map(r => {
@@ -181,6 +195,18 @@ export function RemoveScreen({
             description = 'No datasets to remove';
           }
           break;
+        case 'knowledge-base':
+          if (knowledgeBaseCount === 0) {
+            disabled = true;
+            description = 'No knowledge bases to remove';
+          }
+          break;
+        case 'payment':
+          if (paymentCount === 0) {
+            disabled = true;
+            description = 'No payment managers to remove';
+          }
+          break;
         case 'all':
           // 'all' is always available
           break;
@@ -203,6 +229,8 @@ export function RemoveScreen({
     abTestCount,
     runtimeEndpointCount,
     datasetCount,
+    knowledgeBaseCount,
+    paymentCount,
   ]);
 
   const isDisabled = (item: SelectableItem) => item.disabled ?? false;

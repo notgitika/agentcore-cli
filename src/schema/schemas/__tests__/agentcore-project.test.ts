@@ -408,6 +408,42 @@ describe('AgentCoreProjectSpecSchema', () => {
     }
   });
 
+  it('leaves payments undefined when absent (optional, non-breaking round-trip)', () => {
+    // payments is .optional(), NOT .default([]) — parsing a project without a
+    // payments key must NOT materialize `payments: []`, so re-serializing an
+    // older config does not inject a payments field for customers who never
+    // used payments. See PR discussion on agentcore-l3-cdk-constructs#219.
+    const result = AgentCoreProjectSpecSchema.safeParse(minimalProject);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.payments).toBeUndefined();
+      expect('payments' in result.data).toBe(false);
+    }
+  });
+
+  it('accepts and validates a payments array when present', () => {
+    const result = AgentCoreProjectSpecSchema.safeParse({
+      ...minimalProject,
+      payments: [
+        {
+          name: 'paymgr',
+          authorizerType: 'AWS_IAM',
+          // `pattern` is a removed field; an older agentcore.json may still carry it.
+          // Zod strips unknown keys (the schema is not .strict()), so old configs keep parsing.
+          pattern: 'interceptor',
+          connectors: [],
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.payments).toHaveLength(1);
+      expect(result.data.payments![0]!.name).toBe('paymgr');
+      // Back-compat: the legacy `pattern` key is dropped, not surfaced.
+      expect('pattern' in result.data.payments![0]!).toBe(false);
+    }
+  });
+
   it('accepts project with agents', () => {
     const result = AgentCoreProjectSpecSchema.safeParse({
       ...minimalProject,
@@ -721,5 +757,44 @@ describe('AgentCoreProjectSpecSchema', () => {
     if (!result.success) {
       expect(result.error.issues.some(i => i.message.includes('does not exist on runtime'))).toBe(true);
     }
+  });
+});
+
+describe('AgentCoreProjectSpec — knowledgeBases', () => {
+  it('defaults knowledgeBases to []', () => {
+    const result = AgentCoreProjectSpecSchema.parse({
+      name: 'TestProj',
+      version: 1,
+    });
+    expect(result.knowledgeBases).toEqual([]);
+  });
+
+  it('accepts a populated knowledgeBases array', () => {
+    const result = AgentCoreProjectSpecSchema.parse({
+      name: 'TestProj',
+      version: 1,
+      knowledgeBases: [
+        {
+          name: 'product-docs',
+          dataSources: [{ type: 'S3', uri: 's3://my-bucket/docs/' }],
+        },
+      ],
+    });
+    expect(result.knowledgeBases).toHaveLength(1);
+    expect(result.knowledgeBases[0]?.name).toBe('product-docs');
+    expect(result.knowledgeBases[0]?.type).toBe('AgentCoreKnowledgeBase');
+  });
+
+  it('rejects duplicate knowledge base names', () => {
+    expect(() =>
+      AgentCoreProjectSpecSchema.parse({
+        name: 'TestProj',
+        version: 1,
+        knowledgeBases: [
+          { name: 'docs', dataSources: [{ type: 'S3', uri: 's3://my-bucket/a/' }] },
+          { name: 'docs', dataSources: [{ type: 'S3', uri: 's3://my-bucket/b/' }] },
+        ],
+      })
+    ).toThrow(/Duplicate knowledge base name/);
   });
 });

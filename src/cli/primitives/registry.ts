@@ -9,8 +9,11 @@ import { EvaluatorPrimitive } from './EvaluatorPrimitive';
 import { GatewayPrimitive } from './GatewayPrimitive';
 import { GatewayTargetPrimitive } from './GatewayTargetPrimitive';
 import { HarnessPrimitive } from './HarnessPrimitive';
+import { KnowledgeBasePrimitive } from './KnowledgeBasePrimitive';
 import { MemoryPrimitive } from './MemoryPrimitive';
 import { OnlineEvalConfigPrimitive } from './OnlineEvalConfigPrimitive';
+import { PaymentConnectorPrimitive } from './PaymentConnectorPrimitive';
+import { PaymentManagerPrimitive } from './PaymentManagerPrimitive';
 import { PolicyEnginePrimitive } from './PolicyEnginePrimitive';
 import { PolicyPrimitive } from './PolicyPrimitive';
 import { RuntimeEndpointPrimitive } from './RuntimeEndpointPrimitive';
@@ -28,11 +31,14 @@ export const evaluatorPrimitive = new EvaluatorPrimitive();
 export const onlineEvalConfigPrimitive = new OnlineEvalConfigPrimitive();
 export const gatewayPrimitive = new GatewayPrimitive();
 export const gatewayTargetPrimitive = new GatewayTargetPrimitive();
+export const knowledgeBasePrimitive = new KnowledgeBasePrimitive();
 export const policyEnginePrimitive = new PolicyEnginePrimitive();
 export const policyPrimitive = new PolicyPrimitive();
 export const configBundlePrimitive = new ConfigBundlePrimitive();
 export const abTestPrimitive = new ABTestPrimitive();
 export const runtimeEndpointPrimitive = new RuntimeEndpointPrimitive();
+export const paymentManagerPrimitive = new PaymentManagerPrimitive();
+export const paymentConnectorPrimitive = new PaymentConnectorPrimitive();
 
 /**
  * All primitives in display order.
@@ -47,11 +53,14 @@ export const ALL_PRIMITIVES: BasePrimitive<unknown, RemovableResource>[] = [
   onlineEvalConfigPrimitive,
   gatewayPrimitive,
   gatewayTargetPrimitive,
+  knowledgeBasePrimitive,
   policyEnginePrimitive,
   policyPrimitive,
   configBundlePrimitive,
   abTestPrimitive,
   runtimeEndpointPrimitive,
+  paymentManagerPrimitive,
+  paymentConnectorPrimitive,
 ];
 
 /**

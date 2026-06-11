@@ -9,22 +9,31 @@ import {
   parseDatasetOutputs,
   parseEvaluatorOutputs,
   parseGatewayOutputs,
+  parseKnowledgeBaseOutputs,
   parseMemoryOutputs,
   parseOnlineEvalOutputs,
+  parsePaymentOutputs,
   parsePolicyEngineOutputs,
   parsePolicyOutputs,
+  parseRuntimeEndpointOutputs,
 } from '../../../cloudformation';
 import { DEFAULT_DEPLOY_ATTRS, computeDeployAttrs } from '../../../commands/deploy/utils.js';
 import { getErrorMessage, isChangesetInProgressError, isExpiredTokenError } from '../../../errors';
 import { isPreviewEnabled } from '../../../feature-flags';
 import { ExecLogger } from '../../../logging';
-import { performStackTeardown, setupTransactionSearch } from '../../../operations/deploy';
+import {
+  cleanupPaymentCredentialProviders,
+  performStackTeardown,
+  setupTransactionSearch,
+} from '../../../operations/deploy';
 import { computeProjectDeployHash } from '../../../operations/deploy/change-detection';
 import { getGatewayTargetStatuses } from '../../../operations/deploy/gateway-status';
 import { createDeploymentManager } from '../../../operations/deploy/imperative';
 import { deleteOrphanedABTests, setupABTests } from '../../../operations/deploy/post-deploy-ab-tests';
 import { syncDatasets } from '../../../operations/deploy/post-deploy-datasets';
+import { autoIngestKnowledgeBases } from '../../../operations/deploy/post-deploy-knowledge-bases';
 import { enableOnlineEvalConfigs } from '../../../operations/deploy/post-deploy-online-evals';
+import { hydrateKnowledgeBaseDataSources } from '../../../operations/knowledge-base/hydrate-data-sources';
 import { withCommandRunTelemetry } from '../../../telemetry/cli-command-run.js';
 import {
   type StackDiffSummary,
@@ -143,6 +152,30 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
   });
   const [publishAssetsStep, setPublishAssetsStep] = useState<Step>({ label: 'Publish assets', status: 'pending' });
   const [deployStep, setDeployStep] = useState<Step>({ label: 'Deploy to AWS', status: 'pending' });
+  const [persistStateStep, setPersistStateStep] = useState<Step>({
+    label: 'Persist deployment state',
+    status: 'pending',
+  });
+  // Whether the hydrate-KB step needs to run for this deploy. False (the
+  // common case) when every KB had its `dataSources[]` already populated by
+  // the per-DS CFN outputs the L3 emits since #234 — the persist step did
+  // the work and hydrate would be a pure no-op. We hide the step from the
+  // visible list in that case so the user doesn't see a phantom phase. Set
+  // by the deploy-time code right before the hydrate call (after the parse
+  // step exposes which KBs came back with empty dataSources[]).
+  const [needsKbHydration, setNeedsKbHydration] = useState(false);
+  const [hydrateKbStep, setHydrateKbStep] = useState<Step>({
+    label: 'Hydrate knowledge base data sources',
+    status: 'pending',
+  });
+  const [harnessDeployStep, setHarnessDeployStep] = useState<Step>({ label: 'Deploy harnesses', status: 'pending' });
+  const [autoIngestStep, setAutoIngestStep] = useState<Step>({
+    label: 'Auto-ingest knowledge bases',
+    status: 'pending',
+  });
+  const [datasetSyncStep, setDatasetSyncStep] = useState<Step>({ label: 'Sync datasets', status: 'pending' });
+  const [onlineEvalStep, setOnlineEvalStep] = useState<Step>({ label: 'Enable online evaluation', status: 'pending' });
+  const [abTestsStep, setAbTestsStep] = useState<Step>({ label: 'Sync AB tests', status: 'pending' });
   const [diffStep, setDiffStep] = useState<Step>({ label: 'Run CDK diff', status: 'pending' });
   const [diffSummaries, setDiffSummaries] = useState<StackDiffSummary[]>([]);
   const [numStacksWithChanges, setNumStacksWithChanges] = useState<number | undefined>();
@@ -168,6 +201,16 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     setPreDeployDiffStep({ label: 'Computing diff changes...', status: 'pending' });
     setPublishAssetsStep({ label: 'Publish assets', status: 'pending' });
     setDeployStep({ label: 'Deploy to AWS', status: 'pending' });
+    setPersistStateStep({ label: 'Persist deployment state', status: 'pending' });
+    setHydrateKbStep({ label: 'Hydrate knowledge base data sources', status: 'pending' });
+    setNeedsKbHydration(false);
+    setHarnessDeployStep({ label: 'Deploy harnesses', status: 'pending' });
+    setAutoIngestStep({ label: 'Auto-ingest knowledge bases', status: 'pending' });
+    setDatasetSyncStep({ label: 'Sync datasets', status: 'pending' });
+    setOnlineEvalStep({ label: 'Enable online evaluation', status: 'pending' });
+    setAbTestsStep({ label: 'Sync AB tests', status: 'pending' });
+    setPostDeployHasError(false);
+    setPostDeployWarnings([]);
     setDeployOutput(null);
     setHasTokenExpiredError(false); // Reset token expired state when retrying
     setHasStartedCfn(false);
@@ -223,6 +266,9 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     const target = ctx?.awsTargets[0];
 
     if (!ctx || !currentStackName || !target) return;
+
+    setPersistStateStep(prev => ({ ...prev, status: 'running' }));
+    logger.startStep('Persist deployment state');
 
     const configIO = new ConfigIO();
     const agentNames = ctx.projectSpec.runtimes?.map((a: { name: string }) => a.name) || [];
@@ -319,8 +365,85 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     const configBundleNames = (ctx.projectSpec.configBundles ?? []).map((b: { name: string }) => b.name);
     const configBundles = parseConfigBundleOutputs(outputs, configBundleNames);
 
+    // Parse runtime endpoint outputs
+    const endpointSpecs: { agentName: string; endpointName: string }[] = [];
+    for (const runtime of ctx.projectSpec.runtimes ?? []) {
+      if (runtime.endpoints) {
+        for (const endpointName of Object.keys(runtime.endpoints)) {
+          endpointSpecs.push({ agentName: runtime.name, endpointName });
+        }
+      }
+    }
+    const runtimeEndpoints = parseRuntimeEndpointOutputs(outputs, endpointSpecs);
+
+    // Parse knowledge base outputs (CFN emits id+arn; per-DS outputs hydrate dataSources via getAtt('DataSourceId')).
+    const knowledgeBaseSpecs = ctx.projectSpec.knowledgeBases ?? [];
+    const knowledgeBaseNames = knowledgeBaseSpecs.map(kb => kb.name);
+    const knowledgeBases = parseKnowledgeBaseOutputs(outputs, knowledgeBaseNames);
+
+    if (knowledgeBaseNames.length > 0 && Object.keys(knowledgeBases).length !== knowledgeBaseNames.length) {
+      logger.log(
+        `Deployed-state missing outputs for ${
+          knowledgeBaseNames.length - Object.keys(knowledgeBases).length
+        } knowledge base(s).`,
+        'warn'
+      );
+    }
+
+    // Hydrate dataSources[] for any KB whose CFN per-DS outputs were absent
+    // (older L3, before #234). With the current L3 the persist step has
+    // already filled `dataSources[]` from per-DS outputs — the hydrate
+    // function would short-circuit on every KB and the step would render as a
+    // pointless "running → success" flash. Skip it (and hide it from the
+    // visible step list) when nothing actually needs hydrating.
+    const kbsNeedingHydration = Object.values(knowledgeBases).filter(kb => kb.dataSources.length === 0);
+    if (kbsNeedingHydration.length > 0) {
+      setNeedsKbHydration(true);
+      setHydrateKbStep(prev => ({ ...prev, status: 'running' }));
+      logger.startStep('Hydrate knowledge base data sources');
+      try {
+        await hydrateKnowledgeBaseDataSources({
+          knowledgeBases,
+          knowledgeBaseSpecs,
+          region: target.region,
+        });
+        logger.endStep('success');
+        setHydrateKbStep(prev => ({ ...prev, status: 'success' }));
+      } catch (err) {
+        const msg = getErrorMessage(err);
+        logger.log(`Failed to hydrate knowledge base data sources: ${msg}`, 'warn');
+        // Hydration failure is non-fatal — KBs are still deployed.
+        logger.endStep('success');
+        setHydrateKbStep(prev => ({ ...prev, status: 'warn', warn: msg }));
+      }
+    }
+
     // Expose outputs to UI
     setStackOutputs(outputs);
+
+    // Parse payment outputs from CFN stack
+    const paymentSpecs = (ctx.projectSpec.payments ?? []).map(
+      (p: {
+        name: string;
+        authorizerType?: 'AWS_IAM' | 'CUSTOM_JWT';
+        autoPayment?: boolean;
+        paymentToolAllowlist?: string[];
+        networkPreferences?: string[];
+        connectors: { name: string; credentialName: string }[];
+      }) => ({
+        name: p.name,
+        authorizerType: p.authorizerType,
+        autoPayment: p.autoPayment,
+        paymentToolAllowlist: p.paymentToolAllowlist,
+        networkPreferences: p.networkPreferences,
+        connectors: p.connectors.map(c => ({
+          name: c.name,
+          credentialProviderArn: allCredentials[c.credentialName]?.credentialProviderArn ?? '',
+          credentialProviderName: c.credentialName,
+        })),
+      })
+    );
+    const payments = paymentSpecs.length > 0 ? parsePaymentOutputs(outputs, paymentSpecs) : undefined;
 
     const existingState = await configIO.readDeployedState().catch(() => undefined);
 
@@ -341,6 +464,7 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
       };
 
       if (imperativeManager.hasDeployersForPhase('post-cdk', imperativeContext)) {
+        setHarnessDeployStep(prev => ({ ...prev, status: 'running' }));
         logger.startStep('Deploy harnesses');
         const postCdkResult = await imperativeManager.runPhase('post-cdk', imperativeContext);
         const harnessResult = postCdkResult.results.get('harness');
@@ -349,9 +473,11 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
         }
         if (!postCdkResult.success) {
           logger.endStep('error', postCdkResult.error);
+          setHarnessDeployStep(prev => ({ ...prev, status: 'error', error: postCdkResult.error }));
           throw new Error(`Harness deployment failed: ${postCdkResult.error}`);
         }
         logger.endStep('success');
+        setHarnessDeployStep(prev => ({ ...prev, status: 'success' }));
       }
     }
 
@@ -370,7 +496,10 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
       policies,
       datasets,
       configBundles,
+      runtimeEndpoints,
+      knowledgeBases,
       harnesses: deployedHarnesses,
+      payments,
     });
 
     try {
@@ -385,10 +514,81 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
 
     await configIO.writeDeployedState(deployedState);
 
+    logger.endStep('success');
+    setPersistStateStep(prev => ({ ...prev, status: 'success' }));
+
+    // Post-deploy: auto-trigger ingestion for any KB whose data-source URIs
+    // changed since the last deploy (or has never been ingested before).
+    const knowledgeBaseSpecsForIngest = ctx.projectSpec.knowledgeBases ?? [];
+    if (knowledgeBaseSpecsForIngest.length > 0) {
+      setAutoIngestStep(prev => ({ ...prev, status: 'running' }));
+      logger.startStep('Auto-ingest knowledge bases');
+      try {
+        const previousKnowledgeBases = existingState?.targets?.[target.name]?.resources?.knowledgeBases;
+        const ingestResult = await autoIngestKnowledgeBases({
+          region: target.region,
+          knowledgeBases: knowledgeBaseSpecsForIngest,
+          deployedKnowledgeBases: deployedState.targets?.[target.name]?.resources?.knowledgeBases ?? {},
+          previousKnowledgeBases,
+          targetName: target.name,
+          deployedState,
+          onProgress: msg => logger.log(msg),
+        });
+
+        // Persist new sourcesHash values for KBs whose ingestion fired.
+        const targetResources = deployedState.targets[target.name]?.resources;
+        if (targetResources?.knowledgeBases) {
+          for (const r of ingestResult.results) {
+            if (r.status === 'started' && r.newSourcesHash) {
+              const record = targetResources.knowledgeBases[r.knowledgeBaseName];
+              if (record) record.sourcesHash = r.newSourcesHash;
+            }
+          }
+          await configIO.writeDeployedState(deployedState);
+        }
+
+        // Log per-KB result so the user sees what happened.
+        for (const r of ingestResult.results) {
+          if (r.status === 'started') {
+            logger.log(
+              `Knowledge base "${r.knowledgeBaseName}": ingestion started for ${r.startedJobCount} data source(s)`
+            );
+          } else if (r.status === 'skipped') {
+            logger.log(`Knowledge base "${r.knowledgeBaseName}": skipped (${r.reason})`);
+          } else {
+            logger.log(`Knowledge base "${r.knowledgeBaseName}": ${r.error}`, 'warn');
+            setPostDeployWarnings(prev => [...prev, `Knowledge base "${r.knowledgeBaseName}": ${r.error}`]);
+          }
+        }
+
+        logger.endStep(ingestResult.hasErrors ? 'error' : 'success');
+        if (ingestResult.hasErrors) {
+          // Don't fail the deploy — KBs and DSes are valid CFN resources even if
+          // ingestion failed. The user retries via 'agentcore run ingest --name X'.
+          setPostDeployHasError(true);
+          setAutoIngestStep(prev => ({
+            ...prev,
+            status: 'error',
+            error: 'One or more knowledge bases failed to ingest',
+          }));
+        } else {
+          setAutoIngestStep(prev => ({ ...prev, status: 'success' }));
+        }
+      } catch (err) {
+        const errMsg = getErrorMessage(err);
+        logger.endStep('error', errMsg);
+        setPostDeployHasError(true);
+        setPostDeployWarnings(prev => [...prev, `Knowledge base auto-ingest failed: ${errMsg}`]);
+        setAutoIngestStep(prev => ({ ...prev, status: 'error', error: errMsg }));
+      }
+    }
+
     // Post-deploy: Sync dataset examples from local JSONL to service DRAFT.
     const datasetSpecs = ctx.projectSpec.datasets ?? [];
     const deployedDatasetsRecord = deployedState.targets?.[target.name]?.resources?.datasets ?? {};
     if (datasetSpecs.length > 0 && Object.keys(deployedDatasetsRecord).length > 0) {
+      setDatasetSyncStep(prev => ({ ...prev, status: 'running' }));
+      logger.startStep('Sync datasets');
       try {
         const datasetSyncResult = await syncDatasets({
           region: target.region,
@@ -414,6 +614,15 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
           }
           setPostDeployHasError(true);
           setPostDeployWarnings(prev => [...prev, ...errors.map(err => `Dataset "${err.datasetName}": ${err.error}`)]);
+          logger.endStep('error', 'One or more datasets failed to sync');
+          setDatasetSyncStep(prev => ({
+            ...prev,
+            status: 'error',
+            error: 'One or more datasets failed to sync',
+          }));
+        } else {
+          logger.endStep('success');
+          setDatasetSyncStep(prev => ({ ...prev, status: 'success' }));
         }
 
         for (const r of datasetSyncResult.results) {
@@ -426,6 +635,8 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
         logger.log(`Dataset sync failed: ${message}`, 'warn');
         setPostDeployHasError(true);
         setPostDeployWarnings(prev => [...prev, `Dataset sync failed: ${message}`]);
+        logger.endStep('error', message);
+        setDatasetSyncStep(prev => ({ ...prev, status: 'error', error: message }));
       }
     }
 
@@ -437,6 +648,8 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     const previouslyDeployedOnlineEvals = existingState?.targets?.[target.name]?.resources?.onlineEvalConfigs ?? {};
     const newOnlineEvalFullSpecs = onlineEvalFullSpecs.filter(c => !previouslyDeployedOnlineEvals[c.name]);
     if (newOnlineEvalFullSpecs.length > 0 && Object.keys(deployedOnlineEvalConfigs).length > 0) {
+      setOnlineEvalStep(prev => ({ ...prev, status: 'running' }));
+      logger.startStep('Enable online evaluation');
       try {
         const enableResult = await enableOnlineEvalConfigs({
           region: target.region,
@@ -454,12 +667,23 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
             ...prev,
             ...errors.map(err => `Online eval "${err.configName}": ${err.error}`),
           ]);
+          logger.endStep('error', 'One or more online eval configs failed to enable');
+          setOnlineEvalStep(prev => ({
+            ...prev,
+            status: 'error',
+            error: 'One or more online eval configs failed to enable',
+          }));
+        } else {
+          logger.endStep('success');
+          setOnlineEvalStep(prev => ({ ...prev, status: 'success' }));
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         logger.log(`Online eval enable failed: ${message}`, 'warn');
         setPostDeployHasError(true);
         setPostDeployWarnings(prev => [...prev, `Online eval enable failed: ${message}`]);
+        logger.endStep('error', message);
+        setOnlineEvalStep(prev => ({ ...prev, status: 'error', error: message }));
       }
     }
 
@@ -517,6 +741,8 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     // Post-deploy: Create/update AB tests
     const abTestSpecs = ctx.projectSpec.abTests ?? [];
     if (abTestSpecs.length > 0) {
+      setAbTestsStep(prev => ({ ...prev, status: 'running' }));
+      logger.startStep('Sync AB tests');
       try {
         const existingABTests = deployedState.targets?.[target.name]?.resources?.abTests;
         const deployedResources = deployedState.targets?.[target.name]?.resources;
@@ -543,12 +769,23 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
           }
           setPostDeployHasError(true);
           setPostDeployWarnings(prev => [...prev, ...errors.map(err => `AB test "${err.testName}": ${err.error}`)]);
+          logger.endStep('error', 'One or more AB tests failed to sync');
+          setAbTestsStep(prev => ({
+            ...prev,
+            status: 'error',
+            error: 'One or more AB tests failed to sync',
+          }));
+        } else {
+          logger.endStep('success');
+          setAbTestsStep(prev => ({ ...prev, status: 'success' }));
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         logger.log(`AB test setup failed: ${message}`, 'warn');
         setPostDeployHasError(true);
         setPostDeployWarnings(prev => [...prev, `AB test setup failed: ${message}`]);
+        logger.endStep('error', message);
+        setAbTestsStep(prev => ({ ...prev, status: 'error', error: message }));
       }
     }
 
@@ -652,6 +889,21 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
         // Output goes to stdout via the switchable ioHost
         await cdkToolkitWrapper.deploy();
 
+        // CDK deploy itself is done. Mark "Deploy to AWS" success and let post-deploy
+        // phases (persist, hydrate KBs, auto-ingest, dataset sync, online evals,
+        // config bundles, HTTP gateways, AB tests) advance their own visible steps.
+        //
+        // No-change deploys never receive a progress-bearing CloudFormation event, so
+        // the message handler above never flips Publish assets out of 'running'. Catch
+        // both 'pending' and 'running' here so the step never gets stranded — this is
+        // what Aidan saw as "stuck on Publish assets" during a 2m+ post-deploy ingest
+        // even though the underlying deploy had completed seconds in.
+        logger.endStep('success');
+        setPublishAssetsStep(prev =>
+          prev.status === 'success' || prev.status === 'error' ? prev : { ...prev, status: 'success' }
+        );
+        setDeployStep(prev => ({ ...prev, status: 'success' }));
+
         if (context?.isTeardownDeploy) {
           // Teardown imperative resources (harnesses) before destroying the stack
           if (isPreviewEnabled()) {
@@ -684,9 +936,22 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
             }
           }
 
-          // After deploying the empty spec, destroy the stack entirely
+          // After deploying the empty spec, destroy the stack entirely.
+          // Clean up imperative payment credential providers before stack teardown.
           const targetName = context.awsTargets[0]?.name;
           if (targetName) {
+            try {
+              const configIO = new ConfigIO();
+              const deployedState = await configIO.readDeployedState();
+              const existingPayments = deployedState?.targets?.[targetName]?.resources?.payments;
+              if (existingPayments && Object.keys(existingPayments).length > 0) {
+                const target = context.awsTargets[0]!;
+                await cleanupPaymentCredentialProviders({ region: target.region, payments: existingPayments });
+              }
+            } catch {
+              // Best-effort: continue with teardown even if credential cleanup fails
+            }
+
             const teardown = await performStackTeardown(targetName);
             if (!teardown.success) {
               throw new Error(`Stack teardown failed: ${teardown.error.message}`);
@@ -699,6 +964,18 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
           } catch (error) {
             const message = error instanceof Error ? error.message : 'Unknown error';
             logger.log(`Failed to persist deployed state: ${message}`, 'warn');
+            // Mark whichever post-deploy step was running as errored so the visible
+            // step list resolves (areStepsComplete requires every step terminal).
+            // Only the persist step is reachable here without local handling.
+            setPersistStateStep(prev =>
+              prev.status === 'running' ? { ...prev, status: 'error', error: message } : prev
+            );
+            setHydrateKbStep(prev => (prev.status === 'running' ? { ...prev, status: 'error', error: message } : prev));
+            setHarnessDeployStep(prev =>
+              prev.status === 'running' ? { ...prev, status: 'error', error: message } : prev
+            );
+            setPostDeployHasError(true);
+            setPostDeployWarnings(p => [...p, `Persist deployed state failed: ${message}`]);
           }
 
           // Post-deploy: Enable CloudWatch Transaction Search (non-blocking, silent)
@@ -734,12 +1011,11 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
           }
         }
 
+        // Close any still-open logger step (defensive — post-deploy phases manage
+        // their own start/end pairs, so this usually no-ops).
         logger.endStep('success');
         logger.finalize(true);
         setDeployOutput(`Deployed ${stackNames.length} stack(s): ${stackNames.join(', ')}`);
-        // Mark both steps as success (in case CFn events were never received)
-        setPublishAssetsStep(prev => ({ ...prev, status: 'success' }));
-        setDeployStep(prev => ({ ...prev, status: 'success' }));
         return { success: true } as const;
       } catch (err) {
         const errorMsg = getErrorMessage(err);
@@ -892,60 +1168,120 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     }
   }, [preflight.phase, preflight.cdkToolkitWrapper, logger, skipPreflight]);
 
+  // Project-content-driven inclusion: only show post-deploy steps that will actually run.
+  const projectSpec = context?.projectSpec;
+  const hasKnowledgeBases = (projectSpec?.knowledgeBases?.length ?? 0) > 0;
+  const hasDatasets = (projectSpec?.datasets?.length ?? 0) > 0;
+  const hasOnlineEvalConfigs = (projectSpec?.onlineEvalConfigs?.length ?? 0) > 0;
+  const hasAbTests = (projectSpec?.abTests?.length ?? 0) > 0;
+  const hasHarnesses = (projectSpec?.harnesses?.length ?? 0) > 0;
+  const isPreview = isPreviewEnabled();
+
   const steps = useMemo(() => {
     if (diffMode) {
       return skipPreflight ? [diffStep] : [...preflight.steps, diffStep];
     }
-    return skipPreflight
-      ? [preDeployDiffStep, publishAssetsStep, deployStep]
-      : [...preflight.steps, preDeployDiffStep, publishAssetsStep, deployStep];
-  }, [preflight.steps, preDeployDiffStep, publishAssetsStep, deployStep, diffStep, skipPreflight, diffMode]);
+    const preflightSteps = skipPreflight ? [] : preflight.steps;
+    const isTeardown = projectSpec ? !!context?.isTeardownDeploy : false;
 
-  const phase: DeployPhase = useMemo(() => {
-    const activeStep = diffMode ? diffStep : deployStep;
+    const postDeploySteps: Step[] = isTeardown
+      ? []
+      : [
+          persistStateStep,
+          ...(hasKnowledgeBases && needsKbHydration ? [hydrateKbStep] : []),
+          ...(isPreview && hasHarnesses ? [harnessDeployStep] : []),
+          ...(hasKnowledgeBases ? [autoIngestStep] : []),
+          ...(hasDatasets ? [datasetSyncStep] : []),
+          ...(hasOnlineEvalConfigs ? [onlineEvalStep] : []),
+          ...(hasAbTests ? [abTestsStep] : []),
+        ];
 
-    if (skipPreflight) {
-      if (!shouldStartDeploy && activeStep.status === 'pending') {
-        return 'idle';
-      }
-      if (activeStep.status === 'error') {
-        return 'error';
-      }
-      if (activeStep.status === 'success') {
-        return 'complete';
-      }
-      return 'deploying';
-    }
-
-    if (preflight.phase === 'idle') {
-      return 'idle';
-    }
-    if (preflight.phase === 'error') {
-      return 'error';
-    }
-    if (preflight.phase === 'teardown-confirm') {
-      return 'teardown-confirm';
-    }
-    if (preflight.phase === 'credentials-prompt') {
-      return 'credentials-prompt';
-    }
-    if (preflight.phase === 'bootstrap-confirm') {
-      return 'bootstrap-confirm';
-    }
-    if (preflight.phase === 'running' || preflight.phase === 'bootstrapping' || preflight.phase === 'identity-setup') {
-      return 'running';
-    }
-    if (activeStep.status === 'error') {
-      return 'error';
-    }
-    if (activeStep.status === 'success') {
-      return 'complete';
-    }
-    return 'deploying';
-  }, [preflight.phase, deployStep, diffStep, skipPreflight, shouldStartDeploy, diffMode]);
+    return [...preflightSteps, preDeployDiffStep, publishAssetsStep, deployStep, ...postDeploySteps];
+  }, [
+    preflight.steps,
+    preDeployDiffStep,
+    publishAssetsStep,
+    deployStep,
+    persistStateStep,
+    hydrateKbStep,
+    harnessDeployStep,
+    autoIngestStep,
+    datasetSyncStep,
+    onlineEvalStep,
+    abTestsStep,
+    diffStep,
+    skipPreflight,
+    diffMode,
+    hasKnowledgeBases,
+    needsKbHydration,
+    hasDatasets,
+    hasOnlineEvalConfigs,
+    hasAbTests,
+    hasHarnesses,
+    isPreview,
+    context?.isTeardownDeploy,
+    projectSpec,
+  ]);
 
   const hasError = hasStepError(steps);
   const isComplete = areStepsComplete(steps);
+
+  const phase: DeployPhase = useMemo(() => {
+    if (diffMode) {
+      const activeStep = diffStep;
+      if (skipPreflight) {
+        if (!shouldStartDeploy && activeStep.status === 'pending') {
+          return 'idle';
+        }
+        if (activeStep.status === 'error') {
+          return 'error';
+        }
+        if (activeStep.status === 'success') {
+          return 'complete';
+        }
+        return 'deploying';
+      }
+
+      if (preflight.phase === 'idle') return 'idle';
+      if (preflight.phase === 'error') return 'error';
+      if (preflight.phase === 'teardown-confirm') return 'teardown-confirm';
+      if (preflight.phase === 'credentials-prompt') return 'credentials-prompt';
+      if (preflight.phase === 'bootstrap-confirm') return 'bootstrap-confirm';
+      if (
+        preflight.phase === 'running' ||
+        preflight.phase === 'bootstrapping' ||
+        preflight.phase === 'identity-setup'
+      ) {
+        return 'running';
+      }
+      if (activeStep.status === 'error') return 'error';
+      if (activeStep.status === 'success') return 'complete';
+      return 'deploying';
+    }
+
+    // Deploy mode: derive from the full visible step list so post-CDK phases can
+    // hold the flow in 'deploying' until they all settle.
+    if (skipPreflight) {
+      if (!shouldStartDeploy && deployStep.status === 'pending') {
+        return 'idle';
+      }
+      if (hasError) return 'error';
+      if (isComplete) return 'complete';
+      return 'deploying';
+    }
+
+    if (preflight.phase === 'idle') return 'idle';
+    if (preflight.phase === 'error') return 'error';
+    if (preflight.phase === 'teardown-confirm') return 'teardown-confirm';
+    if (preflight.phase === 'credentials-prompt') return 'credentials-prompt';
+    if (preflight.phase === 'bootstrap-confirm') return 'bootstrap-confirm';
+    if (preflight.phase === 'running' || preflight.phase === 'bootstrapping' || preflight.phase === 'identity-setup') {
+      return 'running';
+    }
+    if (hasError) return 'error';
+    if (isComplete) return 'complete';
+    return 'deploying';
+  }, [preflight.phase, deployStep, diffStep, skipPreflight, shouldStartDeploy, diffMode, hasError, isComplete]);
 
   // Combine token expired errors from both preflight and deploy phases
   const combinedTokenExpiredError = hasTokenExpiredError || preflight.hasTokenExpiredError;

@@ -1,4 +1,5 @@
 import { ConfigIO, DOCKERFILE_NAME, getDockerfilePath, requireConfigRoot, resolveCodeLocation } from '../../../lib';
+import { ValidationError } from '../../../lib/errors/types';
 import type { AgentCoreProjectSpec, AwsDeploymentTarget } from '../../../schema';
 import { validateAwsCredentials } from '../../aws/account';
 import { LocalCdkProject } from '../../cdk/local-cdk-project';
@@ -6,7 +7,7 @@ import { CdkToolkitWrapper, createCdkToolkitWrapper, silentIoHost } from '../../
 import { checkBootstrapStatus, checkStacksStatus, formatCdkEnvironment } from '../../cloudformation';
 import { cleanupStaleLockFiles } from '../../tui/utils';
 import type { IIoHost } from '@aws-cdk/toolkit-lib';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import * as path from 'node:path';
 
 export interface PreflightContext {
@@ -83,6 +84,7 @@ export async function validateProject(): Promise<PreflightContext> {
   let isTeardownDeploy = false;
   const hasAgents = projectSpec.runtimes && projectSpec.runtimes.length > 0;
   const hasMemories = projectSpec.memories && projectSpec.memories.length > 0;
+  const hasKnowledgeBases = projectSpec.knowledgeBases && projectSpec.knowledgeBases.length > 0;
   const hasEvaluators = projectSpec.evaluators && projectSpec.evaluators.length > 0;
   const hasPolicyEngines = projectSpec.policyEngines && projectSpec.policyEngines.length > 0;
   const hasHarnesses = projectSpec.harnesses && projectSpec.harnesses.length > 0;
@@ -90,15 +92,18 @@ export async function validateProject(): Promise<PreflightContext> {
 
   // Check for gateways in agentcore.json
   const hasGateways = projectSpec.agentCoreGateways && projectSpec.agentCoreGateways.length > 0;
+  const hasPayments = projectSpec.payments && projectSpec.payments.length > 0;
 
   if (
     !hasAgents &&
     !hasGateways &&
     !hasMemories &&
+    !hasKnowledgeBases &&
     !hasEvaluators &&
     !hasPolicyEngines &&
     !hasHarnesses &&
-    !hasDatasets
+    !hasDatasets &&
+    !hasPayments
   ) {
     let hasExistingStack = false;
     try {
@@ -108,8 +113,8 @@ export async function validateProject(): Promise<PreflightContext> {
       // No deployed state file — no existing stack
     }
     if (!hasExistingStack) {
-      throw new Error(
-        'No resources defined in project. Add at least one resource (agent, memory, evaluator, or gateway) before deploying.'
+      throw new ValidationError(
+        'No resources defined in project. Add at least one resource (agent, memory, knowledge base, evaluator, or gateway) before deploying.'
       );
     }
     isTeardownDeploy = true;
@@ -140,7 +145,7 @@ function validateRuntimeNames(projectSpec: AgentCoreProjectSpec): void {
     if (agentName) {
       const combinedName = `${projectName}_${agentName}`;
       if (combinedName.length > MAX_RUNTIME_NAME_LENGTH) {
-        throw new Error(
+        throw new ValidationError(
           `Runtime name too long: "${combinedName}" (${combinedName.length} chars). ` +
             `AWS limits runtime names to ${MAX_RUNTIME_NAME_LENGTH} characters. ` +
             `Shorten the project name or agent name in agentcore.json.`
@@ -164,11 +169,34 @@ export function validateContainerAgents(projectSpec: AgentCoreProjectSpec, confi
         errors.push(
           `Agent "${agent.name}": ${agent.dockerfile ?? DOCKERFILE_NAME} not found at ${dockerfilePath}. Container agents require a Dockerfile.`
         );
+      } else {
+        warnDeprecatedBaseImage(dockerfilePath, agent.name);
       }
     }
   }
   if (errors.length > 0) {
     throw new Error(errors.join('\n'));
+  }
+}
+
+const DEPRECATED_BASE_IMAGES: Record<string, string> = {
+  'slim-bookworm':
+    'Affected by CVE-2026-42010 (GnuTLS authentication bypass). Update the FROM line to use a Trixie-based variant.',
+};
+
+function warnDeprecatedBaseImage(dockerfilePath: string, agentName: string): void {
+  try {
+    const content = readFileSync(dockerfilePath, 'utf-8');
+    for (const line of content.split('\n')) {
+      if (!/^\s*FROM\s+/i.test(line)) continue;
+      for (const [image, message] of Object.entries(DEPRECATED_BASE_IMAGES)) {
+        if (line.includes(image)) {
+          console.warn(`Warning: Agent "${agentName}" Dockerfile uses a base image containing "${image}". ${message}`);
+        }
+      }
+    }
+  } catch {
+    // Non-fatal — if we can't read the file, the existing validation will handle it
   }
 }
 
@@ -184,6 +212,8 @@ export interface SynthOptions {
   ioHost?: IIoHost;
   /** Previous toolkit wrapper to dispose before synthesis. */
   previousWrapper?: CdkToolkitWrapper | null;
+  /** Target region for CDK operations. Without this, toolkit may default to us-east-1. */
+  region?: string;
 }
 
 /**
@@ -204,6 +234,7 @@ export async function synthesizeCdk(cdkProject: LocalCdkProject, options?: Synth
   const toolkitWrapper = await createCdkToolkitWrapper({
     projectDir: cdkProject.projectDir,
     ioHost: options?.ioHost ?? silentIoHost,
+    region: options?.region,
   });
 
   // synth() produces the assembly internally and stores the directory for later use

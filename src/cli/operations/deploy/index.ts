@@ -21,6 +21,7 @@ export {
   hasIdentityOAuthProviders,
   getMissingCredentials,
   getAllCredentials,
+  assertEnvFileExists,
   type SetupApiKeyProvidersOptions,
   type SetupOAuth2ProvidersOptions,
   type PreDeployIdentityResult,
@@ -41,6 +42,16 @@ export {
   type DestroyTargetOptions,
 } from './teardown';
 
+// Pre-deploy payment credential setup
+export {
+  setupPaymentCredentialProviders,
+  hasPaymentCredentialProviders,
+  cleanupPaymentCredentialProviders,
+  type SetupPaymentCredentialProvidersOptions,
+  type PaymentCredentialProvidersResult,
+  type PaymentCredentialProviderResult,
+} from './pre-deploy-identity';
+
 // Post-deploy observability setup
 export { setupTransactionSearch } from './post-deploy-observability';
 
@@ -52,13 +63,7 @@ export {
   type OnlineEvalEnableResult,
 } from './post-deploy-online-evals';
 
-// Post-deploy config bundles
-export {
-  setupConfigBundles,
-  type SetupConfigBundlesOptions,
-  type SetupConfigBundlesResult,
-  type ConfigBundleSetupResult,
-} from './post-deploy-config-bundles';
+export { ensureDefaultDeploymentTarget } from './ensure-target';
 
 // Re-export external requirements for convenience
 export {

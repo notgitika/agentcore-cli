@@ -21,7 +21,10 @@ export interface RemoveLoggerOptions {
     | 'policy'
     | 'config-bundle'
     | 'ab-test'
-    | 'dataset';
+    | 'dataset'
+    | 'knowledge-base'
+    | 'payment-manager'
+    | 'payment-connector';
   /** Name of the resource being removed */
   resourceName: string;
 }

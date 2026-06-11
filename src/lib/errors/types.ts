@@ -301,6 +301,27 @@ export class PollExhaustedError extends BaseError {
 }
 
 /**
+ * Thrown when starting or driving a Bedrock Knowledge Base ingestion job
+ * fails. Default source is 'service' because most ingestion failures are
+ * AWS-side (validation, throttling, KB not ready). Pre-flight failures from
+ * the CLI side (KB not deployed, no data sources recorded) override to 'user'.
+ */
+export class IngestionError extends BaseError {
+  constructor(message: string, options?: BaseErrorOptions) {
+    super(message, { defaultSource: 'service', ...options });
+  }
+}
+
+export class ShellKickedError extends BaseError {
+  constructor(options?: BaseErrorOptions) {
+    super('Shell session was taken over by another client (close code 4000)', {
+      defaultSource: 'service',
+      ...options,
+    });
+  }
+}
+
+/**
  * Error indicating user cancellation interuption
  */
 export class UserCancellationError extends BaseError {

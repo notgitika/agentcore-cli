@@ -16,6 +16,7 @@ describe('getDevConfig', () => {
       managedBy: 'CDK' as const,
       runtimes: [],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -25,6 +26,7 @@ describe('getDevConfig', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     const config = getDevConfig(workingDir, project);
@@ -48,6 +50,7 @@ describe('getDevConfig', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -57,6 +60,7 @@ describe('getDevConfig', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     const config = getDevConfig(workingDir, project);
@@ -79,6 +83,7 @@ describe('getDevConfig', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -88,6 +93,7 @@ describe('getDevConfig', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     const config = getDevConfig(workingDir, project, '/test/project/agentcore');
@@ -116,6 +122,7 @@ describe('getDevConfig', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -125,6 +132,7 @@ describe('getDevConfig', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     expect(() => getDevConfig(workingDir, project, undefined, 'NonExistentAgent')).toThrow(
@@ -148,6 +156,7 @@ describe('getDevConfig', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -157,6 +166,7 @@ describe('getDevConfig', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     const config = getDevConfig(workingDir, project, undefined, 'TsAgent');
@@ -181,6 +191,7 @@ describe('getDevConfig', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -190,6 +201,7 @@ describe('getDevConfig', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     const config = getDevConfig(workingDir, project, '/test/project/agentcore');
@@ -214,6 +226,7 @@ describe('getDevConfig', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -223,6 +236,7 @@ describe('getDevConfig', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     // No configRoot provided
@@ -247,6 +261,7 @@ describe('getDevConfig', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -256,6 +271,7 @@ describe('getDevConfig', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     const config = getDevConfig(workingDir, project, '/test/project/agentcore');
@@ -280,6 +296,7 @@ describe('getDevConfig', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -289,6 +306,7 @@ describe('getDevConfig', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     const config = getDevConfig(workingDir, project, '/test/project/agentcore');
@@ -312,6 +330,7 @@ describe('getDevConfig', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -321,6 +340,7 @@ describe('getDevConfig', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     const config = getDevConfig(workingDir, project, '/test/project/agentcore');
@@ -344,6 +364,7 @@ describe('getDevConfig', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -353,6 +374,7 @@ describe('getDevConfig', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     const config = getDevConfig(workingDir, project, '/test/project/agentcore');
@@ -376,6 +398,7 @@ describe('getDevConfig', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -385,6 +408,7 @@ describe('getDevConfig', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     const config = getDevConfig(workingDir, project, '/test/project/agentcore');
@@ -408,6 +432,7 @@ describe('getDevConfig', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -417,6 +442,7 @@ describe('getDevConfig', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     const config = getDevConfig(workingDir, project, '/test/project/agentcore');
@@ -441,6 +467,7 @@ describe('getDevConfig', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -450,6 +477,7 @@ describe('getDevConfig', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     const config = getDevConfig(workingDir, project, '/test/project/agentcore');
@@ -487,6 +515,7 @@ describe('getAgentPort', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -496,6 +525,7 @@ describe('getAgentPort', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     expect(getAgentPort(project, 'Agent1', 8080)).toBe(8080);
@@ -509,6 +539,7 @@ describe('getAgentPort', () => {
       managedBy: 'CDK' as const,
       runtimes: [],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -518,6 +549,7 @@ describe('getAgentPort', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     expect(getAgentPort(project, 'NonExistent', 9000)).toBe(9000);
@@ -536,6 +568,7 @@ describe('getDevSupportedAgents', () => {
       managedBy: 'CDK' as const,
       runtimes: [],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -545,6 +578,7 @@ describe('getDevSupportedAgents', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     expect(getDevSupportedAgents(project)).toEqual([]);
@@ -566,6 +600,7 @@ describe('getDevSupportedAgents', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -575,6 +610,7 @@ describe('getDevSupportedAgents', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     const supported = getDevSupportedAgents(project);
@@ -606,6 +642,7 @@ describe('getDevSupportedAgents', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -614,6 +651,7 @@ describe('getDevSupportedAgents', () => {
       configBundles: [],
       abTests: [],
       harnesses: [],
+      payments: [],
     };
 
     const supported = getDevSupportedAgents(project);
@@ -636,6 +674,7 @@ describe('getDevSupportedAgents', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -645,6 +684,7 @@ describe('getDevSupportedAgents', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     const supported = getDevSupportedAgents(project);
@@ -676,6 +716,7 @@ describe('getDevSupportedAgents', () => {
         },
       ],
       memories: [],
+      knowledgeBases: [],
       credentials: [],
       evaluators: [],
       onlineEvalConfigs: [],
@@ -685,6 +726,7 @@ describe('getDevSupportedAgents', () => {
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     const supported = getDevSupportedAgents(project);

@@ -66,6 +66,7 @@ export async function writeAgentToProject(config: GenerateConfig, options?: Writ
       managedBy: 'CDK' as const,
       runtimes: [agent],
       memories,
+      knowledgeBases: [],
       credentials,
       evaluators: [],
       onlineEvalConfigs: [],
@@ -75,6 +76,7 @@ export async function writeAgentToProject(config: GenerateConfig, options?: Writ
       abTests: [],
       harnesses: [],
       datasets: [],
+      payments: [],
     };
 
     await configIO.writeProjectSpec(project);

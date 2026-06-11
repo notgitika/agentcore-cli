@@ -26,6 +26,8 @@ describe('RemoveScreen', () => {
         abTestCount={0}
         runtimeEndpointCount={1}
         datasetCount={0}
+        knowledgeBaseCount={0}
+        paymentCount={1}
       />
     );
 
@@ -61,6 +63,8 @@ describe('RemoveScreen', () => {
         abTestCount={0}
         runtimeEndpointCount={0}
         datasetCount={0}
+        knowledgeBaseCount={0}
+        paymentCount={0}
       />
     );
 
@@ -92,6 +96,8 @@ describe('RemoveScreen', () => {
         abTestCount={2}
         runtimeEndpointCount={0}
         datasetCount={0}
+        knowledgeBaseCount={0}
+        paymentCount={0}
       />
     );
 
@@ -121,9 +127,72 @@ describe('RemoveScreen', () => {
         abTestCount={0}
         runtimeEndpointCount={0}
         datasetCount={0}
+        knowledgeBaseCount={0}
+        paymentCount={0}
       />
     );
 
     expect(lastFrame()).toContain('No AB tests to remove');
+  });
+
+  it('Knowledge Base option enabled when knowledgeBaseCount > 0', () => {
+    const onSelect = vi.fn();
+    const onExit = vi.fn();
+
+    const { lastFrame } = render(
+      <RemoveScreen
+        onSelect={onSelect}
+        onExit={onExit}
+        agentCount={0}
+        harnessCount={0}
+        gatewayCount={0}
+        mcpToolCount={0}
+        memoryCount={0}
+        credentialCount={0}
+        evaluatorCount={0}
+        onlineEvalCount={0}
+        policyEngineCount={0}
+        policyCount={0}
+        configBundleCount={0}
+        abTestCount={0}
+        runtimeEndpointCount={0}
+        datasetCount={0}
+        knowledgeBaseCount={3}
+        paymentCount={0}
+      />
+    );
+
+    expect(lastFrame()).toContain('Knowledge Base');
+    expect(lastFrame()).not.toContain('No knowledge bases to remove');
+  });
+
+  it('Knowledge Base option disabled when knowledgeBaseCount = 0', () => {
+    const onSelect = vi.fn();
+    const onExit = vi.fn();
+
+    const { lastFrame } = render(
+      <RemoveScreen
+        onSelect={onSelect}
+        onExit={onExit}
+        agentCount={0}
+        harnessCount={0}
+        gatewayCount={0}
+        mcpToolCount={0}
+        memoryCount={0}
+        credentialCount={0}
+        evaluatorCount={0}
+        onlineEvalCount={0}
+        policyEngineCount={0}
+        policyCount={0}
+        configBundleCount={0}
+        abTestCount={0}
+        runtimeEndpointCount={0}
+        datasetCount={0}
+        knowledgeBaseCount={0}
+        paymentCount={0}
+      />
+    );
+
+    expect(lastFrame()).toContain('No knowledge bases to remove');
   });
 });

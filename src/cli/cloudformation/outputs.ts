@@ -4,8 +4,10 @@ import type {
   DatasetDeployedState,
   DeployedState,
   EvaluatorDeployedState,
+  KnowledgeBaseDeployedState,
   MemoryDeployedState,
   OnlineEvalDeployedState,
+  PaymentDeployedState,
   PolicyDeployedState,
   PolicyEngineDeployedState,
   RuntimeEndpointDeployedState,
@@ -266,6 +268,81 @@ export function parseMemoryOutputs(outputs: StackOutputs, memoryNames: string[])
 }
 
 /**
+ * Parse stack outputs into deployed state for knowledge bases.
+ *
+ * Output key patterns (L3 ≥ #234):
+ *   ApplicationKnowledgeBase{Pascal}(Id|Arn)Output{Hash}
+ *   ApplicationKnowledgeBase{Pascal}DataSource{N}(Id|Uri)Output{Hash}
+ *
+ * Per-DS outputs are how we map URI → deployed DS id deterministically. For
+ * stacks deployed against an older L3 that pre-dates those outputs, the map
+ * comes back empty — callers fall back to ListDataSources.
+ *
+ * `sourcesHash` is populated separately by the post-deploy step.
+ */
+export function parseKnowledgeBaseOutputs(
+  outputs: StackOutputs,
+  knowledgeBaseNames: string[]
+): Record<string, KnowledgeBaseDeployedState> {
+  const knowledgeBases: Record<string, KnowledgeBaseDeployedState> = {};
+  const outputKeys = Object.keys(outputs);
+
+  for (const kbName of knowledgeBaseNames) {
+    const pascal = toPascalId('KnowledgeBase', kbName);
+    const idPrefix = `Application${pascal}IdOutput`;
+    const arnPrefix = `Application${pascal}ArnOutput`;
+
+    const idKey = outputKeys.find(k => k.startsWith(idPrefix));
+    const arnKey = outputKeys.find(k => k.startsWith(arnPrefix));
+
+    if (idKey && arnKey) {
+      knowledgeBases[kbName] = {
+        knowledgeBaseId: outputs[idKey]!,
+        knowledgeBaseArn: outputs[arnKey]!,
+        dataSources: parseKnowledgeBaseDataSourceOutputs(outputs, kbName),
+      };
+    }
+  }
+
+  return knowledgeBases;
+}
+
+/**
+ * Parse the per-DataSource CFN outputs for a single KB into an ordered
+ * `[{dataSourceId, uri}]` array. Outputs are paired by index (DataSource{N}Id
+ * + DataSource{N}Uri) and sorted ascending by N so the result mirrors the
+ * local `dataSources[]` order from agentcore.json.
+ *
+ * Returns an empty array when no per-DS outputs are present (e.g. stack
+ * deployed against an older L3) — callers should fall back to a SDK listing.
+ */
+export function parseKnowledgeBaseDataSourceOutputs(
+  outputs: StackOutputs,
+  knowledgeBaseName: string
+): { dataSourceId: string; uri: string }[] {
+  const pascal = toPascalId('KnowledgeBase', knowledgeBaseName);
+  const indexed = new Map<number, { dataSourceId?: string; uri?: string }>();
+  // Match `Application{Pascal}DataSource{N}IdOutput…` and `…UriOutput…`.
+  const pattern = new RegExp(`^Application${pascal}DataSource(\\d+)(Id|Uri)Output`);
+
+  for (const [key, value] of Object.entries(outputs)) {
+    const match = pattern.exec(key);
+    if (!match) continue;
+    const idx = parseInt(match[1]!, 10);
+    const kind = match[2] as 'Id' | 'Uri';
+    const slot = indexed.get(idx) ?? {};
+    if (kind === 'Id') slot.dataSourceId = value;
+    else slot.uri = value;
+    indexed.set(idx, slot);
+  }
+
+  return [...indexed.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([, slot]) => slot)
+    .filter((slot): slot is { dataSourceId: string; uri: string } => !!slot.dataSourceId && !!slot.uri);
+}
+
+/**
  * Parse stack outputs into deployed state for evaluators.
  *
  * Output key pattern: ApplicationEvaluator{PascalName}(Id|Arn)Output{Hash}
@@ -488,6 +565,73 @@ export function parseConfigBundleOutputs(
   return bundles;
 }
 
+/**
+ * Strip underscores from a name to produce a valid CDK logical ID segment.
+ * Must match the toCdkId() function in the vended cdk-stack.ts.
+ */
+function toPaymentCdkId(name: string): string {
+  return name.replace(/_/g, '');
+}
+
+/**
+ * Parse payment-related CfnOutputs from a deployed stack.
+ * Output keys follow the pattern: Payment{name}ManagerArn, Payment{name}ManagerId, etc.
+ * Names have underscores stripped to produce valid CDK logical IDs.
+ */
+export function parsePaymentOutputs(
+  outputs: StackOutputs,
+  paymentSpecs: {
+    name: string;
+    authorizerType?: 'AWS_IAM' | 'CUSTOM_JWT';
+    autoPayment?: boolean;
+    paymentToolAllowlist?: string[];
+    networkPreferences?: string[];
+    connectors: { name: string; credentialProviderArn: string; credentialProviderName?: string }[];
+  }[]
+): Record<string, PaymentDeployedState> {
+  const payments: Record<string, PaymentDeployedState> = {};
+
+  for (const spec of paymentSpecs) {
+    const mgrId = toPaymentCdkId(spec.name);
+    const managerArn = outputs[`Payment${mgrId}ManagerArn`];
+    const managerId = outputs[`Payment${mgrId}ManagerId`];
+    const processPaymentRoleArn = outputs[`Payment${mgrId}ProcessPaymentRoleArn`];
+    const resourceRetrievalRoleArn = outputs[`Payment${mgrId}ResourceRetrievalRoleArn`];
+
+    if (!managerArn || !managerId || !processPaymentRoleArn || !resourceRetrievalRoleArn) continue;
+
+    const connectors: Record<
+      string,
+      { connectorId: string; credentialProviderArn: string; credentialProviderName?: string }
+    > = {};
+    for (const conn of spec.connectors) {
+      const connId = toPaymentCdkId(conn.name);
+      const connectorId = outputs[`Payment${mgrId}${connId}ConnectorId`];
+      if (connectorId) {
+        connectors[conn.name] = {
+          connectorId,
+          credentialProviderArn: conn.credentialProviderArn,
+          credentialProviderName: conn.credentialProviderName,
+        };
+      }
+    }
+
+    payments[spec.name] = {
+      managerId,
+      managerArn,
+      connectors,
+      processPaymentRoleArn,
+      resourceRetrievalRoleArn,
+      ...(spec.authorizerType && { authorizerType: spec.authorizerType }),
+      ...(spec.autoPayment !== undefined && { autoPayment: spec.autoPayment }),
+      ...(spec.paymentToolAllowlist && { paymentToolAllowlist: spec.paymentToolAllowlist }),
+      ...(spec.networkPreferences && { networkPreferences: spec.networkPreferences }),
+    };
+  }
+
+  return payments;
+}
+
 export interface BuildDeployedStateOptions {
   targetName: string;
   stackName: string;
@@ -520,6 +664,8 @@ export interface BuildDeployedStateOptions {
   >;
   datasets?: Record<string, DatasetDeployedState>;
   configBundles?: Record<string, ConfigBundleDeployedState>;
+  knowledgeBases?: Record<string, KnowledgeBaseDeployedState>;
+  payments?: Record<string, PaymentDeployedState>;
 }
 
 /**
@@ -544,6 +690,8 @@ export function buildDeployedState(opts: BuildDeployedStateOptions): DeployedSta
     harnesses,
     datasets,
     configBundles,
+    knowledgeBases,
+    payments,
   } = opts;
   const targetState: TargetDeployedState = {
     resources: {
@@ -592,6 +740,10 @@ export function buildDeployedState(opts: BuildDeployedStateOptions): DeployedSta
     targetState.resources!.datasets = datasets;
   }
 
+  if (knowledgeBases && Object.keys(knowledgeBases).length > 0) {
+    targetState.resources!.knowledgeBases = knowledgeBases;
+  }
+
   // Config bundles from CFN outputs (preferred) or carry forward from existing state (legacy)
   if (configBundles && Object.keys(configBundles).length > 0) {
     targetState.resources!.configBundles = configBundles;
@@ -611,6 +763,11 @@ export function buildDeployedState(opts: BuildDeployedStateOptions): DeployedSta
   // Add harness state if harnesses exist
   if (harnesses && Object.keys(harnesses).length > 0) {
     targetState.resources!.harnesses = harnesses;
+  }
+
+  // Add payment state from CFN outputs (or preserve credential provider state)
+  if (payments && Object.keys(payments).length > 0) {
+    targetState.resources!.payments = payments;
   }
 
   return {

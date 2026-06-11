@@ -8,10 +8,11 @@ interface RunScreenProps {
   onRunEval: () => void;
   onRunBatchEval: () => void;
   onRunRecommendation: () => void;
+  onRunIngest: () => void;
   onExit: () => void;
 }
 
-export function RunScreen({ onRunEval, onRunBatchEval, onRunRecommendation, onExit }: RunScreenProps) {
+export function RunScreen({ onRunEval, onRunBatchEval, onRunRecommendation, onRunIngest, onExit }: RunScreenProps) {
   const items: SelectableItem[] = useMemo(
     () => [
       {
@@ -29,6 +30,11 @@ export function RunScreen({ onRunEval, onRunBatchEval, onRunRecommendation, onEx
         title: 'Recommendation',
         description: 'Optimize system prompts or tool descriptions using agent traces.',
       },
+      {
+        id: 'run-ingest',
+        title: 'Ingest knowledge base',
+        description: 'Start an ingestion job for a deployed knowledge base.',
+      },
     ],
     []
   );
@@ -39,6 +45,7 @@ export function RunScreen({ onRunEval, onRunBatchEval, onRunRecommendation, onEx
       if (item.id === 'run-eval') onRunEval();
       else if (item.id === 'run-batch-eval') onRunBatchEval();
       else if (item.id === 'run-recommendation') onRunRecommendation();
+      else if (item.id === 'run-ingest') onRunIngest();
     },
     onExit,
     isActive: true,

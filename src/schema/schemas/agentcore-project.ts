@@ -19,6 +19,7 @@ import {
   KmsKeyArnSchema,
 } from './primitives/evaluator';
 import { HarnessNameSchema } from './primitives/harness';
+import { KnowledgeBaseSchema } from './primitives/knowledge-base';
 import {
   DEFAULT_EPISODIC_REFLECTION_NAMESPACES,
   DEFAULT_EPISODIC_REFLECTION_NAMESPACE_TEMPLATES,
@@ -28,6 +29,16 @@ import {
   MemoryStrategyTypeSchema,
 } from './primitives/memory';
 import { OnlineEvalConfigSchema } from './primitives/online-eval-config';
+import {
+  DEFAULT_AUTO_PAYMENT,
+  DEFAULT_SPEND_LIMIT,
+  PaymentAuthorizerTypeSchema,
+  PaymentConnectorNameSchema,
+  PaymentConnectorSchema,
+  PaymentManagerNameSchema,
+  PaymentManagerSchema,
+  PaymentProviderSchema,
+} from './primitives/payment';
 import { PolicyEngineSchema } from './primitives/policy';
 import { TagsSchema } from './primitives/tags';
 import { uniqueBy } from './zod-util';
@@ -76,20 +87,53 @@ export type { Dataset, DatasetSchemaType } from './primitives/dataset';
 export type { ABTestMode, TargetRef, GatewayFilter, PerVariantOnlineEvaluationConfig } from './primitives/ab-test';
 export { ABTestModeSchema, TargetRefSchema, GatewayFilterSchema } from './primitives/ab-test';
 export type {
+  BedrockApiFormat,
+  HarnessApiFormat,
   HarnessGatewayOutboundAuth,
   HarnessMemoryRef,
   HarnessModel,
-  HarnessSpec,
   HarnessModelProvider,
+  HarnessSpec,
+  OpenAiApiFormat,
 } from './primitives/harness';
 export {
+  BedrockApiFormatSchema,
+  HarnessApiFormatSchema,
+  OpenAiApiFormatSchema,
   GatewayOAuthGrantTypeSchema,
   HarnessGatewayOutboundAuthSchema,
+  HarnessModelProviderSchema,
   HarnessNameSchema,
   HarnessSpecSchema,
   HarnessToolTypeSchema,
-  HarnessModelProviderSchema,
+  validateApiFormat,
 } from './primitives/harness';
+export type {
+  KnowledgeBase,
+  DataSource,
+  S3DataSource,
+  ConnectorDataSourceType,
+  ConnectorFileDataSource,
+} from './primitives/knowledge-base';
+export {
+  KnowledgeBaseNameSchema,
+  KnowledgeBaseSchema,
+  S3DataSourceSchema,
+  DataSourceSchema,
+  ConnectorDataSourceTypeSchema,
+  ConnectorFileDataSourceSchema,
+} from './primitives/knowledge-base';
+export {
+  DEFAULT_AUTO_PAYMENT,
+  DEFAULT_SPEND_LIMIT,
+  PaymentManagerSchema,
+  PaymentManagerNameSchema,
+  PaymentConnectorSchema,
+  PaymentConnectorNameSchema,
+  PaymentProviderSchema,
+  PaymentAuthorizerTypeSchema,
+};
+export type { PaymentManager, PaymentConnector, PaymentProvider, PaymentAuthorizerType } from './primitives/payment';
 
 // ============================================================================
 // ManagedBy Schema
@@ -251,7 +295,11 @@ export const CredentialNameSchema = z
   .max(128, 'Credential name must be 128 characters or less')
   .regex(/^[a-zA-Z0-9\-_]+$/, 'Must contain only alphanumeric characters, hyphens, and underscores (1-128 chars)');
 
-export const CredentialTypeSchema = z.enum(['ApiKeyCredentialProvider', 'OAuthCredentialProvider']);
+export const CredentialTypeSchema = z.enum([
+  'ApiKeyCredentialProvider',
+  'OAuthCredentialProvider',
+  'PaymentCredentialProvider',
+]);
 export type CredentialType = z.infer<typeof CredentialTypeSchema>;
 
 export const ApiKeyCredentialSchema = z.object({
@@ -278,7 +326,19 @@ export const OAuthCredentialSchema = z.object({
 
 export type OAuthCredential = z.infer<typeof OAuthCredentialSchema>;
 
-export const CredentialSchema = z.discriminatedUnion('authorizerType', [ApiKeyCredentialSchema, OAuthCredentialSchema]);
+export const PaymentCredentialSchema = z.object({
+  authorizerType: z.literal('PaymentCredentialProvider'),
+  name: CredentialNameSchema,
+  provider: PaymentProviderSchema,
+});
+
+export type PaymentCredential = z.infer<typeof PaymentCredentialSchema>;
+
+export const CredentialSchema = z.discriminatedUnion('authorizerType', [
+  ApiKeyCredentialSchema,
+  OAuthCredentialSchema,
+  PaymentCredentialSchema,
+]);
 
 export type Credential = z.infer<typeof CredentialSchema>;
 
@@ -343,6 +403,16 @@ export const AgentCoreProjectSpecSchema = z
         uniqueBy(
           memory => memory.name,
           name => `Duplicate memory name: ${name}`
+        )
+      ),
+
+    knowledgeBases: z
+      .array(KnowledgeBaseSchema)
+      .default([])
+      .superRefine(
+        uniqueBy(
+          kb => kb.name,
+          name => `Duplicate knowledge base name: ${name}`
         )
       ),
 
@@ -470,6 +540,17 @@ export const AgentCoreProjectSpecSchema = z
         '"httpGateways" is deprecated. Migrate to agentCoreGateways with protocolType: "None", or use "agentcore import gateway".'
       )
       .optional(),
+
+    payments: z
+      .array(PaymentManagerSchema)
+      .optional()
+      .superRefine((items, ctx) => {
+        if (!items) return;
+        uniqueBy(
+          (manager: { name: string }) => manager.name,
+          (name: string) => `Duplicate payment manager name: ${name}`
+        )(items, ctx);
+      }),
   })
   .strict()
   .superRefine((spec, ctx) => {
@@ -554,6 +635,69 @@ export const AgentCoreProjectSpecSchema = z
               }
             }
           }
+        }
+      }
+    }
+
+    // Connector gateway target KB reference: a project KB name (entry in
+    // knowledgeBases[]) or a literal 10-char KB ID (an external KB this
+    // project does not own). Real KB IDs match ^[A-Z0-9]{10}$; KB names
+    // start with a letter and may include dashes/underscores. The two
+    // formats can never collide.
+    const knowledgeBaseNames = new Set((spec.knowledgeBases ?? []).map(kb => kb.name));
+    const REAL_KB_ID_PATTERN = /^[A-Z0-9]{10}$/;
+    const validateKbReference = (target: { name: string }, value: string, fieldLabel: string): void => {
+      const looksLikeRealId = REAL_KB_ID_PATTERN.test(value);
+      if (looksLikeRealId) {
+        if (knowledgeBaseNames.has(value)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Connector target "${target.name}" ${fieldLabel} "${value}" looks like a literal KB ID but also matches a knowledgeBases[] entry. Rename the knowledge base or reference it by its project name instead.`,
+          });
+        }
+      } else {
+        if (!knowledgeBaseNames.has(value)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Connector target "${target.name}" ${fieldLabel} "${value}" does not match any knowledgeBases[] entry. To wire an external KB that this project does not own, use its 10-character KB ID.`,
+          });
+        }
+      }
+    };
+
+    for (const gateway of spec.agentCoreGateways ?? []) {
+      for (const target of gateway.targets ?? []) {
+        if (target.targetType !== 'connector') continue;
+        if (target.connectorId !== 'bedrock-knowledge-bases' && target.connectorId !== 'bedrock-agentic-retrieve') {
+          continue;
+        }
+        if (target.knowledgeBaseId) {
+          validateKbReference(target, target.knowledgeBaseId, 'knowledgeBaseId');
+        }
+        for (const value of target.knowledgeBaseIds ?? []) {
+          validateKbReference(target, value, 'knowledgeBaseIds[]');
+        }
+      }
+    }
+
+    // Validate payment connector credential references
+    for (const payment of spec.payments ?? []) {
+      const paymentIndex = (spec.payments ?? []).indexOf(payment);
+      for (const connector of payment.connectors) {
+        const connectorIndex = payment.connectors.indexOf(connector);
+        const credential = spec.credentials.find(c => c.name === connector.credentialName);
+        if (!credential) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Payment connector "${connector.name}" in manager "${payment.name}" references credential "${connector.credentialName}" which does not exist in credentials[]`,
+            path: ['payments', paymentIndex, 'connectors', connectorIndex, 'credentialName'],
+          });
+        } else if (credential.authorizerType !== 'PaymentCredentialProvider') {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Payment connector "${connector.name}" in manager "${payment.name}" references credential "${connector.credentialName}" which is a ${credential.authorizerType}, not a PaymentCredentialProvider`,
+            path: ['payments', paymentIndex, 'connectors', connectorIndex, 'credentialName'],
+          });
         }
       }
     }

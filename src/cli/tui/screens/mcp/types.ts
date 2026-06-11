@@ -98,6 +98,8 @@ export type AddGatewayTargetStep =
   | 'tool-schema'
   | 'runtime'
   | 'runtime-endpoint'
+  | 'kb-select'
+  | 'kb-id'
   | 'confirm';
 
 export type TargetLanguage = 'Python' | 'TypeScript' | 'Other';
@@ -130,6 +132,14 @@ export interface GatewayTargetWizardState {
   toolSchemaFile?: string;
   /** Runtime name reference for httpRuntime targets */
   runtime?: string;
+  /** Knowledge Base reference for connector targets — either a project KB name or a literal 10-char KB ID. */
+  knowledgeBaseId?: string;
+  /**
+   * Connector identifier when targetType is 'connector'.
+   * Currently only `bedrock-knowledge-bases` is exposed in the TUI;
+   * `bedrock-agentic-retrieve` is gateway-managed by the Add Knowledge Base flow.
+   */
+  connectorId?: 'bedrock-knowledge-bases' | 'bedrock-agentic-retrieve';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -193,12 +203,39 @@ export interface HttpRuntimeTargetConfig {
   outboundAuth?: { type: string; credentialName?: string; scopes?: string[] };
 }
 
+interface ConnectorTargetConfigBase {
+  targetType: 'connector';
+  name: string;
+  gateway: string;
+  description?: string;
+}
+
+export interface BedrockKnowledgeBasesConnectorTargetConfig extends ConnectorTargetConfigBase {
+  connectorId: 'bedrock-knowledge-bases';
+  /**
+   * Either a project KB name (a knowledgeBases[] entry, resolved at synth
+   * via application.knowledgeBases) or a literal 10-char external KB ID.
+   */
+  knowledgeBaseId: string;
+}
+
+export interface BedrockAgenticRetrieveConnectorTargetConfig extends ConnectorTargetConfigBase {
+  connectorId: 'bedrock-agentic-retrieve';
+  /** Fan-out: project KB names and/or literal 10-char external KB IDs. */
+  knowledgeBaseIds: string[];
+}
+
+export type ConnectorTargetConfig =
+  | BedrockKnowledgeBasesConnectorTargetConfig
+  | BedrockAgenticRetrieveConnectorTargetConfig;
+
 export type AddGatewayTargetConfig =
   | McpServerTargetConfig
   | ApiGatewayTargetConfig
   | SchemaBasedTargetConfig
   | LambdaFunctionArnTargetConfig
-  | HttpRuntimeTargetConfig;
+  | HttpRuntimeTargetConfig
+  | ConnectorTargetConfig;
 
 export const MCP_TOOL_STEP_LABELS: Record<AddGatewayTargetStep, string> = {
   name: 'Name',
@@ -217,6 +254,8 @@ export const MCP_TOOL_STEP_LABELS: Record<AddGatewayTargetStep, string> = {
   'tool-schema': 'Tool Schema File',
   runtime: 'Runtime',
   'runtime-endpoint': 'Endpoint',
+  'kb-select': 'Knowledge Base',
+  'kb-id': 'KB ID',
   confirm: 'Confirm',
 };
 
@@ -256,7 +295,15 @@ export const TARGET_TYPE_OPTIONS = [
     title: 'HTTP Runtime',
     description: 'Route HTTP traffic to an AgentCore runtime',
   },
+  {
+    id: 'connector',
+    title: 'Knowledge Base',
+    description: 'Wire an existing Knowledge Base to this gateway as a connector target',
+  },
 ] as const;
+
+/** Sentinel ID for the "Enter an existing KB ID manually..." option in the KB-select step. */
+export const ENTER_KB_ID_MANUALLY = '__enter_kb_id__' as const;
 
 export const TARGET_LANGUAGE_OPTIONS = [
   { id: 'Python', title: 'Python', description: 'FastMCP Python server' },

@@ -18,6 +18,7 @@ export const GatewayTargetTypeSchema = z.enum([
   'apiGateway',
   'lambdaFunctionArn',
   'httpRuntime',
+  'connector',
 ]);
 export type GatewayTargetType = z.infer<typeof GatewayTargetTypeSchema>;
 
@@ -38,6 +39,37 @@ export const MCP_TARGET_TYPES: readonly GatewayTargetType[] = [
   'apiGateway',
   'lambdaFunctionArn',
 ] as const;
+
+// ============================================================================
+// Connector (managed-service gateway target)
+// ============================================================================
+
+/**
+ * Managed-service connector identifiers. The L3 maps each one to an operation
+ * name + Enabled list via CONNECTOR_DEFAULTS.
+ *
+ * Spec note: the original DevEx doc (cli-knowledge-bases-devex.md) uses
+ * `agentic-retrieve`, but the service accepts `bedrock-agentic-retrieve`. The
+ * latter is canonical.
+ */
+export const CONNECTOR_ID = {
+  BEDROCK_KNOWLEDGE_BASES: 'bedrock-knowledge-bases',
+  BEDROCK_AGENTIC_RETRIEVE: 'bedrock-agentic-retrieve',
+} as const;
+export const CONNECTOR_ID_VALUES = [
+  CONNECTOR_ID.BEDROCK_KNOWLEDGE_BASES,
+  CONNECTOR_ID.BEDROCK_AGENTIC_RETRIEVE,
+] as const;
+export const ConnectorIdSchema = z.enum(CONNECTOR_ID_VALUES);
+export type ConnectorId = z.infer<typeof ConnectorIdSchema>;
+
+/**
+ * Real Bedrock Knowledge Base IDs are 10 uppercase alphanumeric chars.
+ * KB names follow the standard primitive-name shape (1-48 chars, starts with a letter).
+ * The two formats can never collide, so a connector target's `knowledgeBaseId`
+ * field is unambiguously a project KB name or a literal external KB ID.
+ */
+export const REAL_KB_ID_PATTERN = /^[A-Z0-9]{10}$/;
 
 // ============================================================================
 // Gateway Authorization Schemas
@@ -80,6 +112,9 @@ export const TARGET_TYPE_AUTH_CONFIG: Record<
   lambda: { authRequired: false, validAuthTypes: ['OAUTH', 'NONE'], iamRoleFallback: true },
   lambdaFunctionArn: { authRequired: false, validAuthTypes: ['OAUTH', 'NONE'], iamRoleFallback: true },
   httpRuntime: { authRequired: false, validAuthTypes: ['OAUTH', 'NONE'], iamRoleFallback: true },
+  // Connector targets call the underlying managed service (Bedrock KB, etc.)
+  // via the gateway's IAM role. No outbound auth applies.
+  connector: { authRequired: false, validAuthTypes: [], iamRoleFallback: true },
 };
 
 // ============================================================================
@@ -389,6 +424,39 @@ export const AgentCoreGatewayTargetSchema = z
     lambdaFunctionArn: LambdaFunctionArnConfigSchema.optional(),
     /** HTTP Runtime configuration. Required for httpRuntime target type. */
     httpRuntime: HttpRuntimeConfigSchema.optional(),
+    /**
+     * Managed-service connector identifier. Required for `connector` target type.
+     */
+    connectorId: ConnectorIdSchema.optional(),
+    /**
+     * For `bedrock-knowledge-bases` connector targets: either a project KB
+     * name (references an entry in `knowledgeBases[]` on the project spec)
+     * or a literal 10-character KB ID (refers to an external KB this project
+     * does not own). The L3 disambiguates by regex match. Mutually exclusive
+     * with `knowledgeBaseIds`.
+     */
+    knowledgeBaseId: z
+      .string()
+      .min(1)
+      .max(48)
+      .regex(/^[a-zA-Z0-9_-]+$/, 'Must be a KB name (1-48 chars, letters/digits/dash/underscore) or a 10-char KB ID')
+      .optional(),
+    /**
+     * For `bedrock-agentic-retrieve` connector targets only. List of project
+     * KB names or literal 10-char external KB IDs that this orchestrated
+     * retriever should fan out across. Each entry is disambiguated the same
+     * way `knowledgeBaseId` is. Mutually exclusive with `knowledgeBaseId`.
+     */
+    knowledgeBaseIds: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(48)
+          .regex(/^[a-zA-Z0-9_-]+$/, 'Each entry must be a KB name (1-48 chars) or a 10-char KB ID')
+      )
+      .min(1)
+      .optional(),
   })
   .strict()
   .superRefine((data, ctx) => {
@@ -589,6 +657,96 @@ export const AgentCoreGatewayTargetSchema = z
         code: z.ZodIssueCode.custom,
         message: 'Lambda targets require at least one tool definition.',
         path: ['toolDefinitions'],
+      });
+    }
+    if (data.targetType === 'connector') {
+      if (!data.connectorId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'connectorId is required for connector target type',
+          path: ['connectorId'],
+        });
+      }
+      if (data.connectorId === CONNECTOR_ID.BEDROCK_KNOWLEDGE_BASES) {
+        if (!data.knowledgeBaseId) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `knowledgeBaseId is required for connectorId '${data.connectorId}'`,
+            path: ['knowledgeBaseId'],
+          });
+        }
+        if (data.knowledgeBaseIds) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `knowledgeBaseIds is not applicable for connectorId '${data.connectorId}' (use knowledgeBaseId)`,
+            path: ['knowledgeBaseIds'],
+          });
+        }
+      }
+      if (data.connectorId === CONNECTOR_ID.BEDROCK_AGENTIC_RETRIEVE) {
+        if (!data.knowledgeBaseIds || data.knowledgeBaseIds.length === 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `knowledgeBaseIds (non-empty) is required for connectorId '${data.connectorId}'`,
+            path: ['knowledgeBaseIds'],
+          });
+        }
+        if (data.knowledgeBaseId) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `knowledgeBaseId is not applicable for connectorId '${data.connectorId}' (use knowledgeBaseIds)`,
+            path: ['knowledgeBaseId'],
+          });
+        }
+      }
+      if (data.compute) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'compute is not applicable for connector target type',
+          path: ['compute'],
+        });
+      }
+      if (data.endpoint) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'endpoint is not applicable for connector target type',
+          path: ['endpoint'],
+        });
+      }
+      if (data.toolDefinitions && data.toolDefinitions.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'toolDefinitions is not applicable for connector target type',
+          path: ['toolDefinitions'],
+        });
+      }
+      if (data.apiGateway) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'apiGateway is not applicable for connector target type',
+          path: ['apiGateway'],
+        });
+      }
+      if (data.lambdaFunctionArn) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'lambdaFunctionArn is not applicable for connector target type',
+          path: ['lambdaFunctionArn'],
+        });
+      }
+      if (data.schemaSource) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'schemaSource is not applicable for connector target type',
+          path: ['schemaSource'],
+        });
+      }
+    }
+    if (data.targetType !== 'connector' && (data.connectorId || data.knowledgeBaseId)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'connectorId/knowledgeBaseId only apply to connector target type',
+        path: ['connectorId'],
       });
     }
     // Centralized outbound auth validation (driven by TARGET_TYPE_AUTH_CONFIG)
