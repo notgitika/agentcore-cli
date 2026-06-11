@@ -161,15 +161,77 @@ function registerABTestSubcommand(parent: Command, action: 'pause' | 'resume') {
     });
 }
 
+function registerOnlineInsightsSubcommand(parent: Command, action: 'pause' | 'resume') {
+  const description =
+    action === 'pause'
+      ? 'Pause a deployed online insights config. Use --arn to target configs outside the project.'
+      : 'Resume a paused online insights config. Use --arn to target configs outside the project.';
+  const pastTense = action === 'pause' ? 'Paused' : 'Resumed';
+
+  parent
+    .command('online-insights')
+    .description(description)
+    .argument('[name]', 'Config name from project (not needed with --arn)')
+    .option('--arn <arn>', 'Online insights config ARN — operate without a project directory')
+    .option('--region <region>', 'AWS region override (auto-detected from ARN otherwise)')
+    .option('--json', 'Output as JSON')
+    .action(async (name: string | undefined, cliOptions: { arn?: string; region?: string; json?: boolean }) => {
+      if (!cliOptions.arn && !name) {
+        const error = 'Either a config name or --arn is required';
+        if (cliOptions.json) {
+          console.log(JSON.stringify({ success: false, error }));
+        } else {
+          render(<Text color="red">{error}</Text>);
+        }
+        process.exit(1);
+      }
+
+      if (!cliOptions.arn) {
+        requireProject();
+      }
+
+      const options: OnlineEvalActionOptions = {
+        name: name ?? '',
+        arn: cliOptions.arn,
+        region: cliOptions.region,
+        json: cliOptions.json,
+      };
+
+      try {
+        const result = await handlePauseResume(options, action);
+
+        if (cliOptions.json) {
+          console.log(JSON.stringify(serializeResult(result)));
+        } else if (result.success) {
+          const displayName = cliOptions.arn ? result.configId : name;
+          console.log(`${pastTense} online insights config "${displayName}" (status: ${result.executionStatus})`);
+        } else {
+          render(<Text color="red">{result.error.message}</Text>);
+        }
+
+        process.exit(result.success ? 0 : 1);
+      } catch (error) {
+        if (cliOptions.json) {
+          console.log(JSON.stringify({ success: false, error: getErrorMessage(error) }));
+        } else {
+          render(<Text color="red">Error: {getErrorMessage(error)}</Text>);
+        }
+        process.exit(1);
+      }
+    });
+}
+
 export const registerPause = (program: Command) => {
   const pauseCmd = program.command('pause').description(COMMAND_DESCRIPTIONS.pause);
   registerOnlineEvalSubcommand(pauseCmd, 'pause');
+  registerOnlineInsightsSubcommand(pauseCmd, 'pause');
   registerABTestSubcommand(pauseCmd, 'pause');
 };
 
 export const registerResume = (program: Command) => {
   const resumeCmd = program.command('resume').description(COMMAND_DESCRIPTIONS.resume);
   registerOnlineEvalSubcommand(resumeCmd, 'resume');
+  registerOnlineInsightsSubcommand(resumeCmd, 'resume');
   registerABTestSubcommand(resumeCmd, 'resume');
 };
 

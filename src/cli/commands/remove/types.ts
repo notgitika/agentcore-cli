@@ -10,6 +10,7 @@ export type ResourceType =
   | 'credential'
   | 'evaluator'
   | 'online-eval'
+  | 'online-insights'
   | 'policy-engine'
   | 'policy'
   | 'config-bundle'

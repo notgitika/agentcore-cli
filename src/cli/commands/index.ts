@@ -7,6 +7,7 @@ export { registerCreate } from './create';
 export { registerEval } from './eval';
 export { registerExec } from './exec';
 export { registerFetch } from './fetch';
+export { registerInsights } from './insights';
 export { registerInvoke } from './invoke';
 export { registerPackage } from './package';
 export { registerPause } from './pause';

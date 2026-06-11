@@ -191,6 +191,8 @@ const FeedbackAttrs = safeSchema({
 
 const PauseResumeOnlineEvalAttrs = safeSchema({ ref_type: RefType });
 
+const AddOnlineInsightsAttrs = safeSchema({ insights_count: Count, enable_on_create: z.boolean() });
+
 const NoAttrs = safeSchema({});
 
 /*
@@ -205,6 +207,7 @@ export const COMMAND_SCHEMAS = {
   'add.credential': AddCredentialAttrs,
   'add.evaluator': AddEvaluatorAttrs,
   'add.online-eval': AddOnlineEvalAttrs,
+  'add.online-insights': AddOnlineInsightsAttrs,
   'add.gateway': AddGatewayAttrs,
   'add.gateway-target': AddGatewayTargetAttrs,
   'add.policy-engine': AddPolicyEngineAttrs,
@@ -237,6 +240,8 @@ export const COMMAND_SCHEMAS = {
   update: UpdateAttrs,
   'pause.online-eval': PauseResumeOnlineEvalAttrs,
   'resume.online-eval': PauseResumeOnlineEvalAttrs,
+  'pause.online-insights': PauseResumeOnlineEvalAttrs,
+  'resume.online-insights': PauseResumeOnlineEvalAttrs,
   'traces.list': NoAttrs,
   'traces.get': NoAttrs,
   'evals.history': NoAttrs,
@@ -258,6 +263,7 @@ export const COMMAND_SCHEMAS = {
   'remove.credential': NoAttrs,
   'remove.evaluator': NoAttrs,
   'remove.online-eval': NoAttrs,
+  'remove.online-insights': NoAttrs,
   'remove.gateway': NoAttrs,
   'remove.gateway-target': NoAttrs,
   'remove.policy-engine': NoAttrs,

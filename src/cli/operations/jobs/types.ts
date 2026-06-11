@@ -21,14 +21,14 @@ export type { RecommendationType } from '../../aws/agentcore-recommendation';
 // Job types & statuses
 // ============================================================================
 
-/** The two job types this engine manages (AB tests come later). */
-export type JobType = 'recommendation' | 'batch-evaluation';
+/** The job types this engine manages (AB tests come later). */
+export type JobType = 'recommendation' | 'batch-evaluation' | 'insights';
 
 /** CLI-facing input source for a recommendation. */
 export type RecommendationInputSource = 'config-bundle' | 'inline' | 'file';
 
 /** CLI-facing trace source for a recommendation. */
-export type RecommendationTraceSource = 'cloudwatch' | 'sessions' | 'spans-file';
+export type RecommendationTraceSource = 'cloudwatch' | 'sessions' | 'spans-file' | 'batch-evaluation';
 
 /** Where the batch evaluation sessions came from. */
 export type BatchEvaluationSource = 'traces' | 'dataset';
@@ -100,7 +100,47 @@ export interface BatchEvaluationJobRecord extends JobRecordBase {
   results?: BatchEvaluationResultEntry[];
 }
 
-export type JobRecord = RecommendationJobRecord | BatchEvaluationJobRecord;
+// ============================================================================
+// Insights (failure analysis) types
+// ============================================================================
+
+export interface InsightRelatedSession {
+  sessionId?: string;
+  recommendationType?: string;
+}
+
+export interface InsightRootCause {
+  rootCauseCategory?: string;
+  rootCauseDescription?: string;
+  recommendation?: string;
+  relatedSessions?: InsightRelatedSession[];
+}
+
+export interface InsightFailureCategory {
+  failureCategoryName?: string;
+  failureCategoryDescription?: string;
+  categoryGroupName?: string;
+  rootCauses?: InsightRootCause[];
+}
+
+export interface FailureAnalysisResult {
+  failureCategories?: InsightFailureCategory[];
+}
+
+export interface InsightsJobRecord extends JobRecordBase {
+  type: 'insights';
+  name: string;
+  /** Insight types requested. */
+  insights: string[];
+  /** Optional evaluators (needed for recommendation chaining). */
+  evaluators?: string[];
+  /** Server-computed evaluation results. */
+  evaluationResults?: EvaluationResults;
+  /** Structured failure analysis results from GetBatchEvaluation. */
+  failureAnalysisResult?: FailureAnalysisResult;
+}
+
+export type JobRecord = RecommendationJobRecord | BatchEvaluationJobRecord | InsightsJobRecord;
 
 // ============================================================================
 // Start options (engine-facing; non-colliding with the AWS-layer Start* types)
@@ -108,7 +148,7 @@ export type JobRecord = RecommendationJobRecord | BatchEvaluationJobRecord;
 
 export interface StartRecommendationJobOptions {
   type: RecommendationType;
-  agent: string;
+  agent?: string;
   /** Evaluator name(s), Builtin.* ids, or ARNs (exactly one for system-prompt; none for tool-description). */
   evaluators: string[];
   inputSource: RecommendationInputSource;
@@ -123,6 +163,10 @@ export interface StartRecommendationJobOptions {
   lookbackDays?: number;
   sessionIds?: string[];
   spansFile?: string;
+  /** Use a local insights run as trace source (resolves batchEvaluationArn from .cli/jobs/insights/) */
+  fromInsights?: string;
+  /** Use a batch evaluation ARN directly as trace source */
+  batchEvaluationArn?: string;
   region?: string;
   /** Optional recommendation name. */
   recommendationName?: string;
@@ -151,6 +195,21 @@ export interface StartBatchEvaluationJobOptions {
   dataset?: { id: string; version: string };
   /** KMS key ARN for encrypting batch evaluation results. */
   kmsKeyArn?: string;
+  onProgress?: (status: string, message: string) => void;
+}
+
+export interface StartInsightsJobOptions {
+  agent?: string;
+  insights: string[];
+  evaluators?: string[];
+  onlineEvalConfigArn?: string;
+  lookbackDays?: number;
+  startTime?: string;
+  endTime?: string;
+  sessionIds?: string[];
+  name?: string;
+  region?: string;
+  endpoint?: string;
   onProgress?: (status: string, message: string) => void;
 }
 
@@ -208,19 +267,26 @@ export type BatchEvaluationHandler = Startable<StartBatchEvaluationJobOptions, B
   Stoppable<BatchEvaluationJobRecord> &
   Archivable<BatchEvaluationJobRecord>;
 
+export type InsightsHandler = Startable<StartInsightsJobOptions, InsightsJobRecord> &
+  Refreshable<InsightsJobRecord> &
+  Archivable<InsightsJobRecord>;
+
 export interface RecordByType {
   recommendation: RecommendationJobRecord;
   'batch-evaluation': BatchEvaluationJobRecord;
+  insights: InsightsJobRecord;
 }
 
 export interface StartOptionsByType {
   recommendation: StartRecommendationJobOptions;
   'batch-evaluation': StartBatchEvaluationJobOptions;
+  insights: StartInsightsJobOptions;
 }
 
 export interface HandlerByType {
   recommendation: RecommendationHandler;
   'batch-evaluation': BatchEvaluationHandler;
+  insights: InsightsHandler;
 }
 
 /** Job types whose handler composes Stoppable — derived so it tracks trait composition automatically. */

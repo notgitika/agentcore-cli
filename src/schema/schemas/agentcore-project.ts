@@ -567,7 +567,7 @@ export const AgentCoreProjectSpecSchema = z
       }
 
       // Validate evaluator references
-      for (const evalName of config.evaluators) {
+      for (const evalName of config.evaluators ?? []) {
         // Skip built-in evaluators and ARN references (externally managed)
         if (evalName.startsWith(BUILTIN_EVALUATOR_PREFIX) || evalName.startsWith(ARN_PREFIX)) continue;
         if (!evaluatorNames.has(evalName)) {

@@ -1,0 +1,1 @@
+export { registerInsights } from './command';

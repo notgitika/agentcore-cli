@@ -50,4 +50,14 @@ export const registerArchive = (program: Command) => {
     .action((cliOptions: { id: string; region?: string; json?: boolean }) =>
       executeArchive('recommendation', cliOptions, 'Recommendation')
     );
+
+  archiveCmd
+    .command('insights')
+    .description('[preview] Archive an insights job record on the service and clear local history')
+    .requiredOption('-i, --id <id>', 'Insights job ID to archive')
+    .option('--region <region>', 'AWS region (auto-detected if omitted)')
+    .option('--json', 'Output as JSON')
+    .action((cliOptions: { id: string; region?: string; json?: boolean }) =>
+      executeArchive('insights', cliOptions, 'Insights job')
+    );
 };

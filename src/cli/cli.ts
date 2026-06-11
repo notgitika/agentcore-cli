@@ -16,6 +16,7 @@ import { registerFeedback } from './commands/feedback';
 import { registerFetch } from './commands/fetch';
 import { registerHelp } from './commands/help';
 import { registerImport } from './commands/import';
+import { registerInsights } from './commands/insights';
 import { registerInvoke } from './commands/invoke';
 import { registerLogs } from './commands/logs';
 import { registerPackage } from './commands/package';
@@ -99,6 +100,7 @@ export function registerCommands(program: Command) {
   registerFetch(program);
   registerHelp(program);
   registerImport(program);
+  registerInsights(program);
   registerInvoke(program);
   registerLogs(program);
   registerPackage(program);

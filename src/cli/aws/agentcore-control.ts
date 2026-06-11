@@ -1,5 +1,6 @@
 import type { EvaluationLevel } from '../../schema/schemas/primitives/evaluator';
 import { getCredentialProvider } from './account';
+import { controlPlaneEndpoint } from './stage-endpoint';
 import {
   BedrockAgentCoreControlClient,
   GetAgentRuntimeCommand,
@@ -20,13 +21,17 @@ import {
 
 /**
  * Create a shared BedrockAgentCoreControlClient for the given region.
+ * Respects AGENTCORE_STAGE env var for pre-release endpoint override.
  * Callers should create one client and reuse it across related operations
  * to benefit from connection pooling and credential caching.
  */
 export function createControlClient(region: string): BedrockAgentCoreControlClient {
+  const stage = process.env.AGENTCORE_STAGE?.toLowerCase();
+  const endpointOverride = stage === 'beta' || stage === 'gamma' ? controlPlaneEndpoint(region) : undefined;
   return new BedrockAgentCoreControlClient({
     region,
     credentials: getCredentialProvider(),
+    ...(endpointOverride ? { endpoint: endpointOverride } : {}),
   });
 }
 

@@ -50,6 +50,33 @@ export interface Evaluator {
   evaluatorId: string;
 }
 
+export interface InsightConfig {
+  insightId: string;
+}
+
+export interface FailureAnalysisRelatedSession {
+  sessionId?: string;
+  recommendationType?: string;
+}
+
+export interface FailureAnalysisRootCause {
+  rootCauseCategory?: string;
+  rootCauseDescription?: string;
+  recommendation?: string;
+  relatedSessions?: FailureAnalysisRelatedSession[];
+}
+
+export interface FailureAnalysisCategory {
+  failureCategoryName?: string;
+  failureCategoryDescription?: string;
+  categoryGroupName?: string;
+  rootCauses?: FailureAnalysisRootCause[];
+}
+
+export interface FailureAnalysisResult {
+  failureCategories?: FailureAnalysisCategory[];
+}
+
 export interface GroundTruthAssertion {
   text: string;
 }
@@ -95,7 +122,8 @@ export interface EvaluationMetadata {
 export interface StartBatchEvaluationOptions {
   region: string;
   name: string;
-  evaluators: Evaluator[];
+  evaluators?: Evaluator[];
+  insights?: InsightConfig[];
   dataSourceConfig: DataSourceConfig;
   evaluationMetadata?: EvaluationMetadata;
   description?: string;
@@ -159,6 +187,7 @@ export interface GetBatchEvaluationResult {
   dataSourceConfig?: DataSourceConfig;
   outputConfig?: OutputConfig;
   evaluationResults?: EvaluationResults;
+  failureAnalysisResult?: FailureAnalysisResult;
   errorDetails?: string[];
   description?: string;
   kmsKeyArn?: string;
@@ -283,9 +312,14 @@ async function signedRequest(options: {
 export async function startBatchEvaluation(options: StartBatchEvaluationOptions): Promise<StartBatchEvaluationResult> {
   const body: Record<string, unknown> = {
     batchEvaluationName: options.name,
-    evaluators: options.evaluators,
     dataSourceConfig: options.dataSourceConfig,
   };
+  if (options.evaluators && options.evaluators.length > 0) {
+    body.evaluators = options.evaluators;
+  }
+  if (options.insights && options.insights.length > 0) {
+    body.insights = options.insights;
+  }
   if (options.evaluationMetadata) {
     body.evaluationMetadata = options.evaluationMetadata;
   }
@@ -338,6 +372,7 @@ export async function getBatchEvaluation(options: GetBatchEvaluationOptions): Pr
     dataSourceConfig: raw.dataSourceConfig as DataSourceConfig | undefined,
     outputConfig: raw.outputConfig as OutputConfig | undefined,
     evaluationResults: raw.evaluationResults as EvaluationResults | undefined,
+    failureAnalysisResult: raw.failureAnalysisResult as FailureAnalysisResult | undefined,
     errorDetails: raw.errorDetails as string[] | undefined,
     description: raw.description as string | undefined,
     kmsKeyArn: raw.kmsKeyArn as string | undefined,

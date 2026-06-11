@@ -50,10 +50,10 @@ export const recommendationHandler: RecommendationHandler = {
       logger?.log(`Region: ${region}`);
       logger?.endStep('success');
 
-      // Resolve agent (needed for runtimeId + account id from its ARN)
+      // Resolve agent (needed for runtimeId + account id from its ARN) — skip for batch-evaluation source
       logger?.startStep('Resolve agent and evaluators');
-      const agentState = resolveAgentState(deployedState, opts.agent);
-      if (!agentState) {
+      const agentState = opts.agent ? resolveAgentState(deployedState, opts.agent) : undefined;
+      if (!agentState && opts.traceSource !== 'batch-evaluation') {
         const err = new ResourceNotFoundError(`Agent "${opts.agent}" not deployed. Run \`agentcore deploy\` first.`);
         logger?.endStep('error', err.message);
         logger?.finalize(false);
@@ -102,7 +102,7 @@ export const recommendationHandler: RecommendationHandler = {
         return { success: false, error: err };
       }
 
-      const accountId = extractAccountIdFromArn(agentState.runtimeArn);
+      const accountId = agentState ? extractAccountIdFromArn(agentState.runtimeArn) : '';
 
       // Resolve config-bundle ARN + short JSONPath (from deployed state / agentcore.json)
       let bundleArn: string | undefined;
@@ -160,7 +160,9 @@ export const recommendationHandler: RecommendationHandler = {
         lookbackDays: opts.lookbackDays,
         sessionIds: opts.sessionIds,
         spansFile: opts.spansFile,
-        runtimeId: agentState.runtimeId,
+        fromInsights: opts.fromInsights,
+        batchEvaluationArn: opts.batchEvaluationArn,
+        runtimeId: agentState?.runtimeId ?? '',
         accountId,
         region,
         evaluatorIds,
@@ -190,7 +192,7 @@ export const recommendationHandler: RecommendationHandler = {
         arn: startResult.recommendationArn,
         status: startResult.status,
         createdAt: startResult.createdAt ?? new Date().toISOString(),
-        agent: opts.agent,
+        agent: opts.agent ?? '',
         logFilePath: logger?.logFilePath,
         recommendationType: opts.type,
         evaluators: opts.evaluators,

@@ -7,6 +7,7 @@ import type { RunEvalOptions } from '../../operations/eval';
 import { createJobEngine, runDatasetPhase1, waitForTerminal } from '../../operations/jobs';
 import type {
   BatchEvaluationJobRecord,
+  InsightsJobRecord,
   RecommendationJobRecord,
   StartBatchEvaluationJobOptions,
 } from '../../operations/jobs';
@@ -298,6 +299,91 @@ export const registerRun = (program: Command) => {
     );
 
   runCmd
+    .command('insights')
+    .description('[preview] Run failure analysis across agent sessions')
+    .option('-r, --runtime <name>', 'Runtime name from project config')
+    .option('--insights <ids...>', 'Insight type(s) (default: Builtin.Insight.FailureAnalysis)')
+    .option('-e, --evaluator <ids...>', 'Evaluator(s) to include (needed for chaining into recommendations)')
+    .option('--online-eval-config-arn <arn>', 'Use an existing OnlineEvaluationConfig as session source')
+    .option('-d, --lookback-days <days>', 'Lookback window in days (default: 7)')
+    .option('--start-time <iso8601>', 'Session filter start time')
+    .option('--end-time <iso8601>', 'Session filter end time')
+    .option('-s, --session-ids <ids...>', 'Limit to specific session IDs')
+    .option('-n, --name <name>', 'Job name (auto-generated if omitted)')
+    .option('--wait', 'Block until the job reaches a terminal state')
+    .option('--region <region>', 'AWS region (auto-detected if omitted)')
+    .option('--endpoint <name>', 'Runtime endpoint name (e.g. PROMPT_V1)')
+    .option('--json', 'Output as JSON')
+    .action(
+      async (cliOptions: {
+        runtime?: string;
+        insights?: string[];
+        evaluator?: string[];
+        onlineEvalConfigArn?: string;
+        lookbackDays?: string;
+        startTime?: string;
+        endTime?: string;
+        sessionIds?: string[];
+        name?: string;
+        wait?: boolean;
+        region?: string;
+        endpoint?: string;
+        json?: boolean;
+      }) => {
+        requireProject();
+
+        const log = (message: string) => {
+          if (!cliOptions.json) console.log(message);
+        };
+
+        await runCliCommand('run.job', !!cliOptions.json, async () => {
+          const engine = createJobEngine(new ConfigIO());
+
+          const insightIds = cliOptions.insights ?? ['Builtin.Insight.FailureAnalysis'];
+          const lookbackDays = cliOptions.lookbackDays ? parseInt(cliOptions.lookbackDays, 10) : undefined;
+
+          const startResult = await engine.start('insights', {
+            agent: cliOptions.runtime,
+            insights: insightIds,
+            evaluators: cliOptions.evaluator,
+            onlineEvalConfigArn: cliOptions.onlineEvalConfigArn,
+            lookbackDays: lookbackDays && !isNaN(lookbackDays) ? lookbackDays : undefined,
+            startTime: cliOptions.startTime,
+            endTime: cliOptions.endTime,
+            sessionIds: cliOptions.sessionIds,
+            name: cliOptions.name,
+            region: cliOptions.region,
+            endpoint: cliOptions.endpoint,
+            onProgress: cliOptions.json ? undefined : (_status, message) => console.log(message),
+          });
+          if (!startResult.success) {
+            throw startResult.error;
+          }
+          let record: InsightsJobRecord = startResult.record;
+
+          if (cliOptions.wait) {
+            const final = await waitForTerminal(engine, 'insights', record.id, {
+              onTick: status => log(`Status: ${status}`),
+            });
+            if (final) record = final;
+          }
+
+          if (cliOptions.json) {
+            console.log(JSON.stringify(serializeResult({ success: true, ...record })));
+          } else {
+            console.log(`\n✓ Insights job started: ${record.id} (${record.status})`);
+            printInsightsResult(record);
+            if (!cliOptions.wait) {
+              console.log(`\nNext: agentcore insights results --id ${record.id}`);
+            }
+            console.log('');
+          }
+          return { job_type: 'insights', has_wait: !!cliOptions.wait };
+        });
+      }
+    );
+
+  runCmd
     .command('recommendation')
     .description('[preview] Optimize a system prompt or tool descriptions using agent traces as signal')
     .option('-t, --type <type>', 'What to optimize: system-prompt or tool-description (default: system-prompt)')
@@ -325,6 +411,8 @@ export const registerRun = (program: Command) => {
     .option('-n, --run <name>', 'Run name prefix for the recommendation')
     .option('--region <region>', 'AWS region')
     .option('--kms-key <arn>', 'KMS key ARN for encrypting recommendation results')
+    .option('--from-insights <id>', 'Use a local insights run as trace source (resolves batch eval ARN)')
+    .option('--batch-evaluation-arn <arn>', 'Use a batch evaluation ARN directly as trace source')
     .option('--wait', 'Block until the recommendation reaches a terminal state')
     .option('--json', 'Output as JSON')
     .action(
@@ -345,6 +433,8 @@ export const registerRun = (program: Command) => {
         run?: string;
         region?: string;
         kmsKey?: string;
+        fromInsights?: string;
+        batchEvaluationArn?: string;
         wait?: boolean;
         json?: boolean;
       }) => {
@@ -362,11 +452,12 @@ export const registerRun = (program: Command) => {
           process.exit(1);
         }
 
+        const isBatchEvalSource = !!(cliOptions.fromInsights ?? cliOptions.batchEvaluationArn);
         const agent = cliOptions.runtime;
         const evaluator = cliOptions.evaluator;
 
-        if (!agent) {
-          const error = '--runtime is required';
+        if (!agent && !isBatchEvalSource) {
+          const error = '--runtime is required (unless --from-insights or --batch-evaluation-arn is provided)';
           if (cliOptions.json) {
             console.log(JSON.stringify({ success: false, error }));
           } else {
@@ -375,9 +466,9 @@ export const registerRun = (program: Command) => {
           process.exit(1);
         }
 
-        // Evaluator is required for system-prompt recs, optional for tool-description
-        if (recType === 'SYSTEM_PROMPT_RECOMMENDATION' && !evaluator) {
-          const error = '--evaluator is required for system-prompt recommendations';
+        // Evaluator is required for system-prompt recs, optional for tool-description and batch-eval source
+        if (recType === 'SYSTEM_PROMPT_RECOMMENDATION' && !evaluator && !isBatchEvalSource) {
+          const error = '--evaluator is required for system-prompt recommendations (unless using --from-insights)';
           if (cliOptions.json) {
             console.log(JSON.stringify({ success: false, error }));
           } else {
@@ -394,11 +485,13 @@ export const registerRun = (program: Command) => {
               ? ('config-bundle' as const)
               : ('inline' as const);
 
-        const traceSource = cliOptions.spansFile
-          ? ('spans-file' as const)
-          : cliOptions.sessionId
-            ? ('sessions' as const)
-            : ('cloudwatch' as const);
+        const traceSource = isBatchEvalSource
+          ? ('batch-evaluation' as const)
+          : cliOptions.spansFile
+            ? ('spans-file' as const)
+            : cliOptions.sessionId
+              ? ('sessions' as const)
+              : ('cloudwatch' as const);
 
         // Parse --tool-desc-json-path pairs ("toolName:$.json.path") into structured format
         const toolDescJsonPaths = cliOptions.toolDescJsonPath
@@ -416,7 +509,7 @@ export const registerRun = (program: Command) => {
           const engine = createJobEngine(new ConfigIO());
           const startResult = await engine.start('recommendation', {
             type: recType,
-            agent,
+            agent: agent ?? '',
             evaluators: evaluator ? [evaluator] : [],
             promptFile: cliOptions.promptFile,
             inlineContent: cliOptions.inline,
@@ -428,6 +521,8 @@ export const registerRun = (program: Command) => {
             lookbackDays: parseInt(cliOptions.lookback, 10),
             sessionIds: cliOptions.sessionId,
             spansFile: cliOptions.spansFile,
+            fromInsights: cliOptions.fromInsights,
+            batchEvaluationArn: cliOptions.batchEvaluationArn,
             recommendationName: cliOptions.run,
             region: cliOptions.region,
             kmsKeyArn: cliOptions.kmsKey,
@@ -575,6 +670,29 @@ function printRecommendationResult(record: RecommendationJobRecord): void {
   }
   if (record.syncedVersionId) {
     console.log(`\nNew config bundle version ${record.syncedVersionId} applied to agentcore.json.`);
+  }
+}
+
+/** Print an insights job's failure analysis results. */
+function printInsightsResult(record: InsightsJobRecord): void {
+  const fa = record.failureAnalysisResult;
+  if (fa?.failureCategories?.length) {
+    console.log('\nFailure Analysis:');
+    for (const cat of fa.failureCategories) {
+      console.log(`  ${cat.failureCategoryName ?? 'Unknown'}: ${cat.failureCategoryDescription ?? ''}`);
+      if (cat.rootCauses?.length) {
+        for (const rc of cat.rootCauses) {
+          console.log(`    - ${rc.rootCauseCategory ?? ''}: ${rc.rootCauseDescription ?? ''}`);
+          if (rc.recommendation) console.log(`      Recommendation: ${rc.recommendation}`);
+        }
+      }
+    }
+  } else if (record.evaluationResults?.evaluatorSummaries?.length) {
+    console.log('\nEvaluation Results:');
+    for (const s of record.evaluationResults.evaluatorSummaries) {
+      const avg = s.statistics?.averageScore;
+      console.log(`  ${s.evaluatorId}: ${avg != null ? avg.toFixed(2) : 'N/A'}`);
+    }
   }
 }
 

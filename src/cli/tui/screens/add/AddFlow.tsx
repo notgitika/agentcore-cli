@@ -17,6 +17,7 @@ import { AddKnowledgeBaseFlow } from '../knowledge-base';
 import { AddGatewayFlow, AddGatewayTargetFlow } from '../mcp';
 import { AddMemoryFlow } from '../memory/AddMemoryFlow';
 import { AddOnlineEvalFlow } from '../online-eval';
+import { AddOnlineInsightsFlow } from '../online-insights';
 import { AddPaymentFlow } from '../payment';
 import { AddPolicyFlow } from '../policy';
 import { AddRuntimeEndpointFlow } from '../runtime-endpoint';
@@ -38,6 +39,7 @@ type FlowState =
   | { name: 'identity-wizard' }
   | { name: 'evaluator-wizard' }
   | { name: 'online-eval-wizard' }
+  | { name: 'online-insights-wizard' }
   | { name: 'policy-wizard' }
   | { name: 'dataset-wizard' }
   | { name: 'config-bundle-wizard' }
@@ -196,6 +198,8 @@ function getInitialFlowState(resource?: AddResourceType): FlowState {
       return { name: 'evaluator-wizard' };
     case 'online-eval':
       return { name: 'online-eval-wizard' };
+    case 'online-insights':
+      return { name: 'online-insights-wizard' };
     case 'policy':
       return { name: 'policy-wizard' };
     case 'runtime-endpoint':
@@ -259,6 +263,9 @@ export function AddFlow(props: AddFlowProps) {
         break;
       case 'online-eval':
         setFlow({ name: 'online-eval-wizard' });
+        break;
+      case 'online-insights':
+        setFlow({ name: 'online-insights-wizard' });
         break;
       case 'policy':
         setFlow({ name: 'policy-wizard' });
@@ -524,6 +531,19 @@ export function AddFlow(props: AddFlowProps) {
   if (flow.name === 'online-eval-wizard') {
     return (
       <AddOnlineEvalFlow
+        isInteractive={props.isInteractive}
+        onExit={props.onExit}
+        onBack={() => setFlow({ name: 'select' })}
+        onDev={props.onDev}
+        onDeploy={props.onDeploy}
+      />
+    );
+  }
+
+  // Online insights wizard
+  if (flow.name === 'online-insights-wizard') {
+    return (
+      <AddOnlineInsightsFlow
         isInteractive={props.isInteractive}
         onExit={props.onExit}
         onBack={() => setFlow({ name: 'select' })}

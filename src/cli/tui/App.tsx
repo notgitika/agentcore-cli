@@ -15,6 +15,7 @@ import { EvalHubScreen, EvalScreen } from './screens/eval';
 import { FetchAccessScreen } from './screens/fetch-access';
 import { HelpScreen, HomeScreen } from './screens/home';
 import { ImportFlow } from './screens/import';
+import { InsightsJobsScreen } from './screens/insights-jobs';
 import { InvokeScreen } from './screens/invoke';
 import { LogsScreen } from './screens/logs';
 import { OnlineEvalDashboard } from './screens/online-eval';
@@ -57,6 +58,7 @@ type Route =
   | { name: 'run-batch-eval'; from?: 'run' | 'evals' }
   | { name: 'run-ingest'; from?: 'run' }
   | { name: 'batch-eval-history' }
+  | { name: 'insights-jobs' }
   | { name: 'recommendations-hub' }
   | { name: 'recommend'; from?: 'recommendations-hub' | 'run' }
   | { name: 'recommendation-history' }
@@ -319,6 +321,8 @@ function AppContent({
           if (view === 'runs') setRoute({ name: 'eval-runs' });
           if (view === 'run-batch-eval') setRoute({ name: 'run-batch-eval', from: 'evals' });
           if (view === 'batch-eval-history') setRoute({ name: 'batch-eval-history' });
+          if (view === 'run-insights') setRoute({ name: 'cli-only', commandId: 'run-insights' });
+          if (view === 'insights-jobs') setRoute({ name: 'insights-jobs' });
           if (view === 'online-dashboard') setRoute({ name: 'online-evals' });
         }}
         onExit={handleBack}
@@ -353,6 +357,10 @@ function AppContent({
 
   if (route.name === 'batch-eval-history') {
     return <BatchEvalHistoryScreen onExit={() => setRoute({ name: 'evals' })} />;
+  }
+
+  if (route.name === 'insights-jobs') {
+    return <InsightsJobsScreen onExit={() => setRoute({ name: 'evals' })} />;
   }
 
   if (route.name === 'recommendations-hub') {

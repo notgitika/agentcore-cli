@@ -10,6 +10,7 @@ export type RemoveResourceType =
   | 'credential'
   | 'evaluator'
   | 'online-eval'
+  | 'online-insights'
   | 'policy-engine'
   | 'policy'
   | 'gateway'

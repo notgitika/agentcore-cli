@@ -49,7 +49,8 @@ export const COMMAND_DESCRIPTIONS = {
   recommend: '[preview] Run optimization recommendations for system prompts and tool descriptions.',
   recommendations: '[preview] View recommendation jobs and their results.',
   batchEvaluations: '[preview] View batch evaluation jobs and their results.',
-  run: 'Run evaluations, batch evaluations, or optimization recommendations.',
+  insights: '[preview] Manage insights analysis jobs.',
+  run: 'Run evaluations, batch evaluations, insights, or optimization recommendations.',
   stop: 'Stop a running batch evaluation or A/B test.',
   import: 'Import a runtime, memory, or starter toolkit into this project. [experimental]',
   telemetry: 'Manage anonymous usage analytics preferences.',
@@ -123,6 +124,14 @@ export const CLI_ONLY_EXAMPLES: Record<string, { description: string; examples: 
       'agentcore archive recommendation -i <recommendation-id>',
       'agentcore archive recommendation -i <recommendation-id> --region us-west-2',
       'agentcore archive recommendation -i <recommendation-id> --json',
+    ],
+  },
+  'run-insights': {
+    description: 'Run failure analysis on agent sessions. This command runs in the terminal.',
+    examples: [
+      'agentcore run insights -r MyAgent -i FailureAnalysis',
+      'agentcore run insights -r MyAgent -i FailureAnalysis --lookback 7',
+      'agentcore run insights -r MyAgent -i FailureAnalysis --wait',
     ],
   },
 };

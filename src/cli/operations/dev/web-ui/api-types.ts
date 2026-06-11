@@ -208,7 +208,8 @@ export interface ResourceEvaluator {
 export interface ResourceOnlineEvalConfig {
   name: string;
   agent: string;
-  evaluators: string[];
+  evaluators?: string[];
+  insights?: string[];
   samplingRate: number;
   description?: string;
   deploymentStatus?: ResourceDeploymentStatus;

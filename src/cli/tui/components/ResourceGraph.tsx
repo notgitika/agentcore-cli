@@ -326,7 +326,7 @@ export function ResourceGraph({ project, mcp, agentName, resourceStatuses }: Res
           <SectionHeader>Online Eval Configs</SectionHeader>
           {onlineEvalConfigs.map(config => {
             const rsEntry = statusMap.get(`online-eval:${config.name}`);
-            const defaultDetail = `${config.evaluators.length} evaluator${config.evaluators.length !== 1 ? 's' : ''} — ${config.samplingRate}% sampling`;
+            const defaultDetail = `${(config.evaluators ?? []).length} evaluator${(config.evaluators ?? []).length !== 1 ? 's' : ''} — ${config.samplingRate}% sampling`;
             return (
               <ResourceRow
                 key={config.name}

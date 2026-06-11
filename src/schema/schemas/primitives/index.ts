@@ -59,8 +59,8 @@ export {
   RatingScaleSchema,
 } from './evaluator';
 
-export type { OnlineEvalConfig } from './online-eval-config';
-export { OnlineEvalConfigSchema, OnlineEvalConfigNameSchema } from './online-eval-config';
+export type { OnlineEvalConfig, ClusteringConfig } from './online-eval-config';
+export { OnlineEvalConfigSchema, OnlineEvalConfigNameSchema, ClusteringConfigSchema } from './online-eval-config';
 
 export type { Policy, PolicyEngine, ValidationMode } from './policy';
 export {

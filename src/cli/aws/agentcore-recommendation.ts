@@ -55,7 +55,7 @@ export interface SessionSpan {
   spanId: string;
 }
 
-/** Agent trace source — inline spans or CloudWatch Logs. */
+/** Agent trace source — inline spans, CloudWatch Logs, or batch evaluation. */
 export interface AgentTracesSource {
   sessionSpans?: SessionSpan[];
   cloudwatchLogs?: {
@@ -65,6 +65,9 @@ export interface AgentTracesSource {
     endTime: string;
     limit?: number;
     sessionIds?: string[];
+  };
+  batchEvaluation?: {
+    batchEvaluationArn: string;
   };
 }
 

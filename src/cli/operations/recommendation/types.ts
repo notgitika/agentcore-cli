@@ -10,7 +10,7 @@ export type { RecommendationType } from '../../aws/agentcore-recommendation';
 export type RecommendationInputSourceKind = 'config-bundle' | 'inline' | 'file';
 
 /** CLI-facing trace source kind (maps to API agentTraces shape). */
-export type TraceSourceKind = 'cloudwatch' | 'sessions' | 'spans-file';
+export type TraceSourceKind = 'cloudwatch' | 'sessions' | 'spans-file' | 'batch-evaluation';
 
 export interface RunRecommendationCommandOptions {
   /** What to optimize */
@@ -43,6 +43,10 @@ export interface RunRecommendationCommandOptions {
   sessionIds?: string[];
   /** Path to JSON file containing session spans (when traceSource is 'spans-file') */
   spansFile?: string;
+  /** Use a local insights run as trace source (resolves batchEvaluationArn from .cli/insights/) */
+  fromInsights?: string;
+  /** Use a batch evaluation ARN directly as trace source */
+  batchEvaluationArn?: string;
   /** Region override */
   region?: string;
   /** Optional recommendation name */

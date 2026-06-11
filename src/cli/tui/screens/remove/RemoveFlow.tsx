@@ -131,6 +131,7 @@ interface RemoveFlowProps {
     | 'credential'
     | 'evaluator'
     | 'online-eval'
+    | 'online-insights'
     | 'policy-engine'
     | 'policy'
     | 'config-bundle'
@@ -175,6 +176,8 @@ export function RemoveFlow({
       case 'knowledge-base':
         return { name: 'select-knowledge-base' };
       case 'online-eval':
+        return { name: 'select-online-eval' };
+      case 'online-insights':
         return { name: 'select-online-eval' };
       case 'policy-engine':
         return { name: 'select-policy-engine' };
@@ -779,6 +782,9 @@ export function RemoveFlow({
           void handleSelectEvaluator(initialResourceName);
           break;
         case 'online-eval':
+          void handleSelectOnlineEval(initialResourceName);
+          break;
+        case 'online-insights':
           void handleSelectOnlineEval(initialResourceName);
           break;
         case 'policy-engine':

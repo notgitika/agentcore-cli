@@ -11,6 +11,7 @@ import type { JobCapabilities, JobRecord, JobType } from './types';
 export const STORAGE_DIRS: Record<JobType, string> = {
   recommendation: 'recommendations',
   'batch-evaluation': 'batch-eval-results',
+  insights: 'insights',
 };
 
 /** Sentinel status set when a refresh GET 404s (job deleted on the service). Terminal for both types. */
@@ -31,12 +32,14 @@ export const TERMINAL_STATUSES: Record<JobType, ReadonlySet<string>> = {
     'CANCELLED',
     NOT_FOUND_STATUS,
   ]),
+  insights: new Set(['COMPLETED', 'COMPLETED_WITH_ERRORS', 'FAILED', 'STOPPED', NOT_FOUND_STATUS]),
 };
 
 /** Runtime capability flags (TUI display only; engine legality is enforced by types). */
 export const JOB_CAPABILITIES: Record<JobType, JobCapabilities> = {
   recommendation: { canStop: false },
   'batch-evaluation': { canStop: true },
+  insights: { canStop: false },
 };
 
 /** Batch-evaluation name rule: start with a letter, then letters/digits/underscores, max 48 chars. */

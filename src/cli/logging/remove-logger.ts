@@ -17,6 +17,7 @@ export interface RemoveLoggerOptions {
     | 'runtime-endpoint'
     | 'evaluator'
     | 'online-eval'
+    | 'online-insights'
     | 'policy-engine'
     | 'policy'
     | 'config-bundle'

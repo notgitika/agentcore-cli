@@ -12,6 +12,7 @@ import { HarnessPrimitive } from './HarnessPrimitive';
 import { KnowledgeBasePrimitive } from './KnowledgeBasePrimitive';
 import { MemoryPrimitive } from './MemoryPrimitive';
 import { OnlineEvalConfigPrimitive } from './OnlineEvalConfigPrimitive';
+import { OnlineInsightsPrimitive } from './OnlineInsightsPrimitive';
 import { PaymentConnectorPrimitive } from './PaymentConnectorPrimitive';
 import { PaymentManagerPrimitive } from './PaymentManagerPrimitive';
 import { PolicyEnginePrimitive } from './PolicyEnginePrimitive';
@@ -29,6 +30,7 @@ export const datasetPrimitive = new DatasetPrimitive();
 export const credentialPrimitive = new CredentialPrimitive();
 export const evaluatorPrimitive = new EvaluatorPrimitive();
 export const onlineEvalConfigPrimitive = new OnlineEvalConfigPrimitive();
+export const onlineInsightsPrimitive = new OnlineInsightsPrimitive();
 export const gatewayPrimitive = new GatewayPrimitive();
 export const gatewayTargetPrimitive = new GatewayTargetPrimitive();
 export const knowledgeBasePrimitive = new KnowledgeBasePrimitive();
@@ -51,6 +53,7 @@ export const ALL_PRIMITIVES: BasePrimitive<unknown, RemovableResource>[] = [
   credentialPrimitive,
   evaluatorPrimitive,
   onlineEvalConfigPrimitive,
+  onlineInsightsPrimitive,
   gatewayPrimitive,
   gatewayTargetPrimitive,
   knowledgeBasePrimitive,

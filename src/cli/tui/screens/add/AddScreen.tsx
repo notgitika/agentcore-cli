@@ -10,6 +10,7 @@ export type AddResourceType =
   | 'credential'
   | 'evaluator'
   | 'online-eval'
+  | 'online-insights'
   | 'gateway'
   | 'gateway-target'
   | 'runtime-endpoint'
@@ -27,6 +28,7 @@ const BASE_ADD_RESOURCES: { id: AddResourceType; title: string; description: str
   { id: 'credential', title: 'Credential', description: 'API key credential providers' },
   { id: 'evaluator', title: 'Evaluator', description: 'Custom LLM-as-a-Judge evaluator' },
   { id: 'online-eval', title: 'Online Eval Config', description: 'Continuous evaluation pipeline' },
+  { id: 'online-insights', title: 'Online Insights', description: 'Continuous failure analysis pipeline' },
   { id: 'gateway', title: 'Gateway', description: 'Route and manage gateway targets' },
   { id: 'gateway-target', title: 'Gateway Target', description: 'Extend agent capabilities' },
   { id: 'runtime-endpoint', title: 'Runtime Endpoint', description: 'Named endpoint for a runtime' },

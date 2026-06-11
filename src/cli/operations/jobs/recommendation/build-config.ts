@@ -109,6 +109,8 @@ export interface BuildConfigOptions {
   lookbackDays?: number;
   sessionIds?: string[];
   spansFile?: string;
+  fromInsights?: string;
+  batchEvaluationArn?: string;
   runtimeId: string;
   accountId: string;
   region: string;
@@ -123,10 +125,30 @@ export interface BuildConfigOptions {
  * the request, surfaced via onProgress, and throws on empty so the handler returns {success:false}.
  */
 export async function buildRecommendationConfig(opts: BuildConfigOptions): Promise<RecommendationConfig> {
-  // Build agent traces — either from a spans file (inline session spans) or CloudWatch
+  // Build agent traces — batch evaluation source, spans file, sessions, or CloudWatch
   let agentTraces;
 
-  if (opts.traceSource === 'spans-file' && opts.spansFile) {
+  if (opts.traceSource === 'batch-evaluation') {
+    let batchEvalArn: string;
+    if (opts.batchEvaluationArn) {
+      batchEvalArn = opts.batchEvaluationArn;
+    } else if (opts.fromInsights) {
+      const { loadRecord } = await import('../storage');
+      const record = loadRecord('insights', opts.fromInsights);
+      if (!record) {
+        throw new Error(`Insights run "${opts.fromInsights}" not found.`);
+      }
+      if (record.status !== 'COMPLETED' && record.status !== 'COMPLETED_WITH_ERRORS') {
+        throw new Error(
+          `Insights run "${opts.fromInsights}" has status ${record.status}. Only COMPLETED runs can be used as recommendation source.`
+        );
+      }
+      batchEvalArn = record.arn;
+    } else {
+      throw new Error('Either --from-insights or --batch-evaluation-arn is required for batch-evaluation trace source.');
+    }
+    agentTraces = { batchEvaluation: { batchEvaluationArn: batchEvalArn } };
+  } else if (opts.traceSource === 'spans-file' && opts.spansFile) {
     // Explicit spans file — read and use as inline sessionSpans
     const spansContent = readFileSync(opts.spansFile, 'utf-8');
     const sessionSpans = JSON.parse(spansContent) as SessionSpan | SessionSpan[];

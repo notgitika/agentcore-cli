@@ -8,6 +8,7 @@ import type { Result } from '../../../lib/result';
 import { validateAwsCredentials } from '../../aws/account';
 import { batchEvaluationHandler } from './batch-evaluation/handler';
 import { JOB_CAPABILITIES, isTerminal } from './constants';
+import { insightsHandler } from './insights/handler';
 import { recommendationHandler } from './recommendation/handler';
 import { deleteRecord, listRecords, loadRecord, saveRecord } from './storage';
 import type {
@@ -26,6 +27,7 @@ import type {
 const handlers = {
   recommendation: recommendationHandler,
   'batch-evaluation': batchEvaluationHandler,
+  insights: insightsHandler,
 } as const satisfies HandlerByType;
 
 /** Does this handler compose the optional Settles trait? */

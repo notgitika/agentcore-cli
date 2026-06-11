@@ -10,29 +10,31 @@ import { BasePrimitive } from './BasePrimitive';
 import type { AddResult, AddScreenComponent, RemovableResource } from './types';
 import type { Command } from '@commander-js/extra-typings';
 
-export interface AddOnlineEvalConfigOptions {
+export interface AddOnlineInsightsOptions {
   name: string;
   agent: string;
-  evaluators: string[];
+  insights: string[];
   samplingRate: number;
+  clusteringFrequencies?: string[];
   enableOnCreate?: boolean;
   endpoint?: string;
 }
 
-export type RemovableOnlineEvalConfig = RemovableResource;
+export type RemovableOnlineInsightsConfig = RemovableResource;
 
 /**
- * OnlineEvalConfigPrimitive handles all online eval config add/remove operations.
+ * OnlineInsightsPrimitive handles add/remove operations for online insights configs.
+ * These are online eval configs that use insights (not evaluators).
  */
-export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfigOptions, RemovableOnlineEvalConfig> {
-  readonly kind = 'online-eval' as const;
-  readonly label = 'Online Eval Config';
+export class OnlineInsightsPrimitive extends BasePrimitive<AddOnlineInsightsOptions, RemovableOnlineInsightsConfig> {
+  readonly kind = 'online-insights' as const;
+  readonly label = 'Online Insights Config';
   override readonly article = 'an';
   readonly primitiveSchema = OnlineEvalConfigSchema;
 
-  async add(options: AddOnlineEvalConfigOptions): Promise<AddResult<{ configName: string }>> {
+  async add(options: AddOnlineInsightsOptions): Promise<AddResult<{ configName: string }>> {
     try {
-      const config = await this.createOnlineEvalConfig(options);
+      const config = await this.createOnlineInsightsConfig(options);
       return { success: true, configName: config.name };
     } catch (err) {
       return { success: false, error: toError(err) };
@@ -43,9 +45,14 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
     try {
       const project = await this.readProjectSpec();
 
-      const index = project.onlineEvalConfigs.findIndex(c => c.name === configName);
+      const index = project.onlineEvalConfigs.findIndex(
+        c => c.name === configName && c.insights && c.insights.length > 0
+      );
       if (index === -1) {
-        return { success: false, error: new ResourceNotFoundError(`Online eval config "${configName}" not found.`) };
+        return {
+          success: false,
+          error: new ResourceNotFoundError(`Online insights config "${configName}" not found.`),
+        };
       }
 
       project.onlineEvalConfigs.splice(index, 1);
@@ -60,18 +67,15 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
   async previewRemove(configName: string): Promise<RemovalPreview> {
     const project = await this.readProjectSpec();
 
-    const config = project.onlineEvalConfigs.find(c => c.name === configName);
+    const config = project.onlineEvalConfigs.find(c => c.name === configName && c.insights && c.insights.length > 0);
     if (!config) {
-      throw new Error(`Online eval config "${configName}" not found.`);
+      throw new Error(`Online insights config "${configName}" not found.`);
     }
 
-    const summary: string[] = [`Removing online eval config: ${configName}`];
-    if (config.evaluators && config.evaluators.length > 0) {
-      summary.push(`Uses evaluators: ${config.evaluators.join(', ')}`);
-    }
-    if (config.insights && config.insights.length > 0) {
-      summary.push(`Uses insights: ${config.insights.join(', ')}`);
-    }
+    const summary: string[] = [
+      `Removing online insights config: ${configName}`,
+      `Uses insights: ${(config.insights ?? []).join(', ')}`,
+    ];
     const schemaChanges: SchemaChange[] = [];
 
     const afterSpec = {
@@ -88,10 +92,10 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
     return { summary, directoriesToDelete: [], schemaChanges };
   }
 
-  async getRemovable(): Promise<RemovableOnlineEvalConfig[]> {
+  async getRemovable(): Promise<RemovableOnlineInsightsConfig[]> {
     try {
       const project = await this.readProjectSpec();
-      return project.onlineEvalConfigs.map(c => ({ name: c.name }));
+      return project.onlineEvalConfigs.filter(c => c.insights && c.insights.length > 0).map(c => ({ name: c.name }));
     } catch {
       return [];
     }
@@ -100,7 +104,7 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
   async getAllNames(): Promise<string[]> {
     try {
       const project = await this.readProjectSpec();
-      return project.onlineEvalConfigs.map(c => c.name);
+      return project.onlineEvalConfigs.filter(c => c.insights && c.insights.length > 0).map(c => c.name);
     } catch {
       return [];
     }
@@ -108,23 +112,26 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
 
   registerCommands(addCmd: Command, removeCmd: Command): void {
     addCmd
-      .command('online-eval')
-      .description('Add an online eval config to the project')
+      .command('online-insights')
+      .description('Add an online insights config to the project')
       .option('--name <name>', 'Config name [non-interactive]')
       .option('-r, --runtime <name>', 'Runtime to monitor [non-interactive]')
-      .option('-e, --evaluator <evaluators...>', 'Evaluator name(s), Builtin.* IDs, or ARNs [non-interactive]')
-      .option('--evaluator-arn <arns...>', 'Evaluator ARN(s) [non-interactive]')
+      .option('--insights <insights...>', 'Insight IDs (e.g. Builtin.Insight.FailureAnalysis) [non-interactive]')
       .option('--sampling-rate <rate>', 'Sampling percentage (0.01-100) [non-interactive]')
+      .option(
+        '--clustering-frequency <frequencies...>',
+        'Clustering frequencies: DAILY, WEEKLY, MONTHLY [non-interactive]'
+      )
       .option('--endpoint <name>', 'Runtime endpoint name to scope monitoring [non-interactive]')
-      .option('--enable-on-create', 'Enable evaluation immediately after deploy [non-interactive]')
+      .option('--enable-on-create', 'Enable insights immediately after deploy [non-interactive]')
       .option('--json', 'Output as JSON [non-interactive]')
       .action(
         async (cliOptions: {
           name?: string;
           runtime?: string;
-          evaluator?: string[];
-          evaluatorArn?: string[];
+          insights?: string[];
           samplingRate?: string;
+          clusteringFrequency?: string[];
           endpoint?: string;
           enableOnCreate?: boolean;
           json?: boolean;
@@ -135,17 +142,13 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
           }
 
           if (cliOptions.name || cliOptions.json) {
-            // Merge --evaluator and --evaluator-arn into a single list
-            const allEvaluators = [...(cliOptions.evaluator ?? []), ...(cliOptions.evaluatorArn ?? [])];
-
-            await runCliCommand('add.online-eval', !!cliOptions.json, async () => {
-              if (!cliOptions.name || !cliOptions.runtime || allEvaluators.length === 0 || !cliOptions.samplingRate) {
+            await runCliCommand('add.online-insights', !!cliOptions.json, async () => {
+              if (!cliOptions.name || !cliOptions.runtime || !cliOptions.insights?.length || !cliOptions.samplingRate) {
                 throw new Error(
-                  '--name, --runtime, --evaluator (and/or --evaluator-arn), and --sampling-rate are all required in non-interactive mode'
+                  '--name, --runtime, --insights, and --sampling-rate are all required in non-interactive mode'
                 );
               }
 
-              // Sampling rate as a percentage of requests to evaluate (0.01% to 100%)
               const samplingRate = parseFloat(cliOptions.samplingRate);
               if (isNaN(samplingRate) || samplingRate < 0.01 || samplingRate > 100) {
                 throw new Error(
@@ -156,8 +159,9 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
               const result = await this.add({
                 name: cliOptions.name,
                 agent: cliOptions.runtime,
-                evaluators: allEvaluators,
+                insights: cliOptions.insights,
                 samplingRate,
+                clusteringFrequencies: cliOptions.clusteringFrequency,
                 enableOnCreate: cliOptions.enableOnCreate,
                 endpoint: cliOptions.endpoint,
               });
@@ -169,17 +173,16 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
               if (cliOptions.json) {
                 console.log(JSON.stringify(serializeResult(result)));
               } else {
-                console.log(`Added online eval config '${result.configName}'`);
+                console.log(`Added online insights config '${result.configName}'`);
               }
 
               return {
-                evaluator_count: allEvaluators.length,
+                insights_count: cliOptions.insights.length,
                 enable_on_create: cliOptions.enableOnCreate ?? false,
               };
             });
           } else {
             try {
-              // TUI fallback
               requireTTY();
               const [{ render }, { default: React }, { AddFlow }] = await Promise.all([
                 import('ink'),
@@ -189,7 +192,7 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
               const { clear, unmount } = render(
                 React.createElement(AddFlow, {
                   isInteractive: false,
-                  initialResource: 'online-eval',
+                  initialResource: 'online-insights',
                   onExit: () => {
                     clear();
                     unmount();
@@ -212,10 +215,10 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
     return null;
   }
 
-  private async createOnlineEvalConfig(options: AddOnlineEvalConfigOptions): Promise<OnlineEvalConfig> {
+  private async createOnlineInsightsConfig(options: AddOnlineInsightsOptions): Promise<OnlineEvalConfig> {
     const project = await this.readProjectSpec();
 
-    this.checkDuplicate(project.onlineEvalConfigs, options.name, 'Online eval config');
+    this.checkDuplicate(project.onlineEvalConfigs, options.name, 'Online insights config');
 
     // Validate that the endpoint exists on the specified runtime if provided
     if (options.endpoint) {
@@ -235,8 +238,13 @@ export class OnlineEvalConfigPrimitive extends BasePrimitive<AddOnlineEvalConfig
     const config: OnlineEvalConfig = {
       name: options.name,
       agent: options.agent,
-      evaluators: options.evaluators,
+      insights: options.insights,
       samplingRate: options.samplingRate,
+      ...(options.clusteringFrequencies?.length && {
+        clusteringConfig: {
+          frequencies: options.clusteringFrequencies as ('DAILY' | 'WEEKLY' | 'MONTHLY')[],
+        },
+      }),
       ...(options.enableOnCreate !== undefined && { enableOnCreate: options.enableOnCreate }),
       ...(options.endpoint && { endpoint: options.endpoint }),
     };

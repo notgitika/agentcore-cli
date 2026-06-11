@@ -228,7 +228,7 @@ export function computeResourceStatuses(
     deployedRecord: resources?.onlineEvalConfigs ?? {},
     getIdentifier: deployed => deployed.onlineEvaluationConfigArn,
     getLocalDetail: item =>
-      `${item.evaluators.length} evaluator${item.evaluators.length !== 1 ? 's' : ''}, ${item.samplingRate}% sampling`,
+      `${(item.evaluators ?? []).length} evaluator${(item.evaluators ?? []).length !== 1 ? 's' : ''}, ${item.samplingRate}% sampling`,
   });
 
   const policyEngines = diffResourceSet({
