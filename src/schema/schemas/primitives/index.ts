@@ -62,8 +62,10 @@ export {
 export type { OnlineEvalConfig, ClusteringConfig } from './online-eval-config';
 export { OnlineEvalConfigSchema, OnlineEvalConfigNameSchema, ClusteringConfigSchema } from './online-eval-config';
 
-export type { Policy, PolicyEngine, ValidationMode } from './policy';
+export type { AuthorizationPhase, EnforcementMode, Policy, PolicyEngine, ValidationMode } from './policy';
 export {
+  AuthorizationPhaseSchema,
+  EnforcementModeSchema,
   PolicyEngineNameSchema,
   PolicyEngineSchema,
   PolicyNameSchema,

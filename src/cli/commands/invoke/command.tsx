@@ -139,6 +139,8 @@ export const registerInvoke = (program: Command) => {
       'Read the prompt from a file (for long or structured payloads that exceed shell arg limits) [non-interactive]'
     )
     .option('--runtime <name>', 'Select specific runtime [non-interactive]')
+    .option('--gateway <name>', 'Invoke through a gateway [non-interactive]')
+    .option('--gateway-target-name <name>', 'HTTP runtime target on the gateway [non-interactive]')
     .option('--target <name>', 'Select deployment target [non-interactive]')
     .option('--session-id <id>', 'Use specific session ID for conversation continuity')
     .option('--user-id <id>', 'User ID for runtime invocation (default: "default-user")')
@@ -300,6 +302,8 @@ Model & Runtime Overrides (harness only) [non-interactive] [preview]
         prompt?: string;
         promptFile?: string;
         runtime?: string;
+        gateway?: string;
+        gatewayTargetName?: string;
         target?: string;
         sessionId?: string;
         userId?: string;
@@ -366,8 +370,10 @@ Model & Runtime Overrides (harness only) [non-interactive] [preview]
           resolved.prompt !== undefined ||
           cliOptions.json ||
           cliOptions.target ||
+          cliOptions.gatewayTargetName ||
           cliOptions.stream ||
           cliOptions.runtime ||
+          cliOptions.gateway ||
           cliOptions.tool ||
           cliOptions.exec ||
           cliOptions.bearerToken ||
@@ -407,6 +413,8 @@ Model & Runtime Overrides (harness only) [non-interactive] [preview]
               const options: InvokeOptions = {
                 prompt: resolved.prompt,
                 agentName: cliOptions.runtime,
+                gateway: cliOptions.gateway,
+                gatewayTarget: cliOptions.gatewayTargetName,
                 targetName: cliOptions.target ?? 'default',
                 sessionId: cliOptions.sessionId,
                 userId: cliOptions.userId,

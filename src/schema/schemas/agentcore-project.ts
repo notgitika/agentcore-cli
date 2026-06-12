@@ -77,8 +77,15 @@ export { ConfigBundleSchema };
 export type { ComponentConfiguration, ComponentConfigurationMap, ConfigBundle } from './primitives/config-bundle';
 export { ConfigBundleNameSchema, ComponentConfigurationMapSchema } from './primitives/config-bundle';
 export { PolicyEngineSchema };
-export type { Policy, PolicyEngine, ValidationMode } from './primitives/policy';
-export { PolicyEngineNameSchema, PolicyNameSchema, PolicySchema, ValidationModeSchema } from './primitives/policy';
+export type { AuthorizationPhase, EnforcementMode, Policy, PolicyEngine, ValidationMode } from './primitives/policy';
+export {
+  AuthorizationPhaseSchema,
+  EnforcementModeSchema,
+  PolicyEngineNameSchema,
+  PolicyNameSchema,
+  PolicySchema,
+  ValidationModeSchema,
+} from './primitives/policy';
 export { TagsSchema };
 export type { Tags } from './primitives/tags';
 export { DatasetSchema };

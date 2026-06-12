@@ -1,7 +1,7 @@
 import { ResourceNotFoundError, ValidationError, findConfigRoot, serializeResult, toError } from '../../lib';
 import type { Result } from '../../lib/result';
 import type { Policy } from '../../schema';
-import { PolicySchema, ValidationModeSchema } from '../../schema';
+import { EnforcementModeSchema, PolicySchema, ValidationModeSchema } from '../../schema';
 import { detectRegion } from '../aws';
 import { getPolicyGeneration, startPolicyGeneration } from '../aws/policy-generation';
 import { getErrorMessage } from '../errors';
@@ -9,6 +9,7 @@ import type { RemovalPreview, SchemaChange } from '../operations/remove/types';
 import { runCliCommand, withCommandRunTelemetry } from '../telemetry/cli-command-run.js';
 import { PolicyValidationMode, standardize } from '../telemetry/schemas/common-shapes.js';
 import { requireTTY } from '../tui/guards/tty';
+import { type PolicyEffect, authorizationPhaseForEffect, defaultDataPathForEffect } from '../tui/screens/policy/types';
 import { BasePrimitive } from './BasePrimitive';
 import { SOURCE_CODE_NOTE } from './constants';
 import type { AddResult, AddScreenComponent, RemovableResource } from './types';
@@ -24,6 +25,8 @@ export interface AddPolicyOptions {
   generate?: string;
   gateway?: string;
   validationMode?: 'FAIL_ON_ANY_FINDINGS' | 'IGNORE_ALL_FINDINGS';
+  enforcementMode?: 'ACTIVE' | 'LOG_ONLY';
+  authorizationPhase?: 'INITIATE' | 'RETURN_OUTPUT';
 }
 
 export interface RemovablePolicyResource extends RemovableResource {
@@ -142,6 +145,8 @@ export class PolicyPrimitive extends BasePrimitive<AddPolicyOptions, RemovablePo
         statement,
         ...(options.source && { sourceFile: options.source }),
         validationMode: options.validationMode ?? 'FAIL_ON_ANY_FINDINGS',
+        enforcementMode: options.enforcementMode ?? 'ACTIVE',
+        ...(options.authorizationPhase && { authorizationPhase: options.authorizationPhase }),
       };
 
       engine.policies.push(policy);
@@ -286,13 +291,30 @@ export class PolicyPrimitive extends BasePrimitive<AddPolicyOptions, RemovablePo
       .option('--name <name>', 'Policy name [non-interactive]')
       .option('--engine <engine>', 'Policy engine name [non-interactive]')
       .option('--description <desc>', 'Policy description [non-interactive]')
-      .option('--source <path>', 'Path to a Cedar policy file [non-interactive]')
-      .option('--statement <cedar>', 'Cedar policy statement [non-interactive]')
-      .option('-g, --generate <prompt>', 'Generate Cedar policy from natural language description [non-interactive]')
+      .option('--source <path>', 'Path to a policy file [non-interactive]')
+      .option('--statement <cedar>', 'Policy statement [non-interactive]')
+      .option('-g, --generate <prompt>', 'Generate policy from natural language description [non-interactive]')
       .option('--gateway <name>', 'Deployed gateway name for policy generation [non-interactive]')
+      .option(
+        '--form-category <type>',
+        'Guardrail category: contentFilter, promptAttack, or sensitiveInformation [non-interactive]'
+      )
+      .option('--form-filters <list>', 'Comma-separated filters for the chosen category [non-interactive]')
+      .option(
+        '--form-effect <effect>',
+        'Policy effect: forbid, permit, or suppressOutput (default: forbid) [non-interactive]'
+      )
+      .option(
+        '--form-data-path <path>',
+        'Data path to evaluate, e.g. context.input.message (default: context.input.message) [non-interactive]'
+      )
       .option(
         '--validation-mode <mode>',
         'Validation mode: FAIL_ON_ANY_FINDINGS or IGNORE_ALL_FINDINGS [non-interactive]'
+      )
+      .option(
+        '--enforcement-mode <mode>',
+        'Enforcement mode: ACTIVE (enforce decisions) or LOG_ONLY (shadow mode) (default: ACTIVE) [non-interactive]'
       )
       .option('--json', 'Output as JSON [non-interactive]')
       .action(
@@ -304,7 +326,12 @@ export class PolicyPrimitive extends BasePrimitive<AddPolicyOptions, RemovablePo
           statement?: string;
           generate?: string;
           gateway?: string;
+          formCategory?: string;
+          formFilters?: string;
+          formEffect?: string;
+          formDataPath?: string;
           validationMode?: string;
+          enforcementMode?: string;
           json?: boolean;
         }) => {
           if (!findConfigRoot()) {
@@ -318,6 +345,7 @@ export class PolicyPrimitive extends BasePrimitive<AddPolicyOptions, RemovablePo
             cliOptions.source ||
             cliOptions.statement ||
             cliOptions.generate ||
+            cliOptions.formCategory ||
             cliOptions.json
           ) {
             await runCliCommand('add.policy', !!cliOptions.json, async () => {
@@ -328,7 +356,23 @@ export class PolicyPrimitive extends BasePrimitive<AddPolicyOptions, RemovablePo
                 throw new Error('--engine is required');
               }
 
-              const result = await this.add({
+              // Validate mutual exclusion of source flags
+              const sourceFlags = [
+                cliOptions.statement,
+                cliOptions.source,
+                cliOptions.generate,
+                cliOptions.formCategory,
+              ].filter(Boolean);
+              if (sourceFlags.length > 1) {
+                throw new Error('Only one of --statement, --source, --generate, or --form-* can be provided.');
+              }
+
+              if (cliOptions.enforcementMode && !EnforcementModeSchema.safeParse(cliOptions.enforcementMode).success) {
+                throw new Error('Invalid --enforcement-mode. Use ACTIVE or LOG_ONLY.');
+              }
+
+              // Handle form mode: synthesize Cedar from category/filters/thresholds
+              let effectiveOptions: AddPolicyOptions = {
                 name: cliOptions.name,
                 engine: cliOptions.engine,
                 description: cliOptions.description,
@@ -339,7 +383,49 @@ export class PolicyPrimitive extends BasePrimitive<AddPolicyOptions, RemovablePo
                 validationMode: cliOptions.validationMode
                   ? ValidationModeSchema.parse(cliOptions.validationMode)
                   : undefined,
-              });
+                enforcementMode: cliOptions.enforcementMode
+                  ? EnforcementModeSchema.parse(cliOptions.enforcementMode)
+                  : undefined,
+                authorizationPhase: 'INITIATE',
+              };
+
+              if (cliOptions.formCategory) {
+                if (!cliOptions.formFilters) {
+                  throw new Error('--form-filters is required when --form-category is specified.');
+                }
+                const allowedCategories = ['contentFilter', 'promptAttack', 'sensitiveInformation'];
+                if (!allowedCategories.includes(cliOptions.formCategory)) {
+                  throw new Error(
+                    `Unknown category: ${cliOptions.formCategory}. Allowed: ${allowedCategories.join(', ')}`
+                  );
+                }
+                const effect = cliOptions.formEffect ?? 'forbid';
+                if (!['permit', 'forbid', 'suppressOutput'].includes(effect)) {
+                  throw new Error('Invalid --form-effect. Use permit, forbid, or suppressOutput.');
+                }
+                const policyEffect = effect as PolicyEffect;
+                const filters = cliOptions.formFilters.split(',').map(s => s.trim());
+
+                const { synthesizeCedar } = await import('../tui/screens/policy/synthesize-cedar');
+
+                const statement = synthesizeCedar(
+                  {
+                    category: cliOptions.formCategory as 'contentFilter' | 'promptAttack' | 'sensitiveInformation',
+                    filters,
+                    effect: policyEffect,
+                    dataPath: cliOptions.formDataPath ?? defaultDataPathForEffect(policyEffect),
+                  },
+                  { targetName: cliOptions.gateway ?? undefined }
+                );
+                // Output-phase effects (suppressOutput) must register on RETURN_OUTPUT.
+                effectiveOptions = {
+                  ...effectiveOptions,
+                  statement,
+                  authorizationPhase: authorizationPhaseForEffect(policyEffect),
+                };
+              }
+
+              const result = await this.add(effectiveOptions);
 
               if (!result.success) {
                 throw result.error;
@@ -351,11 +437,13 @@ export class PolicyPrimitive extends BasePrimitive<AddPolicyOptions, RemovablePo
                 console.log(`Added policy '${result.policyName}' to engine '${result.engineName}'`);
               }
 
-              const sourceType: 'file' | 'statement' | 'generate' = cliOptions.source
+              const sourceType: 'file' | 'statement' | 'generate' | 'form' = cliOptions.source
                 ? 'file'
                 : cliOptions.generate
                   ? 'generate'
-                  : 'statement';
+                  : cliOptions.formCategory
+                    ? 'form'
+                    : 'statement';
               return {
                 policy_attr_source_type: sourceType,
                 policy_validation_mode: standardize(

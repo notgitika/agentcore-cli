@@ -198,6 +198,7 @@ export const registerDeploy = (program: Command) => {
               target: cliOptions.target ?? 'default',
               progress: !cliOptions.json,
             };
+
             await handleDeployCLI(options as DeployOptions);
           } else if (cliOptions.diff) {
             // Diff-only: use TUI with diff mode

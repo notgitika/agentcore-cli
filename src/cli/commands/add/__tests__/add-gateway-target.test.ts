@@ -22,7 +22,7 @@ describe('add gateway-target command', () => {
     }
     projectDir = join(testDir, projectName);
 
-    // Create gateway for tests
+    // Create gateway for tests with MCP protocol (required for mcpServer and lambdaFunctionArn targets)
     const gwResult = await runCLI(
       ['add', 'gateway', '--name', gatewayName, '--protocol-type', 'MCP', '--json'],
       projectDir

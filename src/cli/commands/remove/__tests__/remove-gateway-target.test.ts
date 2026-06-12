@@ -46,7 +46,7 @@ describe('remove gateway-target command', () => {
 
   describe('remove existing-endpoint target', () => {
     it('removes target from gateway', async () => {
-      // Create a fresh gateway
+      // Create a fresh gateway with MCP protocol (required for mcp-server targets)
       const tempGateway = `TempGw${Date.now()}`;
       const gwResult = await runCLI(
         ['add', 'gateway', '--name', tempGateway, '--protocol-type', 'MCP', '--json'],

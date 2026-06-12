@@ -92,7 +92,7 @@ export const RecommendationKind = z.enum(['system-prompt', 'tool-description']);
 export const RecommendationInputSource = z.enum(['config-bundle', 'inline', 'file']);
 export const RecommendationTraceSource = z.enum(['cloudwatch', 'sessions', 'spans-file']);
 export const BatchEvalSource = z.enum(['traces', 'dataset']);
-export const PolicyAttrSourceType = z.enum(['file', 'statement', 'generate']);
+export const PolicyAttrSourceType = z.enum(['file', 'statement', 'generate', 'form']);
 export const PolicyValidationMode = z.enum(['fail_on_any_findings', 'ignore_all_findings']);
 
 export const ErrorName = z.enum([

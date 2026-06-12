@@ -201,6 +201,20 @@ export class PolicyEnginePrimitive extends BasePrimitive<AddPolicyEngineOptions,
     }
   }
 
+  async getProjectGateways(): Promise<{ name: string; httpTargets: string[] }[]> {
+    try {
+      const project = await this.readProjectSpec();
+      return project.agentCoreGateways.map(gw => ({
+        name: gw.name,
+        httpTargets: (gw.targets || [])
+          .filter((t: { targetType?: string }) => t.targetType === 'httpRuntime')
+          .map((t: { name: string }) => t.name),
+      }));
+    } catch {
+      return [];
+    }
+  }
+
   registerCommands(addCmd: Command, removeCmd: Command): void {
     addCmd
       .command('policy-engine')

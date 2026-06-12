@@ -5,6 +5,10 @@ export interface InvokeOptions {
   harnessName?: string;
   /** Direct harness ARN — bypasses project config and deployed state resolution */
   harnessArn?: string;
+  /** Gateway name — invoke through a deployed gateway */
+  gateway?: string;
+  /** Gateway target name (httpRuntime target on the gateway) */
+  gatewayTarget?: string;
   /** AWS region (used with --harness-arn) */
   region?: string;
   targetName?: string;
