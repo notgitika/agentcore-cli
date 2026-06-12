@@ -1,4 +1,9 @@
-import type { CustomClaimValidation, EndpointIpAddressType, PrivateEndpoint, PrivateEndpointOverride } from '../../../../schema';
+import type {
+  CustomClaimValidation,
+  EndpointIpAddressType,
+  PrivateEndpoint,
+  PrivateEndpointOverride,
+} from '../../../../schema';
 import type {
   ClaimsManagerMode,
   ConstraintType,
@@ -125,7 +130,9 @@ export function useJwtConfigFlow({ onComplete, onBack, enablePrivateEndpoint = f
         privateEndpointType === 'lattice' && domainOverrides.length > 0
           ? domainOverrides.map(o => ({
               domain: o.domain,
-              privateEndpoint: { selfManagedLatticeResource: { resourceConfigurationIdentifier: o.resourceConfigurationId } },
+              privateEndpoint: {
+                selfManagedLatticeResource: { resourceConfigurationIdentifier: o.resourceConfigurationId },
+              },
             }))
           : undefined;
 
@@ -182,14 +189,17 @@ export function useJwtConfigFlow({ onComplete, onBack, enablePrivateEndpoint = f
       setDiscoveryUrl(url);
       setSubStep('constraintPicker');
     },
-    handleConstraintsPicked: useCallback((selectedIds: string[]) => {
-      const constraints = new Set(selectedIds as ConstraintType[]);
-      setSelectedConstraints(constraints);
-      const order: ConstraintType[] = ['audience', 'clients', 'scopes', 'customClaims'];
-      const first = order.find(c => constraints.has(c));
-      // Private-endpoint type follows the constraints block when enabled; else jump to clientId.
-      setSubStep(first ?? (enablePrivateEndpoint ? 'privateEndpointType' : 'clientId'));
-    }, [enablePrivateEndpoint]),
+    handleConstraintsPicked: useCallback(
+      (selectedIds: string[]) => {
+        const constraints = new Set(selectedIds as ConstraintType[]);
+        setSelectedConstraints(constraints);
+        const order: ConstraintType[] = ['audience', 'clients', 'scopes', 'customClaims'];
+        const first = order.find(c => constraints.has(c));
+        // Private-endpoint type follows the constraints block when enabled; else jump to clientId.
+        setSubStep(first ?? (enablePrivateEndpoint ? 'privateEndpointType' : 'clientId'));
+      },
+      [enablePrivateEndpoint]
+    ),
     handlePrivateEndpointType: (type: string) => {
       setPrivateEndpointType(type as PrivateEndpointType);
       // Step list recomputes from privateEndpointType; advance to the first step after it.
@@ -201,13 +211,10 @@ export function useJwtConfigFlow({ onComplete, onBack, enablePrivateEndpoint = f
       setLatticeResourceId(value);
       setSubStep('domainOverrides');
     },
-    handleDomainOverridesDone: useCallback(
-      (entries: DomainOverrideEntry[]) => {
-        setDomainOverrides(entries);
-        setSubStep('clientId');
-      },
-      []
-    ),
+    handleDomainOverridesDone: useCallback((entries: DomainOverrideEntry[]) => {
+      setDomainOverrides(entries);
+      setSubStep('clientId');
+    }, []),
     handleOverridesManagerModeChange: setOverridesManagerMode,
     handleVpcId: (value: string) => {
       setVpcId(value);

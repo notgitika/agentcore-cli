@@ -273,7 +273,6 @@ export function CreateScreen({ cwd, isInteractive, onExit, onNavigate }: CreateS
   }, [
     allSuccess,
     isInteractive,
-    flow.phase,
     flow.projectName,
     flow.steps,
     flow.addAgentConfig,

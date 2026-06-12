@@ -15,7 +15,9 @@ describe('SelfManagedLatticeResourceSchema', () => {
     expect(SelfManagedLatticeResourceSchema.safeParse({ resourceConfigurationIdentifier: RCFG }).success).toBe(true);
   });
   it('accepts a full VPC Lattice ARN', () => {
-    expect(SelfManagedLatticeResourceSchema.safeParse({ resourceConfigurationIdentifier: RCFG_ARN }).success).toBe(true);
+    expect(SelfManagedLatticeResourceSchema.safeParse({ resourceConfigurationIdentifier: RCFG_ARN }).success).toBe(
+      true
+    );
   });
   it('rejects a malformed identifier', () => {
     expect(SelfManagedLatticeResourceSchema.safeParse({ resourceConfigurationIdentifier: 'nope' }).success).toBe(false);
@@ -67,9 +69,9 @@ describe('ManagedVpcResourceSchema', () => {
 
 describe('PrivateEndpointSchema (exactly-one-of)', () => {
   it('accepts the lattice arm alone', () => {
-    expect(PrivateEndpointSchema.safeParse({ selfManagedLatticeResource: { resourceConfigurationIdentifier: RCFG } }).success).toBe(
-      true
-    );
+    expect(
+      PrivateEndpointSchema.safeParse({ selfManagedLatticeResource: { resourceConfigurationIdentifier: RCFG } }).success
+    ).toBe(true);
   });
   it('accepts the managed-vpc arm alone', () => {
     expect(
@@ -148,8 +150,11 @@ describe('CustomJwtAuthorizerConfigSchema with PrivateLink fields', () => {
       privateEndpoint: latticeEndpoint,
     }));
     expect(
-      CustomJwtAuthorizerConfigSchema.safeParse({ ...base, privateEndpoint: latticeEndpoint, privateEndpointOverrides: overrides })
-        .success
+      CustomJwtAuthorizerConfigSchema.safeParse({
+        ...base,
+        privateEndpoint: latticeEndpoint,
+        privateEndpointOverrides: overrides,
+      }).success
     ).toBe(true);
   });
   it('rejects more than 5 privateEndpointOverrides', () => {
@@ -158,8 +163,11 @@ describe('CustomJwtAuthorizerConfigSchema with PrivateLink fields', () => {
       privateEndpoint: latticeEndpoint,
     }));
     expect(
-      CustomJwtAuthorizerConfigSchema.safeParse({ ...base, privateEndpoint: latticeEndpoint, privateEndpointOverrides: overrides })
-        .success
+      CustomJwtAuthorizerConfigSchema.safeParse({
+        ...base,
+        privateEndpoint: latticeEndpoint,
+        privateEndpointOverrides: overrides,
+      }).success
     ).toBe(false);
   });
   it('still accepts a config with no PrivateLink fields (backwards compat)', () => {
@@ -174,7 +182,9 @@ describe('CustomJwtAuthorizerConfigSchema with PrivateLink fields', () => {
     });
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.issues.some(i => i.message.includes('only be used when privateEndpoint is also set'))).toBe(true);
+      expect(result.error.issues.some(i => i.message.includes('only be used when privateEndpoint is also set'))).toBe(
+        true
+      );
     }
   });
   it('rejects an override arm that mismatches the base arm (lattice base, vpc override)', () => {

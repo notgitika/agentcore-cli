@@ -1,5 +1,5 @@
-import { validateAddHarnessOptions } from '../validate';
 import type { AddHarnessCliOptions } from '../types';
+import { validateAddHarnessOptions } from '../validate';
 import { describe, expect, it } from 'vitest';
 
 const base: AddHarnessCliOptions = {

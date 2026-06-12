@@ -1,5 +1,10 @@
 import { setEnvVar } from '../../lib';
-import type { AgentCoreProjectSpec, CustomClaimValidation, PrivateEndpoint, PrivateEndpointOverride } from '../../schema';
+import type {
+  AgentCoreProjectSpec,
+  CustomClaimValidation,
+  PrivateEndpoint,
+  PrivateEndpointOverride,
+} from '../../schema';
 import { computeDefaultCredentialEnvVarName, computeManagedOAuthCredentialName } from './credential-utils';
 
 /** Flat JWT config from TUI/CLI (pre-schema-transformation). */

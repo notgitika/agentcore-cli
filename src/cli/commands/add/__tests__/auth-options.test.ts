@@ -181,7 +181,9 @@ describe('validateJwtAuthorizerOptions', () => {
       const overrides = JSON.stringify(
         Array.from({ length: 6 }, (_, i) => ({
           domain: `d${i}.example.com`,
-          privateEndpoint: { selfManagedLatticeResource: { resourceConfigurationIdentifier: 'rcfg-0123456789abcdefg' } },
+          privateEndpoint: {
+            selfManagedLatticeResource: { resourceConfigurationIdentifier: 'rcfg-0123456789abcdefg' },
+          },
         }))
       );
       const result = validateJwtAuthorizerOptions({ ...validBase, privateEndpointOverrides: overrides });
@@ -199,7 +201,9 @@ describe('validateJwtAuthorizerOptions', () => {
       const overrides = JSON.stringify([
         {
           domain: 'api.example.com',
-          privateEndpoint: { selfManagedLatticeResource: { resourceConfigurationIdentifier: 'rcfg-0123456789abcdefg' } },
+          privateEndpoint: {
+            selfManagedLatticeResource: { resourceConfigurationIdentifier: 'rcfg-0123456789abcdefg' },
+          },
         },
       ]);
       expect(
@@ -215,7 +219,9 @@ describe('validateJwtAuthorizerOptions', () => {
       const overrides = JSON.stringify([
         {
           domain: 'api.example.com',
-          privateEndpoint: { selfManagedLatticeResource: { resourceConfigurationIdentifier: 'rcfg-0123456789abcdefg' } },
+          privateEndpoint: {
+            selfManagedLatticeResource: { resourceConfigurationIdentifier: 'rcfg-0123456789abcdefg' },
+          },
         },
       ]);
       const result = validateJwtAuthorizerOptions({ ...validBase, privateEndpointOverrides: overrides });
@@ -247,8 +253,18 @@ describe('validateJwtAuthorizerOptions', () => {
 
     it('rejects duplicate override domains', () => {
       const overrides = JSON.stringify([
-        { domain: 'dup.example.com', privateEndpoint: { selfManagedLatticeResource: { resourceConfigurationIdentifier: 'rcfg-0123456789abcdefg' } } },
-        { domain: 'dup.example.com', privateEndpoint: { selfManagedLatticeResource: { resourceConfigurationIdentifier: 'rcfg-0123456789abcdefg' } } },
+        {
+          domain: 'dup.example.com',
+          privateEndpoint: {
+            selfManagedLatticeResource: { resourceConfigurationIdentifier: 'rcfg-0123456789abcdefg' },
+          },
+        },
+        {
+          domain: 'dup.example.com',
+          privateEndpoint: {
+            selfManagedLatticeResource: { resourceConfigurationIdentifier: 'rcfg-0123456789abcdefg' },
+          },
+        },
       ]);
       const result = validateJwtAuthorizerOptions({
         ...validBase,

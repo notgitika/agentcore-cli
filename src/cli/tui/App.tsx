@@ -11,6 +11,7 @@ import { CreateScreen } from './screens/create';
 import { DatasetFlow } from './screens/dataset-hub';
 import { DeployScreen } from './screens/deploy/DeployScreen';
 import { EvalHubScreen, EvalScreen } from './screens/eval';
+import { ExportHarnessFlow } from './screens/export';
 import { FetchAccessScreen } from './screens/fetch-access';
 import { HelpScreen, HomeScreen } from './screens/home';
 import { ImportFlow } from './screens/import';
@@ -76,6 +77,7 @@ type Route =
   | { name: 'config-bundle' }
   | { name: 'dataset' }
   | { name: 'import' }
+  | { name: 'export-harness' }
   | { name: 'cli-only'; commandId: string };
 
 // Commands that don't require being at the project root
@@ -187,6 +189,12 @@ function AppContent({
       setRoute({ name: 'config-bundle' });
     } else if (id === 'dataset') {
       setRoute({ name: 'dataset' });
+    } else if (id === 'export') {
+      if (!projectExists() && route.name === 'help') {
+        setHelpNotice(<MissingProjectMessage inTui />);
+        return;
+      }
+      setRoute({ name: 'export-harness' });
     }
   };
 
@@ -457,6 +465,17 @@ function AppContent({
 
   if (route.name === 'dataset') {
     return <DatasetFlow onExit={() => setRoute({ name: 'help' })} />;
+  }
+
+  if (route.name === 'export-harness') {
+    return (
+      <ExportHarnessFlow
+        isInteractive={isInteractive}
+        onExit={handleBack}
+        onBack={handleBack}
+        onDeploy={() => setRoute({ name: 'deploy' })}
+      />
+    );
   }
 
   if (route.name === 'cli-only') {

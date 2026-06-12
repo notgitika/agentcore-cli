@@ -1011,8 +1011,6 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
   const hasKnowledgeBases = (projectSpec?.knowledgeBases?.length ?? 0) > 0;
   const hasDatasets = (projectSpec?.datasets?.length ?? 0) > 0;
   const hasOnlineEvalConfigs = (projectSpec?.onlineEvalConfigs?.length ?? 0) > 0;
-  const hasHarnesses = (projectSpec?.harnesses?.length ?? 0) > 0;
-  const isPreview = isPreviewEnabled();
 
   const steps = useMemo(() => {
     if (diffMode) {
@@ -1049,8 +1047,6 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     needsKbHydration,
     hasDatasets,
     hasOnlineEvalConfigs,
-    hasHarnesses,
-    isPreview,
     context?.isTeardownDeploy,
     projectSpec,
   ]);

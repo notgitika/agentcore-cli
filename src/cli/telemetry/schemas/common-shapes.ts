@@ -99,6 +99,7 @@ export const PolicyValidationMode = z.enum(['fail_on_any_findings', 'ignore_all_
 
 export const ErrorName = z.enum([
   'AccessDeniedError',
+  'ExportHarnessError',
   'AgentAlreadyExistsError',
   'ArtifactSizeError',
   'AwsCredentialsError',

@@ -533,13 +533,22 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
         '--private-endpoint-vpc-id <vpc-id>',
         'PrivateLink: VPC id for a service-managed endpoint to the OIDC discovery endpoint (for CUSTOM_JWT)'
       )
-      .option('--private-endpoint-subnets <ids>', 'PrivateLink: comma-separated subnet IDs (with --private-endpoint-vpc-id)')
-      .option('--private-endpoint-ip-type <type>', 'PrivateLink: endpoint IP address type: IPV4 or IPV6 (with --private-endpoint-vpc-id)')
+      .option(
+        '--private-endpoint-subnets <ids>',
+        'PrivateLink: comma-separated subnet IDs (with --private-endpoint-vpc-id)'
+      )
+      .option(
+        '--private-endpoint-ip-type <type>',
+        'PrivateLink: endpoint IP address type: IPV4 or IPV6 (with --private-endpoint-vpc-id)'
+      )
       .option(
         '--private-endpoint-security-groups <ids>',
         'PrivateLink: comma-separated security group IDs, max 5 (with --private-endpoint-vpc-id)'
       )
-      .option('--private-endpoint-routing-domain <domain>', 'PrivateLink: routing domain (with --private-endpoint-vpc-id)')
+      .option(
+        '--private-endpoint-routing-domain <domain>',
+        'PrivateLink: routing domain (with --private-endpoint-vpc-id)'
+      )
       .option('--private-endpoint-tags <json>', 'PrivateLink: tags JSON object (with --private-endpoint-vpc-id)')
       .option(
         '--private-endpoint-overrides <json>',
@@ -696,7 +705,9 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
                         clientSecret: cliOptions.clientSecret,
                         privateEndpoint: this.buildPrivateEndpointFromFlags(cliOptions),
                         privateEndpointOverrides: cliOptions.privateEndpointOverrides
-                          ? (JSON.parse(cliOptions.privateEndpointOverrides) as JwtConfigOptions['privateEndpointOverrides'])
+                          ? (JSON.parse(
+                              cliOptions.privateEndpointOverrides
+                            ) as JwtConfigOptions['privateEndpointOverrides'])
                           : undefined,
                       }
                     : undefined,

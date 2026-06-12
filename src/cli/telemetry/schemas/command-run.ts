@@ -196,6 +196,16 @@ const PauseResumeOnlineEvalAttrs = safeSchema({ ref_type: RefType });
 
 const AddOnlineInsightsAttrs = safeSchema({ insights_count: Count, enable_on_create: z.boolean() });
 
+const ExportHarnessAttrs = safeSchema({
+  build_type: BuildType,
+  model_provider: ModelProvider,
+  has_memory: z.boolean(),
+  has_gateway: z.boolean(),
+  has_container: z.boolean(),
+  has_execution_limits: z.boolean(),
+  notes_count: Count,
+});
+
 const NoAttrs = safeSchema({});
 
 /*
@@ -286,6 +296,7 @@ export const COMMAND_SCHEMAS = {
   'telemetry.disable': NoAttrs,
   'telemetry.enable': NoAttrs,
   'telemetry.status': NoAttrs,
+  'export.harness': ExportHarnessAttrs,
 } as const satisfies Record<string, z.ZodObject<z.ZodRawShape>>;
 
 // ---------------------------------------------------------------------------

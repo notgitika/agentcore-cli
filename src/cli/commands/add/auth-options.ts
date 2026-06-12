@@ -138,7 +138,10 @@ function validatePrivateEndpointOptions(options: JwtAuthorizerCliOptions): Valid
       return { valid: false, error: '--private-endpoint-subnets is required with --private-endpoint-vpc-id' };
     }
     if (!options.privateEndpointIpType?.trim()) {
-      return { valid: false, error: '--private-endpoint-ip-type (IPV4 or IPV6) is required with --private-endpoint-vpc-id' };
+      return {
+        valid: false,
+        error: '--private-endpoint-ip-type (IPV4 or IPV6) is required with --private-endpoint-vpc-id',
+      };
     }
     let tags: unknown;
     if (options.privateEndpointTags) {
@@ -183,7 +186,8 @@ function validatePrivateEndpointOptions(options: JwtAuthorizerCliOptions): Valid
     if (!hasLattice && !hasVpc) {
       return {
         valid: false,
-        error: '--private-endpoint-overrides requires a base private endpoint (--private-endpoint-lattice-arn or --private-endpoint-vpc-id)',
+        error:
+          '--private-endpoint-overrides requires a base private endpoint (--private-endpoint-lattice-arn or --private-endpoint-vpc-id)',
       };
     }
     const baseArm = hasLattice ? 'selfManagedLatticeResource' : 'managedVpcResource';
@@ -191,7 +195,10 @@ function validatePrivateEndpointOptions(options: JwtAuthorizerCliOptions): Valid
     for (const [i, entry] of parsed.entries()) {
       const result = PrivateEndpointOverrideSchema.safeParse(entry);
       if (!result.success) {
-        return { valid: false, error: `Invalid private-endpoint override at index ${i}: ${result.error.issues[0]?.message}` };
+        return {
+          valid: false,
+          error: `Invalid private-endpoint override at index ${i}: ${result.error.issues[0]?.message}`,
+        };
       }
       const overrideArm = result.data.privateEndpoint.selfManagedLatticeResource
         ? 'selfManagedLatticeResource'

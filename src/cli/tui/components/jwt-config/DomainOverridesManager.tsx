@@ -23,7 +23,12 @@ export interface DomainOverridesManagerProps {
  * Only offered under the self-managed (VPC Lattice) arm, so every override is a lattice resource —
  * which is exactly what the service and the AWS Console expose.
  */
-export function DomainOverridesManager({ initialOverrides, onDone, onCancel, onModeChange }: DomainOverridesManagerProps) {
+export function DomainOverridesManager({
+  initialOverrides,
+  onDone,
+  onCancel,
+  onModeChange,
+}: DomainOverridesManagerProps) {
   const [overrides, setOverrides] = useState<DomainOverrideEntry[]>(initialOverrides);
   const [mode, setMode] = useState<DomainOverridesManagerMode>(initialOverrides.length > 0 ? 'list' : 'add');
   const [editIndex, setEditIndex] = useState(-1);

@@ -1,4 +1,8 @@
-import { LATTICE_RESOURCE_CONFIG_PATTERN, SECURITY_GROUP_ID_PATTERN, SUBNET_ID_PATTERN } from '../../../../schema/schemas/auth';
+import {
+  LATTICE_RESOURCE_CONFIG_PATTERN,
+  SECURITY_GROUP_ID_PATTERN,
+  SUBNET_ID_PATTERN,
+} from '../../../../schema/schemas/auth';
 import { useListNavigation, useMultiSelectNavigation } from '../../hooks';
 import { SecretInput, TextInput, WizardMultiSelect, WizardSelect } from '../index';
 import { CustomClaimsManager } from './CustomClaimsManager';
@@ -234,7 +238,8 @@ export function JwtConfigInput({
             onSubmit={v => onLatticeResourceId?.(v)}
             onCancel={onBack}
             customValidation={value =>
-              LATTICE_RESOURCE_CONFIG_PATTERN.test(value.trim()) || 'Must be a VPC Lattice resource-config id (rcfg-...) or ARN'
+              LATTICE_RESOURCE_CONFIG_PATTERN.test(value.trim()) ||
+              'Must be a VPC Lattice resource-config id (rcfg-...) or ARN'
             }
           />
         )}
@@ -253,7 +258,9 @@ export function JwtConfigInput({
             initialValue={vpcId}
             onSubmit={v => onVpcId?.(v)}
             onCancel={onBack}
-            customValidation={value => /^vpc-(([0-9a-z]{8})|([0-9a-z]{17}))$/.test(value.trim()) || 'Must be a VPC id (vpc-...)'}
+            customValidation={value =>
+              /^vpc-(([0-9a-z]{8})|([0-9a-z]{17}))$/.test(value.trim()) || 'Must be a VPC id (vpc-...)'
+            }
           />
         )}
         {subStep === 'vpcSubnets' && (
@@ -267,7 +274,11 @@ export function JwtConfigInput({
           />
         )}
         {subStep === 'vpcIpType' && (
-          <WizardSelect title="Endpoint IP address type" items={ENDPOINT_IP_TYPE_ITEMS} selectedIndex={ipTypeNav.selectedIndex} />
+          <WizardSelect
+            title="Endpoint IP address type"
+            items={ENDPOINT_IP_TYPE_ITEMS}
+            selectedIndex={ipTypeNav.selectedIndex}
+          />
         )}
         {subStep === 'vpcSecurityGroups' && (
           <TextInput
@@ -278,7 +289,9 @@ export function JwtConfigInput({
             onCancel={onBack}
             allowEmpty
             customValidation={value =>
-              value.trim() === '' ? true : validateIdList(value, SECURITY_GROUP_ID_PATTERN, 'security group id (sg-...)', 5)
+              value.trim() === ''
+                ? true
+                : validateIdList(value, SECURITY_GROUP_ID_PATTERN, 'security group id (sg-...)', 5)
             }
           />
         )}
