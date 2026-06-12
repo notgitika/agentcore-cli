@@ -185,6 +185,8 @@ function AppContent({
       setRoute({ name: 'import' });
     } else if (id === 'update') {
       setRoute({ name: 'update' });
+    } else if (id === 'batch-evaluations') {
+      setRoute({ name: 'batch-eval-history' });
     } else if (id === 'config-bundle') {
       setRoute({ name: 'config-bundle' });
     } else if (id === 'dataset') {
