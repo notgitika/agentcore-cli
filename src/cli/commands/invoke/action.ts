@@ -801,7 +801,14 @@ export function buildHarnessBaseOpts(
   if (options.maxIterations != null) baseOpts.maxIterations = options.maxIterations;
   if (options.maxTokens != null) baseOpts.maxTokens = options.maxTokens;
   if (options.harnessTimeout != null) baseOpts.timeoutSeconds = options.harnessTimeout;
-  if (options.skills) baseOpts.skills = options.skills.split(',').map(p => ({ path: p.trim() }));
+  if (options.skills) {
+    baseOpts.skills = options.skills.split(',').map(s => {
+      const trimmed = s.trim();
+      if (trimmed.startsWith('s3://')) return { s3Uri: trimmed };
+      if (trimmed.startsWith('https://')) return { gitUrl: trimmed };
+      return { path: trimmed };
+    });
+  }
   if (options.systemPrompt) baseOpts.systemPrompt = [{ text: options.systemPrompt }];
   if (options.allowedTools) baseOpts.allowedTools = options.allowedTools.split(',').map(t => t.trim());
   if (options.actorId) baseOpts.actorId = options.actorId;

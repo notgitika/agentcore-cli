@@ -36,20 +36,27 @@ import {
   MODEL_PROVIDER_OPTIONS,
   NETWORK_MODE_OPTIONS,
   OPENAI_API_FORMAT_OPTIONS,
+  SKILL_SOURCE_TYPE_OPTIONS,
   TOOL_SELECT_OPTIONS,
   TRUNCATION_STRATEGY_OPTIONS,
 } from './types';
 import { useAddHarnessWizard } from './useAddHarnessWizard';
 import { Text } from 'ink';
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 
 interface AddHarnessScreenProps {
   existingHarnessNames: string[];
+  existingApiKeyCredentialNames?: string[];
   onComplete: (config: AddHarnessConfig) => void;
   onExit: () => void;
 }
 
-export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: AddHarnessScreenProps) {
+export function AddHarnessScreen({
+  existingHarnessNames,
+  existingApiKeyCredentialNames = [],
+  onComplete,
+  onExit,
+}: AddHarnessScreenProps) {
   const wizard = useAddHarnessWizard();
 
   const jwtFlow = useJwtConfigFlow({
@@ -148,6 +155,14 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
   const isS3ArnStep = wizard.step === 's3-arn';
   const isS3MountPathStep = wizard.step === 's3-mount-path';
   const isS3AddAnotherStep = wizard.step === 's3-add-another';
+  const isSkillsSourceTypeStep = wizard.step === 'skills-source-type';
+  const isSkillPathStep = wizard.step === 'skill-path';
+  const isSkillS3UriStep = wizard.step === 'skill-s3-uri';
+  const isSkillGitUrlStep = wizard.step === 'skill-git-url';
+  const isSkillGitPathStep = wizard.step === 'skill-git-path';
+  const isSkillGitCredentialStep = wizard.step === 'skill-git-credential';
+  const isSkillGitUsernameStep = wizard.step === 'skill-git-username';
+  const isSkillAddAnotherStep = wizard.step === 'skill-add-another';
   const isConfirmStep = wizard.step === 'confirm';
 
   const modelProviderNav = useListNavigation({
@@ -224,6 +239,60 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
     isActive: isTruncationStrategyStep,
   });
 
+  const skillSourceTypeItems: SelectableItem[] = useMemo(
+    () => SKILL_SOURCE_TYPE_OPTIONS.map(opt => ({ id: opt.id, title: opt.title, description: opt.description })),
+    []
+  );
+
+  const skillSourceTypeNav = useListNavigation({
+    items: skillSourceTypeItems,
+    onSelect: item => wizard.setSkillSourceType(item.id as 'path' | 's3' | 'git'),
+    onExit: () => wizard.goBack(),
+    isActive: isSkillsSourceTypeStep,
+  });
+
+  const skillGitCredentialItems: SelectableItem[] = useMemo(
+    () => [
+      ...existingApiKeyCredentialNames.map(name => ({
+        id: name,
+        title: name,
+        description: 'Use existing API key credential',
+      })),
+      { id: 'skip', title: 'Skip (no auth needed)', description: 'Repository is publicly accessible' },
+    ],
+    [existingApiKeyCredentialNames]
+  );
+
+  const skillGitCredentialNav = useListNavigation({
+    items: skillGitCredentialItems,
+    onSelect: item => {
+      wizard.submitSkillGitCredential(item.id);
+    },
+    onExit: () => wizard.goBack(),
+    isActive: isSkillGitCredentialStep,
+  });
+
+  useEffect(() => {
+    if (isSkillGitCredentialStep && existingApiKeyCredentialNames.length === 0) {
+      wizard.submitSkillGitCredential('skip');
+    }
+  }, [isSkillGitCredentialStep, existingApiKeyCredentialNames.length]);
+
+  const skillAddAnotherItems: SelectableItem[] = useMemo(
+    () => [
+      { id: 'add', title: 'Add another skill', description: 'Add one more skill source' },
+      { id: 'done', title: 'Done', description: `${(wizard.config.skills ?? []).length} skill(s) configured` },
+    ],
+    [wizard.config.skills]
+  );
+
+  const skillAddAnotherNav = useListNavigation({
+    items: skillAddAnotherItems,
+    onSelect: item => wizard.submitSkillAddAnother(item.id),
+    onExit: () => wizard.goBack(),
+    isActive: isSkillAddAnotherStep,
+  });
+
   useListNavigation({
     items: [{ id: 'confirm', title: 'Confirm' }],
     onSelect: () => onComplete(wizard.config),
@@ -248,7 +317,10 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
           isNetworkModeStep ||
           isTruncationStrategyStep ||
           isAuthorizerTypeStep ||
-          isGatewayOutboundAuthStep
+          isGatewayOutboundAuthStep ||
+          isSkillsSourceTypeStep ||
+          isSkillGitCredentialStep ||
+          isSkillAddAnotherStep
         ? HELP_TEXT.NAVIGATE_SELECT
         : isConfirmStep
           ? HELP_TEXT.CONFIRM_CANCEL
@@ -337,6 +409,13 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
         if (wizard.config.gatewayScopes) {
           fields.push({ label: 'OAuth Scopes', value: wizard.config.gatewayScopes });
         }
+      }
+    }
+
+    if (wizard.config.skills?.length) {
+      for (const [i, skill] of wizard.config.skills.entries()) {
+        const label = skill.s3Uri ?? skill.gitUrl ?? skill.path ?? 'unknown';
+        fields.push({ label: `Skill ${i + 1}`, value: label });
       }
     }
 
@@ -643,6 +722,88 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
             onSubmit={wizard.setGatewayScopes}
             onCancel={() => wizard.goBack()}
             customValidation={value => (value.trim().length > 0 ? true : 'At least one scope is required')}
+          />
+        )}
+
+        {isSkillsSourceTypeStep && (
+          <WizardSelect
+            title="Skill source type"
+            description="Where is your skill located?"
+            items={skillSourceTypeItems}
+            selectedIndex={skillSourceTypeNav.selectedIndex}
+          />
+        )}
+
+        {isSkillPathStep && (
+          <TextInput
+            key="skill-path"
+            prompt="Path to an installed skill in the environment"
+            initialValue=""
+            onSubmit={wizard.submitSkillPath}
+            onCancel={() => wizard.goBack()}
+            customValidation={value => (value.trim().length > 0 ? true : 'Path is required')}
+          />
+        )}
+
+        {isSkillS3UriStep && (
+          <TextInput
+            key="skill-s3-uri"
+            prompt="S3 URI (e.g., s3://my-bucket/skills/research)"
+            initialValue=""
+            onSubmit={wizard.submitSkillS3}
+            onCancel={() => wizard.goBack()}
+            customValidation={value => (value.startsWith('s3://') ? true : 'Must start with s3://')}
+          />
+        )}
+
+        {isSkillGitUrlStep && (
+          <TextInput
+            key="skill-git-url"
+            prompt="Git repository URL (HTTPS)"
+            initialValue=""
+            onSubmit={wizard.submitSkillGitUrl}
+            onCancel={() => wizard.goBack()}
+            customValidation={value => (value.startsWith('https://') ? true : 'Must be an HTTPS URL')}
+          />
+        )}
+
+        {isSkillGitPathStep && (
+          <TextInput
+            key="skill-git-path"
+            prompt="Subdirectory path within the repo (optional, press Enter to skip)"
+            initialValue=""
+            allowEmpty
+            onSubmit={wizard.submitSkillGitPath}
+            onCancel={() => wizard.goBack()}
+          />
+        )}
+
+        {isSkillGitCredentialStep && (
+          <WizardSelect
+            title="Git authentication"
+            description="Select a credential for private repository access"
+            items={skillGitCredentialItems}
+            selectedIndex={skillGitCredentialNav.selectedIndex}
+          />
+        )}
+
+        {isSkillGitUsernameStep && (
+          <TextInput
+            key="skill-git-username"
+            prompt="Username for git auth (optional, press Enter to skip)"
+            initialValue=""
+            allowEmpty
+            onSubmit={wizard.submitSkillGitUsername}
+            onCancel={() => wizard.goBack()}
+          />
+        )}
+
+        {isSkillAddAnotherStep && (
+          <WizardSelect
+            title="Add another skill?"
+            description={`${(wizard.config.skills ?? []).length} skill(s) configured`}
+            items={skillAddAnotherItems}
+            selectedIndex={skillAddAnotherNav.selectedIndex}
           />
         )}
 

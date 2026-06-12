@@ -1,5 +1,6 @@
 import { getOrCreateInstallationId } from '../lib/schemas/io/global-config';
 import { registerAdd } from './commands/add';
+import { registerAddSkill } from './commands/add/skill-command';
 import { registerAddTool } from './commands/add/tool-command';
 import { registerArchive } from './commands/archive';
 import { registerBatchEvaluations } from './commands/batch-evaluations';
@@ -21,6 +22,7 @@ import { registerPackage } from './commands/package';
 import { registerPause } from './commands/pause';
 import { registerPromote } from './commands/promote';
 import { registerRemove } from './commands/remove';
+import { registerRemoveSkill } from './commands/remove/skill-command';
 import { registerRemoveTool } from './commands/remove/tool-command';
 import { registerResume } from './commands/resume';
 import { registerRun } from './commands/run';
@@ -129,6 +131,8 @@ export function registerCommands(program: Command) {
   if (isPreviewEnabled()) {
     registerAddTool(addCmd);
     registerRemoveTool(removeCmd);
+    registerAddSkill(addCmd);
+    registerRemoveSkill(removeCmd);
   }
 }
 

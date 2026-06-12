@@ -9,7 +9,7 @@
  * from a single source of truth instead of manually duplicating.
  */
 import type { HarnessModel } from '../../../../schema';
-import type { HarnessModelConfiguration, HarnessTool } from '../../../aws/agentcore-harness';
+import type { HarnessModelConfiguration, HarnessSkill, HarnessTool } from '../../../aws/agentcore-harness';
 import type { CloudWatchSpanRecord, CloudWatchTraceRecord } from '../../traces/types';
 
 // ---------------------------------------------------------------------------
@@ -445,7 +445,7 @@ export interface A2AAgentCardResponse {
 export interface HarnessInvocationOverrides {
   model?: HarnessModelConfiguration;
   systemPrompt?: string;
-  skills?: { path: string }[];
+  skills?: HarnessSkill[];
   actorId?: string;
   maxIterations?: number;
   maxTokens?: number;
@@ -465,12 +465,20 @@ export interface StatusHarness {
   name: string;
 }
 
+export type ResourceSkillSource =
+  | { path: string }
+  | { s3: { uri: string } }
+  | {
+      git: { url: string; path?: string; auth?: { credentialName: string; credentialArn?: string; username?: string } };
+    };
+
 export interface ResourceHarness {
   name: string;
   /** @deprecated Use modelConfig instead. */
   model: string;
   modelConfig?: HarnessModel;
   tools: string[];
+  skills?: ResourceSkillSource[];
   deploymentStatus?: ResourceDeploymentStatus;
   deployed?: DeployedHarnessState;
 }

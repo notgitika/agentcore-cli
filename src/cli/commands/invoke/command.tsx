@@ -200,7 +200,10 @@ export const registerInvoke = (program: Command) => {
         'Override timeout seconds (harness only) [non-interactive] [preview]',
         parseInt
       )
-      .option('--skills <paths>', 'Skills to use, comma-separated paths (harness only) [non-interactive] [preview]')
+      .option(
+        '--skills <sources>',
+        'Skills override, comma-separated (path, s3://uri, or https://git-url). Git auth not supported here — configure via agentcore add skill [non-interactive] [preview]'
+      )
       .option('--system-prompt <text>', 'Override system prompt (harness only) [non-interactive] [preview]')
       .option(
         '--allowed-tools <tools>',

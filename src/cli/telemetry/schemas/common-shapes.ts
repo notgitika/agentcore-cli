@@ -35,6 +35,7 @@ export const AuthType = z.enum(['sigv4', 'bearer_token']);
 export const AuthorizerType = z.enum(['aws_iam', 'custom_jwt', 'none']);
 export const BuildType = z.enum(['codezip', 'container']);
 export const CredentialType = z.enum(['api-key', 'oauth']);
+export const SkillSourceType = z.enum(['path', 's3', 'git']);
 export const EvaluatorType = z.enum(['llm-as-a-judge', 'code-based']);
 export const ExitReason = z.enum(['success', 'failure']);
 export const FilterState = z.enum(['deployed', 'local-only', 'pending-removal', 'none']);
@@ -212,6 +213,7 @@ export const ATTRIBUTES = {
   strategy_summarization: z.boolean(),
   strategy_user_preference: z.boolean(),
   gateway_target_type: GatewayTargetType,
+  skill_source_type: SkillSourceType,
   ui_mode: UiMode,
   policy_validation_mode: PolicyValidationMode,
 } as const;

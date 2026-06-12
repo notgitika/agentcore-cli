@@ -67,6 +67,14 @@ export interface AddHarnessOptions {
   gatewayScopes?: string[];
   authorizerType?: RuntimeAuthorizerType;
   jwtConfig?: JwtConfigOptions;
+  skills?: {
+    path?: string;
+    s3Uri?: string;
+    gitUrl?: string;
+    gitPath?: string;
+    credentialName?: string;
+    username?: string;
+  }[];
   configBaseDir?: string;
 }
 
@@ -183,7 +191,18 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
           ...(options.additionalParams && { additionalParams: options.additionalParams }),
         },
         tools,
-        skills: [],
+        skills: (options.skills ?? []).map(s => {
+          if (s.s3Uri) return { s3Uri: s.s3Uri };
+          if (s.gitUrl)
+            return {
+              gitUrl: s.gitUrl,
+              ...(s.gitPath && { path: s.gitPath }),
+              ...(s.credentialName && {
+                auth: { credentialName: s.credentialName, ...(s.username && { username: s.username }) },
+              }),
+            };
+          return { path: s.path! };
+        }),
         ...(options.systemPrompt && { systemPrompt: options.systemPrompt }),
         ...(memoryName && { memory: { name: memoryName } }),
         ...(options.containerUri && { containerUri: options.containerUri }),

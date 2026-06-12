@@ -303,6 +303,62 @@ export const HarnessTruncationConfigSchema = z.object({
 export type HarnessTruncationConfig = z.infer<typeof HarnessTruncationConfigSchema>;
 
 // ============================================================================
+// Skill Configuration
+// ============================================================================
+
+export const HarnessSkillGitAuthSchema = z.object({
+  credentialName: z.string().min(1),
+  username: z.string().optional(),
+});
+
+export type HarnessSkillGitAuth = z.infer<typeof HarnessSkillGitAuthSchema>;
+
+export const HarnessSkillS3SourceSchema = z
+  .object({
+    s3Uri: z
+      .string()
+      .min(5)
+      .regex(/^s3:\/\//, 'Must be an S3 URI starting with s3://'),
+  })
+  .strict();
+
+export type HarnessSkillS3Source = z.infer<typeof HarnessSkillS3SourceSchema>;
+
+export const HarnessSkillGitSourceSchema = z
+  .object({
+    gitUrl: z
+      .string()
+      .min(8)
+      .regex(/^https:\/\//, 'Must be an HTTPS git URL'),
+    path: z.string().min(1).optional(),
+    auth: HarnessSkillGitAuthSchema.optional(),
+  })
+  .strict();
+
+export type HarnessSkillGitSource = z.infer<typeof HarnessSkillGitSourceSchema>;
+
+export const HarnessSkillPathSourceSchema = z
+  .object({
+    path: z.string().min(1),
+  })
+  .strict();
+
+export type HarnessSkillPathSource = z.infer<typeof HarnessSkillPathSourceSchema>;
+
+export const HarnessSkillSchema = z.union([
+  z
+    .string()
+    .min(1)
+    .transform(path => ({ path })),
+  HarnessSkillS3SourceSchema,
+  HarnessSkillGitSourceSchema,
+  HarnessSkillPathSourceSchema,
+]);
+
+export type HarnessSkillInput = z.input<typeof HarnessSkillSchema>;
+export type HarnessSkill = z.output<typeof HarnessSkillSchema>;
+
+// ============================================================================
 // Allowed Tools
 // ============================================================================
 
@@ -331,7 +387,7 @@ export const HarnessSpecSchema = z
           name => `Duplicate tool name: ${name}`
         )
       ),
-    skills: z.array(z.string().min(1)).default([]),
+    skills: z.array(HarnessSkillSchema).default([]),
     allowedTools: z.array(AllowedToolSchema).optional(),
     memory: HarnessMemoryRefSchema.optional(),
     maxIterations: z.number().int().min(1).optional(),

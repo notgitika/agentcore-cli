@@ -1,8 +1,9 @@
 import { ErrorPrompt } from '../../components';
 import { AddSuccessScreen } from '../add/AddSuccessScreen';
+import { useExistingCredentials } from '../identity/useCreateIdentity';
 import { AddHarnessScreen } from './AddHarnessScreen';
 import type { AddHarnessConfig } from './types';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 type FlowState =
   | { name: 'create-wizard' }
@@ -20,6 +21,12 @@ interface AddHarnessFlowProps {
 export function AddHarnessFlow({ isInteractive = true, onExit, onBack, onDev, onDeploy }: AddHarnessFlowProps) {
   const [flow, setFlow] = useState<FlowState>({ name: 'create-wizard' });
   const [existingNames, setExistingNames] = useState<string[]>([]);
+  const { credentials } = useExistingCredentials();
+
+  const apiKeyCredentialNames = useMemo(
+    () => credentials.filter(c => c.authorizerType === 'ApiKeyCredentialProvider').map(c => c.name),
+    [credentials]
+  );
 
   useEffect(() => {
     void (async () => {
@@ -81,6 +88,7 @@ export function AddHarnessFlow({ isInteractive = true, onExit, onBack, onDev, on
               .map(s => s.trim())
               .filter(Boolean)
           : undefined,
+        skills: config.skills,
         authorizerType: config.authorizerType,
         jwtConfig: config.jwtConfig
           ? {
@@ -110,6 +118,7 @@ export function AddHarnessFlow({ isInteractive = true, onExit, onBack, onDev, on
     return (
       <AddHarnessScreen
         existingHarnessNames={existingNames}
+        existingApiKeyCredentialNames={apiKeyCredentialNames}
         onComplete={config => void handleCreateComplete(config)}
         onExit={onBack}
       />

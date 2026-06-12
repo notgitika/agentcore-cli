@@ -2,6 +2,7 @@ import {
   HarnessModelProviderSchema,
   HarnessModelSchema,
   HarnessNameSchema,
+  HarnessSkillSchema,
   HarnessSpecSchema,
   HarnessToolSchema,
   HarnessToolTypeSchema,
@@ -833,5 +834,108 @@ describe('HarnessSpecSchema', () => {
       model: { provider: 'bedrock', modelId: 'anthropic.claude-v2', apiFormat: 'invalid_format' },
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe('HarnessSkillSchema', () => {
+  it('accepts a bare path string and normalizes to object', () => {
+    const result = HarnessSkillSchema.safeParse('./my-skill');
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ path: './my-skill' });
+    }
+  });
+
+  it('accepts a path object', () => {
+    const result = HarnessSkillSchema.safeParse({ path: './skills/research' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ path: './skills/research' });
+    }
+  });
+
+  it('accepts an S3 source', () => {
+    const result = HarnessSkillSchema.safeParse({ s3Uri: 's3://my-bucket/skills/research' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ s3Uri: 's3://my-bucket/skills/research' });
+    }
+  });
+
+  it('rejects S3 source without s3:// prefix', () => {
+    const result = HarnessSkillSchema.safeParse({ s3Uri: 'my-bucket/skills/research' });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts a git source with URL only', () => {
+    const result = HarnessSkillSchema.safeParse({ gitUrl: 'https://github.com/org/repo' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ gitUrl: 'https://github.com/org/repo' });
+    }
+  });
+
+  it('accepts a git source with path and auth', () => {
+    const input = {
+      gitUrl: 'https://github.com/org/repo',
+      path: 'skills/research',
+      auth: {
+        credentialName: 'my-cred',
+        username: 'bot-user',
+      },
+    };
+    const result = HarnessSkillSchema.safeParse(input);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual(input);
+    }
+  });
+
+  it('rejects git source without https:// prefix', () => {
+    const result = HarnessSkillSchema.safeParse({ gitUrl: 'git@github.com:org/repo.git' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects empty string', () => {
+    const result = HarnessSkillSchema.safeParse('');
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects empty path object', () => {
+    const result = HarnessSkillSchema.safeParse({ path: '' });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('HarnessSpecSchema skills field', () => {
+  const minimalHarness = {
+    name: 'TestHarness',
+    model: { provider: 'bedrock', modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0' },
+  };
+
+  it('accepts mixed skill sources', () => {
+    const result = HarnessSpecSchema.safeParse({
+      ...minimalHarness,
+      skills: [
+        './local-skill',
+        { s3Uri: 's3://bucket/skill' },
+        { gitUrl: 'https://github.com/org/repo', path: 'skills/foo' },
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.skills).toHaveLength(3);
+      expect(result.data.skills[0]).toEqual({ path: './local-skill' });
+      expect(result.data.skills[1]).toEqual({ s3Uri: 's3://bucket/skill' });
+      expect(result.data.skills[2]).toEqual({ gitUrl: 'https://github.com/org/repo', path: 'skills/foo' });
+    }
+  });
+
+  it('defaults skills to empty array', () => {
+    const result = HarnessSpecSchema.safeParse(minimalHarness);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.skills).toEqual([]);
+    }
   });
 });

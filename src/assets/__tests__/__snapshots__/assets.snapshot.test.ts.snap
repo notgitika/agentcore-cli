@@ -146,6 +146,7 @@ async function main() {
         dockerfile: harnessSpec.dockerfile,
         codeLocation: harnessSpec.dockerfile ? harnessDir : undefined,
         tools: harnessSpec.tools,
+        skills: harnessSpec.skills,
         apiKeyArn: harnessSpec.model?.apiKeyArn,
         efsAccessPoints: harnessSpec.efsAccessPoints,
         s3AccessPoints: harnessSpec.s3AccessPoints,
@@ -469,6 +470,9 @@ export class AgentCoreStack extends Stack {
     }
     if (connectorParametersByFile && Object.keys(connectorParametersByFile).length > 0) {
       appProps.connectorParametersByFile = connectorParametersByFile;
+    }
+    if (credentials) {
+      appProps.credentials = credentials;
     }
     this.application = new AgentCoreApplication(this, 'Application', appProps as any);
 

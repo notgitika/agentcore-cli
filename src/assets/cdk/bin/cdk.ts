@@ -101,6 +101,7 @@ async function main() {
         dockerfile: harnessSpec.dockerfile,
         codeLocation: harnessSpec.dockerfile ? harnessDir : undefined,
         tools: harnessSpec.tools,
+        skills: harnessSpec.skills,
         apiKeyArn: harnessSpec.model?.apiKeyArn,
         efsAccessPoints: harnessSpec.efsAccessPoints,
         s3AccessPoints: harnessSpec.s3AccessPoints,

@@ -8,6 +8,7 @@ import { useCallback, useMemo, useState } from 'react';
 
 const ADVANCED_SETTING_ORDER: AdvancedSetting[] = [
   'tools',
+  'skills',
   'auth',
   'network',
   'lifecycle',
@@ -18,6 +19,7 @@ const ADVANCED_SETTING_ORDER: AdvancedSetting[] = [
 
 const SETTING_TO_FIRST_STEP: Record<AdvancedSetting, AddHarnessStep> = {
   tools: 'tools-select',
+  skills: 'skills-source-type',
   auth: 'authorizerType',
   network: 'network-mode',
   lifecycle: 'idle-timeout',
@@ -95,6 +97,18 @@ export function useAddHarnessWizard() {
       }
     }
 
+    if (advancedSettings.includes('skills')) {
+      steps.push('skills-source-type');
+      if (config.pendingSkillSourceType === 'path') {
+        steps.push('skill-path');
+      } else if (config.pendingSkillSourceType === 's3') {
+        steps.push('skill-s3-uri');
+      } else if (config.pendingSkillSourceType === 'git') {
+        steps.push('skill-git-url', 'skill-git-path', 'skill-git-credential', 'skill-git-username');
+      }
+      steps.push('skill-add-another');
+    }
+
     if (advancedSettings.includes('auth')) {
       steps.push('authorizerType');
       if (config.authorizerType === 'CUSTOM_JWT') {
@@ -137,6 +151,8 @@ export function useAddHarnessWizard() {
     config.networkMode,
     config.selectedTools,
     config.gatewayOutboundAuth,
+    config.pendingSkillSourceType,
+    config.skills,
     advancedSettings,
   ]);
 
@@ -227,6 +243,22 @@ export function useAddHarnessWizard() {
       }
       return;
     }
+    if (step === 'skills-source-type') {
+      if ((config.skills?.length ?? 0) > 0) {
+        setStep('skill-add-another');
+      } else {
+        const idx = allSteps.indexOf('skills-source-type');
+        const prev = allSteps[idx - 1];
+        if (prev) setStep(prev);
+      }
+      return;
+    }
+    if (step === 'skill-add-another') {
+      const idx = allSteps.indexOf('skills-source-type');
+      const prev = allSteps[idx - 1];
+      if (prev) setStep(prev);
+      return;
+    }
     const idx = allSteps.indexOf(step);
     const prevStep = allSteps[idx - 1];
     if (prevStep) setStep(prevStep);
@@ -237,6 +269,7 @@ export function useAddHarnessWizard() {
     editingS3Index,
     config.efsAccessPoints,
     config.s3AccessPoints,
+    config.skills,
     resetFilesystemState,
   ]);
 
@@ -567,6 +600,86 @@ export function useAddHarnessWizard() {
     [nextStep]
   );
 
+  const setSkillSourceType = useCallback((sourceType: 'path' | 's3' | 'git') => {
+    setConfig(c => ({ ...c, pendingSkillSourceType: sourceType }));
+    if (sourceType === 'path') setStep('skill-path');
+    else if (sourceType === 's3') setStep('skill-s3-uri');
+    else setStep('skill-git-url');
+  }, []);
+
+  const submitSkillPath = useCallback((path: string) => {
+    setConfig(c => ({
+      ...c,
+      skills: [...(c.skills ?? []), { path }],
+      pendingSkillSourceType: undefined,
+    }));
+    setStep('skill-add-another');
+  }, []);
+
+  const submitSkillS3 = useCallback((s3Uri: string) => {
+    setConfig(c => ({
+      ...c,
+      skills: [...(c.skills ?? []), { s3Uri }],
+      pendingSkillSourceType: undefined,
+    }));
+    setStep('skill-add-another');
+  }, []);
+
+  const submitSkillGitUrl = useCallback((gitUrl: string) => {
+    setConfig(c => ({ ...c, pendingSkillGitUrl: gitUrl }));
+    setStep('skill-git-path');
+  }, []);
+
+  const submitSkillGitPath = useCallback((gitPath: string) => {
+    setConfig(c => ({ ...c, pendingSkillGitPath: gitPath || undefined }));
+    setStep('skill-git-credential');
+  }, []);
+
+  const submitSkillGitCredential = useCallback((selection: string) => {
+    if (selection === 'skip') {
+      setConfig(c => ({ ...c, pendingSkillCredentialName: undefined }));
+      setStep('skill-git-username');
+    } else {
+      // selection is a credential name (existing or newly created)
+      setConfig(c => ({ ...c, pendingSkillCredentialName: selection }));
+      setStep('skill-git-username');
+    }
+  }, []);
+
+  const submitSkillGitUsername = useCallback((username: string) => {
+    setConfig(c => {
+      const skill: NonNullable<AddHarnessConfig['skills']>[number] = {
+        gitUrl: c.pendingSkillGitUrl,
+        ...(c.pendingSkillGitPath && { gitPath: c.pendingSkillGitPath }),
+        ...(c.pendingSkillCredentialName && {
+          credentialName: c.pendingSkillCredentialName,
+          ...(username && { username }),
+        }),
+      };
+      return {
+        ...c,
+        skills: [...(c.skills ?? []), skill],
+        pendingSkillSourceType: undefined,
+        pendingSkillGitUrl: undefined,
+        pendingSkillGitPath: undefined,
+        pendingSkillCredentialName: undefined,
+      };
+    });
+    setStep('skill-add-another');
+  }, []);
+
+  const submitSkillAddAnother = useCallback(
+    (choice: string) => {
+      if (choice === 'add') {
+        setStep('skills-source-type');
+      } else {
+        const next = getNextAdvancedStep(advancedSettings, 'skills');
+        setStep(next ?? 'confirm');
+      }
+    },
+    [advancedSettings]
+  );
+
   const reset = useCallback(() => {
     setConfig(getDefaultConfig());
     setStep('name');
@@ -621,6 +734,14 @@ export function useAddHarnessWizard() {
     submitS3Arn,
     submitS3MountPath,
     submitS3AddAnother,
+    setSkillSourceType,
+    submitSkillPath,
+    submitSkillS3,
+    submitSkillGitUrl,
+    submitSkillGitPath,
+    submitSkillGitCredential,
+    submitSkillGitUsername,
+    submitSkillAddAnother,
     reset,
   };
 }

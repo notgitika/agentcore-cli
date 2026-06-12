@@ -108,6 +108,9 @@ export class AgentCoreStack extends Stack {
     if (connectorParametersByFile && Object.keys(connectorParametersByFile).length > 0) {
       appProps.connectorParametersByFile = connectorParametersByFile;
     }
+    if (credentials) {
+      appProps.credentials = credentials;
+    }
     this.application = new AgentCoreApplication(this, 'Application', appProps as any);
 
     // Create AgentCoreMcp if there are gateways configured

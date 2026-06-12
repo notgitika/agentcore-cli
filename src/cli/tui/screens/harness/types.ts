@@ -21,6 +21,14 @@ export type AddHarnessStep =
   | 'gateway-outbound-auth'
   | 'gateway-provider-arn'
   | 'gateway-scopes'
+  | 'skills-source-type'
+  | 'skill-path'
+  | 'skill-s3-uri'
+  | 'skill-git-url'
+  | 'skill-git-path'
+  | 'skill-git-credential'
+  | 'skill-git-username'
+  | 'skill-add-another'
   | 'memory'
   | 'authorizerType'
   | 'jwtConfig'
@@ -75,6 +83,18 @@ export interface AddHarnessConfig {
   gatewayOutboundAuth?: 'awsIam' | 'none' | 'oauth';
   gatewayProviderArn?: string;
   gatewayScopes?: string;
+  skills?: {
+    path?: string;
+    s3Uri?: string;
+    gitUrl?: string;
+    gitPath?: string;
+    credentialName?: string;
+    username?: string;
+  }[];
+  pendingSkillSourceType?: 'path' | 's3' | 'git';
+  pendingSkillGitUrl?: string;
+  pendingSkillGitPath?: string;
+  pendingSkillCredentialName?: string;
 }
 
 export const HARNESS_STEP_LABELS: Record<AddHarnessStep, string> = {
@@ -95,6 +115,14 @@ export const HARNESS_STEP_LABELS: Record<AddHarnessStep, string> = {
   'gateway-outbound-auth': 'Gateway auth',
   'gateway-provider-arn': 'Provider ARN',
   'gateway-scopes': 'OAuth scopes',
+  'skills-source-type': 'Skill source',
+  'skill-path': 'Skill path',
+  'skill-s3-uri': 'S3 URI',
+  'skill-git-url': 'Git URL',
+  'skill-git-path': 'Git sub-path',
+  'skill-git-credential': 'Git credential',
+  'skill-git-username': 'Username',
+  'skill-add-another': 'Add skill',
   memory: 'Memory',
   authorizerType: 'Auth type',
   jwtConfig: 'JWT config',
@@ -185,6 +213,7 @@ export const TRUNCATION_STRATEGY_OPTIONS = [
 
 export const ADVANCED_SETTING_OPTIONS = [
   { id: 'tools', title: 'Tools', description: 'Add browser, code interpreter, MCP, or gateway tools' },
+  { id: 'skills', title: 'Skills', description: 'Add skills from local path, S3, or Git' },
   { id: 'auth', title: 'Authentication', description: 'Inbound auth: AWS_IAM or Custom JWT' },
   { id: 'network', title: 'Network', description: 'Deploy inside a VPC with custom subnets and security groups' },
   { id: 'lifecycle', title: 'Lifecycle', description: 'Set idle timeout and max session lifetime' },
@@ -240,3 +269,9 @@ export const GATEWAY_OUTBOUND_AUTH_OPTIONS = [
   { id: 'none', title: 'None', description: 'No authentication headers' },
   { id: 'oauth', title: 'OAuth', description: 'Bearer token via AgentCore Identity credential provider' },
 ];
+
+export const SKILL_SOURCE_TYPE_OPTIONS = [
+  { id: 'path' as const, title: 'Path', description: 'Path to an installed skill in the environment' },
+  { id: 's3' as const, title: 'S3', description: 'S3 URI (s3://bucket/path)' },
+  { id: 'git' as const, title: 'Git', description: 'HTTPS git repository URL' },
+] as const;

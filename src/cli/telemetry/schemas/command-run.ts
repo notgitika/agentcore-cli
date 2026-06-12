@@ -29,6 +29,7 @@ import {
   PolicyValidationMode,
   RefType,
   ResourceType,
+  SkillSourceType,
   UiMode,
   safeSchema,
 } from './common-shapes.js';
@@ -104,6 +105,8 @@ const AddPolicyAttrs = safeSchema({
   policy_attr_source_type: PolicyAttrSourceType,
   policy_validation_mode: PolicyValidationMode,
 });
+
+const AddSkillAttrs = safeSchema({ skill_source_type: SkillSourceType });
 
 const DeployAttrs = safeSchema({
   runtime_count: Count,
@@ -216,6 +219,7 @@ export const COMMAND_SCHEMAS = {
   'add.knowledge-base': AddKnowledgeBaseAttrs,
   'add.payment-manager': NoAttrs,
   'add.payment-connector': NoAttrs,
+  'add.skill': AddSkillAttrs,
   deploy: DeployAttrs,
 
   // dev / invoke / exec
@@ -278,6 +282,7 @@ export const COMMAND_SCHEMAS = {
   'dataset.remove-version': NoAttrs,
   'remove.payment-manager': NoAttrs,
   'remove.payment-connector': NoAttrs,
+  'remove.skill': NoAttrs,
   'telemetry.disable': NoAttrs,
   'telemetry.enable': NoAttrs,
   'telemetry.status': NoAttrs,

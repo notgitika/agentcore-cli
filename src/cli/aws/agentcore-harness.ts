@@ -72,9 +72,10 @@ export interface HarnessTool {
   config?: Record<string, unknown>;
 }
 
-export interface HarnessSkill {
-  path: string;
-}
+export type HarnessSkill =
+  | { path: string }
+  | { s3Uri: string }
+  | { gitUrl: string; path?: string; auth?: { credentialArn: string; username?: string } };
 
 export interface HarnessAgentCoreMemoryConfiguration {
   arn: string;
