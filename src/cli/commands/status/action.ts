@@ -5,7 +5,6 @@ import { getAgentRuntimeStatus } from '../../aws';
 import { getEvaluator, getOnlineEvaluationConfig } from '../../aws/agentcore-control';
 import { getPaymentManager } from '../../aws/agentcore-payments';
 import { getKnowledgeBase, getLatestIngestionJob } from '../../aws/bedrock-agent';
-import { dnsSuffix } from '../../aws/partition';
 import { getErrorMessage } from '../../errors';
 import { isPreviewEnabled } from '../../feature-flags';
 import { ExecLogger } from '../../logging';

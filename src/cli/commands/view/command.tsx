@@ -103,6 +103,9 @@ async function launchTuiList(type: JobType): Promise<never> {
   } else if (type === 'batch-evaluation') {
     const { BatchEvalHistoryScreen } = await import('../../tui/screens/run-eval');
     render(React.createElement(BatchEvalHistoryScreen, { onExit: () => process.exit(0) }));
+  } else if (type === 'insights') {
+    const { InsightsJobsScreen } = await import('../../tui/screens/insights-jobs');
+    render(React.createElement(InsightsJobsScreen, { onExit: () => process.exit(0) }));
   } else {
     const { RecommendationHistoryScreen } = await import('../../tui/screens/recommendation');
     render(React.createElement(RecommendationHistoryScreen, { onExit: () => process.exit(0) }));
@@ -122,4 +125,5 @@ export const registerView = (program: Command) => {
   registerViewSubcommand(viewCmd, 'recommendation');
   registerViewSubcommand(viewCmd, 'batch-evaluation');
   registerViewSubcommand(viewCmd, 'ab-test');
+  registerViewSubcommand(viewCmd, 'insights');
 };
