@@ -1,5 +1,4 @@
 import { ConfigIO } from '../../../../lib';
-import type { DeployedState, HarnessDeployedState } from '../../../../schema';
 import type { CdkToolkitWrapper, DeployMessage, SwitchableIoHost } from '../../../cdk/toolkit-lib';
 import {
   buildDeployedState,
@@ -9,6 +8,7 @@ import {
   parseDatasetOutputs,
   parseEvaluatorOutputs,
   parseGatewayOutputs,
+  parseHarnessOutputs,
   parseKnowledgeBaseOutputs,
   parseMemoryOutputs,
   parseOnlineEvalOutputs,
@@ -28,7 +28,6 @@ import {
 } from '../../../operations/deploy';
 import { computeProjectDeployHash } from '../../../operations/deploy/change-detection';
 import { getGatewayTargetStatuses } from '../../../operations/deploy/gateway-status';
-import { createDeploymentManager } from '../../../operations/deploy/imperative';
 import { deleteOrphanedABTests, setupABTests } from '../../../operations/deploy/post-deploy-ab-tests';
 import { syncDatasets } from '../../../operations/deploy/post-deploy-datasets';
 import { autoIngestKnowledgeBases } from '../../../operations/deploy/post-deploy-knowledge-bases';
@@ -168,7 +167,6 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     label: 'Hydrate knowledge base data sources',
     status: 'pending',
   });
-  const [harnessDeployStep, setHarnessDeployStep] = useState<Step>({ label: 'Deploy harnesses', status: 'pending' });
   const [autoIngestStep, setAutoIngestStep] = useState<Step>({
     label: 'Auto-ingest knowledge bases',
     status: 'pending',
@@ -204,7 +202,6 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     setPersistStateStep({ label: 'Persist deployment state', status: 'pending' });
     setHydrateKbStep({ label: 'Hydrate knowledge base data sources', status: 'pending' });
     setNeedsKbHydration(false);
-    setHarnessDeployStep({ label: 'Deploy harnesses', status: 'pending' });
     setAutoIngestStep({ label: 'Auto-ingest knowledge bases', status: 'pending' });
     setDatasetSyncStep({ label: 'Sync datasets', status: 'pending' });
     setOnlineEvalStep({ label: 'Enable online evaluation', status: 'pending' });
@@ -447,39 +444,13 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
 
     const existingState = await configIO.readDeployedState().catch(() => undefined);
 
-    // Post-CDK: deploy imperative resources (harness) — preview mode only
-    let deployedHarnesses: Record<string, HarnessDeployedState> | undefined;
-    if (isPreviewEnabled()) {
-      const imperativeManager = createDeploymentManager();
-      const imperativeDeployedState: DeployedState = existingState ?? { targets: {} };
-      const imperativeContext = {
-        projectSpec: ctx.projectSpec,
-        target,
-        configIO,
-        deployedState: imperativeDeployedState,
-        cdkOutputs: outputs,
-        onProgress: (step: string, status: 'start' | 'done' | 'error') => {
-          logger.log(`${step}: ${status}`);
-        },
-      };
-
-      if (imperativeManager.hasDeployersForPhase('post-cdk', imperativeContext)) {
-        setHarnessDeployStep(prev => ({ ...prev, status: 'running' }));
-        logger.startStep('Deploy harnesses');
-        const postCdkResult = await imperativeManager.runPhase('post-cdk', imperativeContext);
-        const harnessResult = postCdkResult.results.get('harness');
-        if (harnessResult?.state) {
-          deployedHarnesses = harnessResult.state as Record<string, HarnessDeployedState>;
-        }
-        if (!postCdkResult.success) {
-          logger.endStep('error', postCdkResult.error);
-          setHarnessDeployStep(prev => ({ ...prev, status: 'error', error: postCdkResult.error }));
-          throw new Error(`Harness deployment failed: ${postCdkResult.error}`);
-        }
-        logger.endStep('success');
-        setHarnessDeployStep(prev => ({ ...prev, status: 'success' }));
-      }
-    }
+    // Parse harness outputs (harnesses are now part of the CloudFormation stack).
+    // Preview-gated to match the synth path: with preview off, bin/cdk.ts emits no harness
+    // resource/outputs, so skip parsing entirely (see toolkit-lib/wrapper.ts + bin/cdk.ts).
+    const harnessNames = isPreviewEnabled()
+      ? (ctx.projectSpec.harnesses ?? []).map((h: { name: string }) => h.name)
+      : [];
+    const deployedHarnesses = parseHarnessOutputs(outputs, harnessNames);
 
     let deployedState = buildDeployedState({
       targetName: target.name,
@@ -905,38 +876,8 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
         setDeployStep(prev => ({ ...prev, status: 'success' }));
 
         if (context?.isTeardownDeploy) {
-          // Teardown imperative resources (harnesses) before destroying the stack
-          if (isPreviewEnabled()) {
-            const teardownTarget = context.awsTargets[0];
-            if (teardownTarget) {
-              const imperativeManager = createDeploymentManager();
-              const teardownConfigIO = new ConfigIO();
-              const existingTeardownState = await teardownConfigIO
-                .readDeployedState()
-                .catch(() => ({ targets: {} }) as DeployedState);
-              const teardownContext = {
-                projectSpec: context.projectSpec,
-                target: teardownTarget,
-                configIO: teardownConfigIO,
-                deployedState: existingTeardownState,
-                onProgress: (step: string, status: 'start' | 'done' | 'error') => {
-                  logger.log(`${step}: ${status}`);
-                },
-              };
-
-              if (imperativeManager.hasDeployersForPhase('post-cdk', teardownContext)) {
-                logger.startStep('Tear down imperative resources');
-                const teardownResult = await imperativeManager.teardownAll(teardownContext);
-                if (!teardownResult.success) {
-                  logger.endStep('error', teardownResult.error);
-                  throw new Error(`Imperative teardown failed: ${teardownResult.error}`);
-                }
-                logger.endStep('success');
-              }
-            }
-          }
-
           // After deploying the empty spec, destroy the stack entirely.
+          // Harnesses are part of the CloudFormation stack, so stack destroy handles them.
           // Clean up imperative payment credential providers before stack teardown.
           const targetName = context.awsTargets[0]?.name;
           if (targetName) {
@@ -971,9 +912,6 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
               prev.status === 'running' ? { ...prev, status: 'error', error: message } : prev
             );
             setHydrateKbStep(prev => (prev.status === 'running' ? { ...prev, status: 'error', error: message } : prev));
-            setHarnessDeployStep(prev =>
-              prev.status === 'running' ? { ...prev, status: 'error', error: message } : prev
-            );
             setPostDeployHasError(true);
             setPostDeployWarnings(p => [...p, `Persist deployed state failed: ${message}`]);
           }
@@ -1174,8 +1112,6 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
   const hasDatasets = (projectSpec?.datasets?.length ?? 0) > 0;
   const hasOnlineEvalConfigs = (projectSpec?.onlineEvalConfigs?.length ?? 0) > 0;
   const hasAbTests = (projectSpec?.abTests?.length ?? 0) > 0;
-  const hasHarnesses = (projectSpec?.harnesses?.length ?? 0) > 0;
-  const isPreview = isPreviewEnabled();
 
   const steps = useMemo(() => {
     if (diffMode) {
@@ -1189,7 +1125,6 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
       : [
           persistStateStep,
           ...(hasKnowledgeBases && needsKbHydration ? [hydrateKbStep] : []),
-          ...(isPreview && hasHarnesses ? [harnessDeployStep] : []),
           ...(hasKnowledgeBases ? [autoIngestStep] : []),
           ...(hasDatasets ? [datasetSyncStep] : []),
           ...(hasOnlineEvalConfigs ? [onlineEvalStep] : []),
@@ -1204,7 +1139,6 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     deployStep,
     persistStateStep,
     hydrateKbStep,
-    harnessDeployStep,
     autoIngestStep,
     datasetSyncStep,
     onlineEvalStep,
@@ -1217,8 +1151,6 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     hasDatasets,
     hasOnlineEvalConfigs,
     hasAbTests,
-    hasHarnesses,
-    isPreview,
     context?.isTeardownDeploy,
     projectSpec,
   ]);

@@ -13,15 +13,15 @@ describe('HarnessNameSchema', () => {
     expect(HarnessNameSchema.safeParse(name).success).toBe(true);
   });
 
-  it('accepts 48-character name (max)', () => {
-    const name = 'A' + 'b'.repeat(47);
-    expect(name).toHaveLength(48);
+  it('accepts 40-character name (max)', () => {
+    const name = 'A' + 'b'.repeat(39);
+    expect(name).toHaveLength(40);
     expect(HarnessNameSchema.safeParse(name).success).toBe(true);
   });
 
-  it('rejects 49-character name', () => {
-    const name = 'A' + 'b'.repeat(48);
-    expect(name).toHaveLength(49);
+  it('rejects 41-character name', () => {
+    const name = 'A' + 'b'.repeat(40);
+    expect(name).toHaveLength(41);
     expect(HarnessNameSchema.safeParse(name).success).toBe(false);
   });
 
@@ -347,9 +347,35 @@ describe('HarnessModelSchema', () => {
       provider: 'gemini',
       modelId: 'gemini-2.5-pro',
       apiKeyArn: 'arn:aws:bedrock-agentcore:us-west-2:123:apikey/abc',
-      topK: 0.5,
+      topK: 40,
     });
     expect(result.success).toBe(true);
+  });
+
+  it('rejects non-integer topK', () => {
+    const result = HarnessModelSchema.safeParse({
+      provider: 'gemini',
+      modelId: 'gemini-2.5-pro',
+      apiKeyArn: 'arn:aws:bedrock-agentcore:us-west-2:123:apikey/abc',
+      topK: 0.5,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects topK above 500', () => {
+    const result = HarnessModelSchema.safeParse({
+      provider: 'gemini',
+      modelId: 'gemini-2.5-pro',
+      apiKeyArn: 'arn:aws:bedrock-agentcore:us-west-2:123:apikey/abc',
+      topK: 501,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('requires apiKeyArn for open_ai and gemini providers', () => {
+    expect(HarnessModelSchema.safeParse({ provider: 'open_ai', modelId: 'gpt-4o' }).success).toBe(false);
+    expect(HarnessModelSchema.safeParse({ provider: 'gemini', modelId: 'gemini-2.5-pro' }).success).toBe(false);
+    expect(HarnessModelSchema.safeParse({ provider: 'bedrock', modelId: 'claude' }).success).toBe(true);
   });
 
   it('rejects temperature above 2.0', () => {
@@ -397,7 +423,7 @@ describe('HarnessModelSchema', () => {
     const result = HarnessModelSchema.safeParse({
       provider: 'bedrock',
       modelId: 'us.anthropic.claude-sonnet-4-5-20250514-v1:0',
-      topK: 0.5,
+      topK: 40,
     });
     expect(result.success).toBe(false);
     if (!result.success) {

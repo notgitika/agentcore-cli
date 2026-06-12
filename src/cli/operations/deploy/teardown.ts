@@ -5,6 +5,7 @@ import { withTargetRegion } from '../../aws';
 import { deleteConfigurationBundle } from '../../aws/agentcore-config-bundles';
 import { CdkToolkitWrapper, silentIoHost } from '../../cdk/toolkit-lib';
 import { type DiscoveredStack, findStack } from '../../cloudformation/stack-discovery';
+import { findOrphanHarnesses } from '../harness/orphan';
 import { deleteOrphanedABTests } from './post-deploy-ab-tests';
 import { StackSelectionStrategy } from '@aws-cdk/toolkit-lib';
 import { existsSync } from 'fs';
@@ -118,6 +119,18 @@ export async function performStackTeardown(targetName: string): Promise<Result> 
   try {
     const deployedState = await configIO.readDeployedState();
     const resources = deployedState.targets?.[targetName]?.resources;
+
+    // Warn about imperative-build orphan harnesses. Unlike config bundles / AB tests (deleted
+    // below), an orphan harness is never auto-deleted — the user may want to migrate it to GA.
+    // CloudFormation can't delete it either (it never created it), so tearing the stack down
+    // leaves it running. Point the user at `remove harness` for an explicit, intentful delete.
+    for (const orphan of findOrphanHarnesses(deployedState, undefined).filter(o => o.targetName === targetName)) {
+      console.warn(
+        `Warning: Harness "${orphan.name}" was created by the preview build and is not managed by ` +
+          `CloudFormation, so tearing down this stack will NOT delete it — it keeps incurring cost. ` +
+          `Run \`agentcore remove harness ${orphan.name} --discard\` to delete it from your AWS account.`
+      );
+    }
 
     if (resources?.configBundles || resources?.abTests) {
       let region = deployedTarget?.target.region;

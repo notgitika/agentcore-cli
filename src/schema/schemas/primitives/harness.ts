@@ -17,10 +17,10 @@ import { z } from 'zod';
 export const HarnessNameSchema = z
   .string()
   .min(1, 'Harness name is required')
-  .max(48)
+  .max(40)
   .regex(
-    /^[a-zA-Z][a-zA-Z0-9_]{0,47}$/,
-    'Must begin with a letter and contain only alphanumeric characters and underscores (max 48 chars)'
+    /^[a-zA-Z][a-zA-Z0-9_]{0,39}$/,
+    'Must begin with a letter and contain only alphanumeric characters and underscores (max 40 chars)'
   );
 
 // ============================================================================
@@ -47,7 +47,7 @@ export const HarnessModelSchema = z
     apiFormat: HarnessApiFormatSchema.optional(),
     temperature: z.number().min(0).max(2).optional(),
     topP: z.number().min(0).max(1).optional(),
-    topK: z.number().min(0).max(1).optional(),
+    topK: z.number().int().min(0).max(500).optional(),
     maxTokens: z.number().int().min(1).optional(),
   })
   .superRefine((model, ctx) => {
@@ -72,6 +72,14 @@ export const HarnessModelSchema = z
           path: ['apiFormat'],
         });
       }
+    }
+    // CFN requires ApiKeyArn for the open_ai and gemini model configs (bedrock does not).
+    if (model.apiKeyArn === undefined && (model.provider === 'open_ai' || model.provider === 'gemini')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `apiKeyArn is required for the "${model.provider}" provider`,
+        path: ['apiKeyArn'],
+      });
     }
   });
 

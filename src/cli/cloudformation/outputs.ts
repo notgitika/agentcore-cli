@@ -4,6 +4,7 @@ import type {
   DatasetDeployedState,
   DeployedState,
   EvaluatorDeployedState,
+  HarnessDeployedState,
   KnowledgeBaseDeployedState,
   MemoryDeployedState,
   OnlineEvalDeployedState,
@@ -536,6 +537,71 @@ export function parseDatasetOutputs(
   return datasets;
 }
 
+/**
+ * Parse CDK stack outputs for CFN-deployed harnesses into deployed-state records.
+ *
+ * The L3 AgentCoreApplication emits, per harness `${name}` (pascal = toPascalId('Harness', name)):
+ *   ApplicationHarness{Pascal}{Id,Arn,Status,AgentRuntimeArn}Output<hash>
+ * and the execution role (AgentCoreHarnessRole) separately emits:
+ *   ApplicationHarness{Pascal}RoleRoleArnOutput<hash>
+ * The 'Arn' harness prefix does not collide with 'RoleRoleArn' (next segment differs).
+ */
+export function parseHarnessOutputs(
+  outputs: StackOutputs,
+  harnessNames: string[],
+  onWarn: (message: string) => void = console.warn
+): Record<string, HarnessDeployedState> {
+  const harnesses: Record<string, HarnessDeployedState> = {};
+  const outputKeys = Object.keys(outputs);
+
+  for (const harnessName of harnessNames) {
+    const pascal = toPascalId('Harness', harnessName);
+    const idKey = outputKeys.find(k => k.startsWith(`Application${pascal}IdOutput`));
+    const arnKey = outputKeys.find(k => k.startsWith(`Application${pascal}ArnOutput`));
+    const statusKey = outputKeys.find(k => k.startsWith(`Application${pascal}StatusOutput`));
+    const runtimeArnKey = outputKeys.find(k => k.startsWith(`Application${pascal}AgentRuntimeArnOutput`));
+    const roleArnKey = outputKeys.find(k => k.startsWith(`Application${pascal}RoleRoleArnOutput`));
+
+    // Id/Arn/Status/RoleArn are required for a complete CDK-managed harness record.
+    if (idKey && arnKey && statusKey && roleArnKey) {
+      harnesses[harnessName] = {
+        harnessId: outputs[idKey]!,
+        harnessArn: outputs[arnKey]!,
+        status: outputs[statusKey]!,
+        roleArn: outputs[roleArnKey]!,
+        ...(runtimeArnKey && { agentRuntimeArn: outputs[runtimeArnKey] }),
+        provisioner: 'cloudformation',
+      };
+      continue;
+    }
+
+    // A spec'd harness that produced incomplete (or no) outputs is dropped from
+    // deployed-state, which silently removes it from `status`/`invoke`. Surface
+    // the gap so a partially-emitted or missing harness leaves a trace rather
+    // than vanishing without explanation.
+    const missing = [
+      !idKey && 'Id',
+      !arnKey && 'Arn',
+      !statusKey && 'Status',
+      !roleArnKey && 'RoleArn',
+    ].filter((v): v is string => typeof v === 'string');
+    if (missing.length === 4) {
+      onWarn(
+        `Harness "${harnessName}" produced no CloudFormation outputs; it will not appear in ` +
+          `\`agentcore status\` or be invocable until the next successful deploy.`
+      );
+    } else {
+      onWarn(
+        `Harness "${harnessName}" is missing CloudFormation output(s): ${missing.join(', ')}. ` +
+          `Skipping it in deployed-state — it will not appear in \`agentcore status\` or be invocable. ` +
+          `Re-run \`agentcore deploy\`; if this persists, the harness stack output template may be malformed.`
+      );
+    }
+  }
+
+  return harnesses;
+}
+
 export function parseConfigBundleOutputs(
   outputs: StackOutputs,
   bundleNames: string[]
@@ -650,18 +716,7 @@ export interface BuildDeployedStateOptions {
   policyEngines?: Record<string, PolicyEngineDeployedState>;
   policies?: Record<string, PolicyDeployedState>;
   runtimeEndpoints?: Record<string, RuntimeEndpointDeployedState>;
-  harnesses?: Record<
-    string,
-    {
-      harnessId: string;
-      harnessArn: string;
-      roleArn: string;
-      status: string;
-      agentRuntimeArn?: string;
-      memoryArn?: string;
-      configHash?: string;
-    }
-  >;
+  harnesses?: Record<string, HarnessDeployedState>;
   datasets?: Record<string, DatasetDeployedState>;
   configBundles?: Record<string, ConfigBundleDeployedState>;
   knowledgeBases?: Record<string, KnowledgeBaseDeployedState>;
@@ -760,9 +815,24 @@ export function buildDeployedState(opts: BuildDeployedStateOptions): DeployedSta
     targetState.resources!.abTests = existingABTests;
   }
 
-  // Add harness state if harnesses exist
-  if (harnesses && Object.keys(harnesses).length > 0) {
-    targetState.resources!.harnesses = harnesses;
+  // Merge harness state. CFN-sourced records (freshly parsed, stamped
+  // `provisioner: 'cloudformation'`) are authoritative for every CDK-managed harness — they
+  // are re-parsed in full each deploy, so a CFN harness dropped from the spec correctly
+  // disappears here (CloudFormation deletes the resource). On top of that, carry forward any
+  // existing *orphan* record (imperative-build harness, no marker) that the current outputs
+  // don't cover, so it stays visible to detection/cleanup instead of silently vanishing.
+  // Only orphans are preserved — carrying forward stale marked records would resurrect a
+  // harness CloudFormation just deleted.
+  const existingHarnesses = existingState?.targets?.[targetName]?.resources?.harnesses ?? {};
+  const carriedOrphans: Record<string, HarnessDeployedState> = {};
+  for (const [name, record] of Object.entries(existingHarnesses)) {
+    if (!harnesses?.[name] && record.provisioner !== 'cloudformation') {
+      carriedOrphans[name] = record;
+    }
+  }
+  const mergedHarnesses = { ...carriedOrphans, ...harnesses };
+  if (Object.keys(mergedHarnesses).length > 0) {
+    targetState.resources!.harnesses = mergedHarnesses;
   }
 
   // Add payment state from CFN outputs (or preserve credential provider state)

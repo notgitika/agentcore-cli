@@ -1,5 +1,6 @@
 import type { RemovableGatewayTarget, RemovalPreview } from '../../../operations/remove';
-import { paymentManagerPrimitive } from '../../../primitives/registry';
+import type { OrphanAction } from '../../../primitives/HarnessPrimitive';
+import { harnessPrimitive, paymentManagerPrimitive } from '../../../primitives/registry';
 import { ErrorPrompt, Panel, Screen, SelectScreen } from '../../components';
 import {
   useRemovableABTests,
@@ -73,6 +74,7 @@ type FlowState =
   | { name: 'select-policy' }
   | { name: 'select-harness' }
   | { name: 'confirm-harness'; harnessName: string; preview: RemovalPreview }
+  | { name: 'confirm-orphan-harness'; harnessName: string }
   | { name: 'select-config-bundle' }
   | { name: 'select-ab-test' }
   | { name: 'select-runtime-endpoint' }
@@ -423,6 +425,13 @@ export function RemoveFlow({
 
   const handleSelectHarness = useCallback(
     async (harnessName: string) => {
+      // Imperative-build orphans need an explicit delete-and-keep / delete-and-discard choice
+      // (deleting a real AWS resource), so they bypass the plain confirm and the force path —
+      // we never auto-delete an orphan, even with --yes.
+      if (harnessPrimitive && (await harnessPrimitive.isOrphan(harnessName))) {
+        setFlow({ name: 'confirm-orphan-harness', harnessName });
+        return;
+      }
       const result = await loadHarnessPreview(harnessName);
       if (result.ok) {
         if (force) {
@@ -442,6 +451,16 @@ export function RemoveFlow({
     },
     [loadHarnessPreview, force, removeHarnessOp]
   );
+
+  const handleConfirmOrphanHarness = useCallback(async (harnessName: string, orphanAction: OrphanAction) => {
+    setFlow({ name: 'loading', message: `Deleting orphan harness ${harnessName} from AWS...` });
+    const result = await harnessPrimitive!.remove(harnessName, { orphanAction });
+    if (result.success) {
+      setFlow({ name: 'harness-success', harnessName });
+    } else {
+      setFlow({ name: 'error', message: result.error.message });
+    }
+  }, []);
 
   const handleSelectGateway = useCallback(
     async (gatewayName: string) => {
@@ -1429,6 +1448,42 @@ export function RemoveFlow({
         preview={flow.preview}
         onConfirm={() => void handleConfirmHarness(flow.harnessName, flow.preview)}
         onCancel={() => setFlow({ name: 'select-harness' })}
+      />
+    );
+  }
+
+  if (flow.name === 'confirm-orphan-harness') {
+    const orphanName = flow.harnessName;
+    return (
+      <SelectScreen<{ id: string; title: string; description?: string; spaceBefore?: boolean }>
+        title={`Remove Harness: ${orphanName}`}
+        color="yellow"
+        headerContent={
+          <Text>
+            {`"${orphanName}" was created by the preview build and is not managed by CloudFormation, so CloudFormation cannot delete it. This will delete it directly from your AWS account.`}
+          </Text>
+        }
+        items={[
+          {
+            id: 'keep',
+            title: 'Delete it and keep it in agentcore.json',
+            description: 'Moves to GA — the next `agentcore deploy` recreates it under CloudFormation.',
+          },
+          {
+            id: 'discard',
+            title: 'Delete it and remove it from agentcore.json',
+            description: 'You no longer want this harness.',
+          },
+          { id: 'cancel', title: 'Cancel', description: 'Leave the harness untouched.', spaceBefore: true },
+        ]}
+        onSelect={item => {
+          if (item.id === 'cancel') {
+            setFlow({ name: 'select-harness' });
+          } else {
+            void handleConfirmOrphanHarness(orphanName, item.id as OrphanAction);
+          }
+        }}
+        onExit={() => setFlow({ name: 'select-harness' })}
       />
     );
   }

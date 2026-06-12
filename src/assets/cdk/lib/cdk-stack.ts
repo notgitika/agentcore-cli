@@ -6,24 +6,18 @@ import {
   type AgentCoreProjectSpec,
   type AgentCoreMcpSpec,
   type CustomJWTAuthorizerConfig,
+  type HarnessDeploymentConfig,
 } from '@aws/agentcore-cdk';
 import { CfnOutput, Stack, type StackProps } from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
 
-export interface HarnessConfig {
-  name: string;
-  executionRoleArn?: string;
-  memoryName?: string;
-  containerUri?: string;
-  hasDockerfile?: boolean;
-  dockerfile?: string;
-  codeLocation?: string;
-  tools?: { type: string; name: string }[];
-  apiKeyArn?: string;
-  efsAccessPoints?: { accessPointArn: string; mountPath: string }[];
-  s3AccessPoints?: { accessPointArn: string; mountPath: string }[];
-}
+/**
+ * Harness deployment config: role-scoped fields (for IAM role + container build)
+ * plus the full validated spec + its config directory so the L3 construct can
+ * synthesize the AWS::BedrockAgentCore::Harness resource.
+ */
+export type HarnessConfig = HarnessDeploymentConfig;
 
 export interface PaymentConnectorSpec {
   name: string;

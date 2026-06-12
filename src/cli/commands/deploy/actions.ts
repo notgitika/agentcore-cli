@@ -1,5 +1,5 @@
 import { ConfigIO, ResourceNotFoundError, SecureCredentials, ValidationError, toError } from '../../../lib';
-import type { AgentCoreMcpSpec, DeployedState, HarnessDeployedState } from '../../../schema';
+import type { AgentCoreMcpSpec, DeployedState } from '../../../schema';
 import { applyTargetRegionToEnv } from '../../aws';
 import { validateAwsCredentials } from '../../aws/account';
 import { CdkToolkitWrapper, createSwitchableIoHost } from '../../cdk/toolkit-lib';
@@ -12,6 +12,7 @@ import {
   parseDatasetOutputs,
   parseEvaluatorOutputs,
   parseGatewayOutputs,
+  parseHarnessOutputs,
   parseKnowledgeBaseOutputs,
   parseMemoryOutputs,
   parseOnlineEvalOutputs,
@@ -23,6 +24,7 @@ import {
 import { getErrorMessage } from '../../errors';
 import { isPreviewEnabled } from '../../feature-flags';
 import { ExecLogger } from '../../logging';
+import { findOrphanHarnesses } from '../../operations/harness/orphan';
 import {
   assertEnvFileExists,
   bootstrapEnvironment,
@@ -42,7 +44,6 @@ import {
 } from '../../operations/deploy';
 import { computeProjectDeployHash } from '../../operations/deploy/change-detection';
 import { formatTargetStatus, getGatewayTargetStatuses } from '../../operations/deploy/gateway-status';
-import { type ImperativeDeployContext, createDeploymentManager } from '../../operations/deploy/imperative';
 import { deleteOrphanedABTests, setupABTests } from '../../operations/deploy/post-deploy-ab-tests';
 import { syncDatasets } from '../../operations/deploy/post-deploy-datasets';
 import { autoIngestKnowledgeBases } from '../../operations/deploy/post-deploy-knowledge-bases';
@@ -161,6 +162,27 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     startStep('Validate project');
     const context = await validateProject();
     endStep('success');
+
+    // Warn about imperative-build orphan harnesses (preview→GA transition). These aren't
+    // managed by CloudFormation, so this deploy can't delete or adopt them; a same-named CFN
+    // harness would 409/rollback. Non-blocking — point the user at `remove harness`. Collected
+    // into postDeployWarnings at the success return so they reach the terminal, not just the log.
+    // Skipped on a teardown deploy: the "migrate it to GA with --keep" guidance is wrong when the
+    // user is tearing everything down, and teardown.ts emits the apt "--discard" warning instead.
+    const orphanWarnings: string[] = [];
+    if (isPreviewEnabled() && !context.isTeardownDeploy) {
+      const preDeployState = await configIO.readDeployedState().catch(() => undefined);
+      for (const orphan of findOrphanHarnesses(preDeployState)) {
+        const warning =
+          `Harness "${orphan.name}" was created by the preview build and is not managed by ` +
+          `CloudFormation. This deploy won't touch it, and it keeps incurring cost. To migrate it ` +
+          `to GA, run \`agentcore remove harness ${orphan.name} --keep\` (deletes the old resource ` +
+          `but keeps it in agentcore.json), then deploy again so it's recreated under CloudFormation. ` +
+          `Use --discard instead if you no longer want it.`;
+        logger.log(warning, 'warn');
+        orphanWarnings.push(warning);
+      }
+    }
 
     // Teardown confirmation: if this is a teardown deploy, require --yes
     if (context.isTeardownDeploy && !options.autoConfirm) {
@@ -437,38 +459,8 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     endStep('success');
 
     if (context.isTeardownDeploy) {
-      if (isPreviewEnabled()) {
-        const imperativeManager = createDeploymentManager();
-        const existingTeardownState: DeployedState = await configIO
-          .readDeployedState()
-          .catch(() => ({ targets: {} }) as DeployedState);
-        const teardownContext: ImperativeDeployContext = {
-          projectSpec: context.projectSpec,
-          target,
-          configIO,
-          deployedState: existingTeardownState,
-          onProgress: (step: string, status: 'start' | 'done' | 'error') => {
-            logger.log(`${step}: ${status}`);
-          },
-        };
-
-        if (imperativeManager.hasDeployersForPhase('post-cdk', teardownContext)) {
-          startStep('Tear down imperative resources');
-          const imperativeTeardown = await imperativeManager.teardownAll(teardownContext);
-          if (!imperativeTeardown.success) {
-            endStep('error', imperativeTeardown.error);
-            logger.finalize(false);
-            return {
-              success: false,
-              error: new Error(`Imperative teardown failed: ${imperativeTeardown.error}`),
-              logPath: logger.getRelativeLogPath(),
-            };
-          }
-          endStep('success');
-        }
-      }
-
-      // Clean up imperative payment credential providers (CFN stack delete handles manager/connector/roles)
+      // Clean up imperative payment credential providers (CFN stack delete handles manager/connector/roles).
+      // Harnesses are part of the CloudFormation stack, so stack destroy handles them.
       const existingDeployedState = await configIO.readDeployedState().catch(() => undefined);
       const existingPayments = existingDeployedState?.targets?.[target.name]?.resources?.payments;
       if (existingPayments && Object.keys(existingPayments).length > 0) {
@@ -635,49 +627,14 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     }));
     const payments = paymentSpecs.length > 0 ? parsePaymentOutputs(outputs, paymentSpecs) : undefined;
 
+    // Parse harness outputs (harnesses are now part of the CloudFormation stack).
+    // Preview-gated: when preview is off the vended app never synthesizes a harness
+    // (see bin/cdk.ts), so there are no outputs to parse — skip entirely to keep the
+    // gate complete and avoid warning on a harness that was intentionally not deployed.
+    const harnessNames = isPreviewEnabled() ? (context.projectSpec.harnesses ?? []).map(h => h.name) : [];
+    const deployedHarnesses = parseHarnessOutputs(outputs, harnessNames);
+
     endStep('success');
-
-    // Post-CDK: deploy imperative resources (harness) — preview mode only
-    let deployedHarnesses: Record<string, HarnessDeployedState> | undefined;
-    if (isPreviewEnabled()) {
-      const imperativeManager = createDeploymentManager();
-      const existingImperativeState: DeployedState = await configIO.readDeployedState().catch(() => ({ targets: {} }));
-      const imperativeContext = {
-        projectSpec: context.projectSpec,
-        target,
-        configIO,
-        deployedState: existingImperativeState,
-        cdkOutputs: outputs,
-        onProgress: (step: string, status: 'start' | 'done' | 'error') => {
-          logger.log(`${step}: ${status}`);
-        },
-      };
-
-      let harnessDeployError: string | undefined;
-      if (imperativeManager.hasDeployersForPhase('post-cdk', imperativeContext)) {
-        startStep('Deploy harnesses');
-        const postCdkResult = await imperativeManager.runPhase('post-cdk', imperativeContext);
-        const harnessResult = postCdkResult.results.get('harness');
-        if (harnessResult?.state) {
-          deployedHarnesses = harnessResult.state as Record<string, HarnessDeployedState>;
-        }
-        if (!postCdkResult.success) {
-          endStep('error', postCdkResult.error);
-          harnessDeployError = postCdkResult.error;
-        } else {
-          endStep('success');
-        }
-      }
-
-      if (harnessDeployError) {
-        logger.finalize(false);
-        return {
-          success: false,
-          error: new Error(`Harness deployment failed: ${harnessDeployError}`),
-          logPath: logger.getRelativeLogPath(),
-        };
-      }
-    }
 
     let deployHash: string | undefined;
     try {
@@ -959,6 +916,10 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
 
     logger.finalize(true);
 
+    // Surface orphan-harness warnings (collected pre-deploy) to the terminal alongside any
+    // post-deploy warnings — logger.log only writes to the log file.
+    const allWarnings = [...orphanWarnings, ...postDeployWarnings];
+
     return {
       success: true,
       targetName: target.name,
@@ -967,7 +928,7 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       logPath: logger.getRelativeLogPath(),
       nextSteps,
       notes,
-      postDeployWarnings: postDeployWarnings.length > 0 ? postDeployWarnings : undefined,
+      postDeployWarnings: allWarnings.length > 0 ? allWarnings : undefined,
     };
   } catch (err: unknown) {
     logger.log(getErrorMessage(err), 'error');

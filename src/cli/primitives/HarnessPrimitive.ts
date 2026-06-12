@@ -1,5 +1,6 @@
 import { APP_DIR, ConfigIO, type Result, findConfigRoot } from '../../lib';
 import type {
+  AgentCoreProjectSpec,
   HarnessApiFormat,
   HarnessGatewayOutboundAuth,
   HarnessModelProvider,
@@ -12,14 +13,20 @@ import type {
 import { DEFAULT_EPISODIC_REFLECTION_NAMESPACES, DEFAULT_STRATEGY_NAMESPACES, HarnessSpecSchema } from '../../schema';
 import { deleteHarness } from '../aws/agentcore-harness';
 import { getErrorMessage } from '../errors';
+import { findOrphanHarnesses } from '../operations/harness/orphan';
+import type { OrphanHarness } from '../operations/harness/orphan';
 import type { RemovalPreview, SchemaChange } from '../operations/remove/types';
 import { getTemplatePath } from '../templates/templateRoot';
 import { DEFAULT_MEMORY_EXPIRY_DAYS } from '../tui/screens/generate/defaults';
+import { withCommandRunTelemetry } from '../telemetry/cli-command-run.js';
+import type { SubCommand } from '../telemetry/schemas/command-run.js';
+import { requireTTY } from '../tui/guards/tty';
 import { BasePrimitive } from './BasePrimitive';
 import { buildAuthorizerConfigFromJwtConfig, createManagedOAuthCredential } from './auth-utils';
 import type { JwtConfigOptions } from './auth-utils';
+import { SOURCE_CODE_NOTE } from './constants';
 import type { AddScreenComponent, RemovableResource } from './types';
-import { ResourceNotFoundError, toError } from '@/lib/errors/types';
+import { ResourceNotFoundError, ValidationError, toError } from '@/lib/errors/types';
 import type { Command } from '@commander-js/extra-typings';
 import { access, copyFile, mkdir, readFile, rm, writeFile } from 'fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'path';
@@ -60,6 +67,19 @@ export interface AddHarnessOptions {
 }
 
 export type RemovableHarness = RemovableResource;
+
+/**
+ * Intent for removing an imperative-build orphan harness (one not managed by CloudFormation).
+ * - `keep`: delete the AWS resource but keep the agentcore.json entry (it moves to GA — the
+ *   next deploy recreates it under CloudFormation).
+ * - `discard`: delete the AWS resource and remove the agentcore.json entry (no longer wanted).
+ */
+export type OrphanAction = 'keep' | 'discard';
+
+export interface RemoveHarnessOptions {
+  /** Explicit intent when the named harness is an orphan. Required to delete one (never auto-deletes). */
+  orphanAction?: OrphanAction;
+}
 
 export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, RemovableHarness> {
   readonly kind = 'harness' as const;
@@ -242,7 +262,7 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
     }
   }
 
-  async remove(harnessName: string): Promise<Result> {
+  async remove(harnessName: string, opts?: RemoveHarnessOptions): Promise<Result> {
     try {
       const configRoot = findConfigRoot();
       if (!configRoot) {
@@ -251,53 +271,118 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
 
       const configIO = new ConfigIO({ baseDir: configRoot });
       const project = await this.readProjectSpec(configIO);
+      const deployedState = await configIO.readDeployedState().catch(() => undefined);
 
-      const harnesses = project.harnesses ?? [];
-      const harnessIndex = harnesses.findIndex(h => h.name === harnessName);
+      // An orphan is an imperative-build harness recorded in deployed-state but not managed by
+      // CloudFormation (no `provisioner: 'cloudformation'` marker). CFN can't delete it, so it
+      // keeps billing and would 409 a same-named CFN deploy. It must be deleted directly from
+      // AWS — but only with the user's explicit intent (never auto-delete).
+      const orphans = findOrphanHarnesses(deployedState, harnessName);
+      if (orphans.length > 0) {
+        return this.removeOrphan(harnessName, orphans, opts?.orphanAction, configIO, project);
+      }
 
-      if (harnessIndex === -1) {
+      const inSpec = (project.harnesses ?? []).some(h => h.name === harnessName);
+      if (!inSpec) {
         return { success: false, error: new ResourceNotFoundError(`Harness "${harnessName}" not found.`) };
       }
 
-      // Delete harness from AWS if it's deployed
-      try {
-        const deployedState = await configIO.readDeployedState();
-        for (const target of Object.values(deployedState.targets)) {
-          const deployedHarness = target.resources?.harnesses?.[harnessName];
-          if (deployedHarness) {
-            const targets = await configIO.resolveAWSDeploymentTargets();
-            const region = targets[0]?.region;
-            if (region) {
-              await deleteHarness({ region, harnessId: deployedHarness.harnessId });
-            }
-            delete target.resources!.harnesses![harnessName];
-            await configIO.writeDeployedState(deployedState);
-            break;
-          }
-        }
-      } catch {
-        // AWS deletion is best-effort; next deploy will clean up
-      }
-
-      harnesses.splice(harnessIndex, 1);
-      project.harnesses = harnesses;
-
-      // Remove the associated memory (convention: <harnessName>Memory)
-      const associatedMemoryName = `${harnessName}Memory`;
-      if (project.memories) {
-        project.memories = project.memories.filter(m => m.name !== associatedMemoryName);
-      }
-
-      await this.writeProjectSpec(project, configIO);
-
-      const pathResolver = configIO.getPathResolver();
-      const harnessDir = pathResolver.getHarnessDir(harnessName);
-      await rm(harnessDir, { recursive: true, force: true });
-
+      // CDK-managed harness: drop it from the project spec. The harness is part of the
+      // CloudFormation stack, so the next deploy removes the AWS::BedrockAgentCore::Harness.
+      await this.removeFromSpec(harnessName, configIO, project);
       return { success: true };
     } catch (err) {
       return { success: false, error: toError(err) };
     }
+  }
+
+  /**
+   * Delete an imperative-build orphan harness directly from AWS, then reconcile local state
+   * per the user's chosen intent. Never auto-deletes: an unspecified action returns an
+   * actionable error rather than guessing.
+   */
+  private async removeOrphan(
+    harnessName: string,
+    orphans: OrphanHarness[],
+    action: OrphanAction | undefined,
+    configIO: ConfigIO,
+    project: AgentCoreProjectSpec
+  ): Promise<Result> {
+    if (!action) {
+      return {
+        success: false,
+        error: new ValidationError(
+          `No changes were made — "${harnessName}" was not deleted. It was created by the preview ` +
+            `build and is not managed by CloudFormation, so CloudFormation cannot delete it. Removing ` +
+            `it deletes the resource directly from your AWS account. Re-run with an explicit choice:\n` +
+            `  --keep     delete it from AWS but keep it in agentcore.json (it moves to GA; the ` +
+            `next \`agentcore deploy\` recreates it under CloudFormation)\n` +
+            `  --discard  delete it from AWS and remove it from agentcore.json (you no longer want it)`
+        ),
+      };
+    }
+
+    // Delete each recorded orphan resource using its recorded id + ARN-derived region — never
+    // re-resolve by name. A 404/NotFound means it's already gone, which is success for our
+    // purposes; any other error aborts so local state still points at the live resource for a
+    // retry.
+    for (const orphan of orphans) {
+      try {
+        await deleteHarness({ region: orphan.region, harnessId: orphan.harnessId });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!/404|NotFound|ResourceNotFound|does not exist/i.test(msg)) {
+          return {
+            success: false,
+            error: toError(
+              `Failed to delete orphan harness "${harnessName}" (${orphan.harnessId}) in ${orphan.region}: ${msg}. ` +
+                `Local state was left unchanged — resolve the error and retry.`
+            ),
+          };
+        }
+      }
+    }
+
+    // Drop the orphan records from deployed-state so the harness is no longer flagged.
+    const deployedState = await configIO.readDeployedState().catch(() => undefined);
+    if (deployedState) {
+      for (const orphan of orphans) {
+        const harnesses = deployedState.targets?.[orphan.targetName]?.resources?.harnesses;
+        if (harnesses) delete harnesses[orphan.name];
+      }
+      await configIO.writeDeployedState(deployedState);
+    }
+
+    // delete-and-discard also removes the spec entry, its memory, and its directory.
+    // delete-and-keep leaves the spec entry so the next deploy recreates it under CloudFormation.
+    if (action === 'discard' && (project.harnesses ?? []).some(h => h.name === harnessName)) {
+      await this.removeFromSpec(harnessName, configIO, project);
+    }
+
+    return { success: true };
+  }
+
+  /**
+   * Remove a harness from the project spec: drop its entry, its convention-named memory
+   * (`<name>Memory`), persist agentcore.json, and delete its on-disk directory.
+   */
+  private async removeFromSpec(
+    harnessName: string,
+    configIO: ConfigIO,
+    project: AgentCoreProjectSpec
+  ): Promise<void> {
+    project.harnesses = (project.harnesses ?? []).filter(h => h.name !== harnessName);
+
+    const associatedMemoryName = `${harnessName}Memory`;
+    if (project.memories) {
+      project.memories = project.memories.filter(m => m.name !== associatedMemoryName);
+    }
+
+    await this.writeProjectSpec(project, configIO);
+
+    const pathResolver = configIO.getPathResolver();
+    const harnessDir = pathResolver.getHarnessDir(harnessName);
+    await rm(harnessDir, { recursive: true, force: true });
   }
 
   async previewRemove(harnessName: string): Promise<RemovalPreview> {
@@ -342,6 +427,23 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
       return harnesses.map(h => ({ name: h.name }));
     } catch {
       return [];
+    }
+  }
+
+  /**
+   * Whether the named harness is an imperative-build orphan (recorded in deployed-state but
+   * not managed by CloudFormation). Local check, no AWS calls. The TUI uses this to decide
+   * whether to show the delete-and-keep / delete-and-discard choice instead of a plain confirm.
+   */
+  async isOrphan(harnessName: string): Promise<boolean> {
+    try {
+      const configRoot = findConfigRoot();
+      if (!configRoot) return false;
+      const configIO = new ConfigIO({ baseDir: configRoot });
+      const deployedState = await configIO.readDeployedState().catch(() => undefined);
+      return findOrphanHarnesses(deployedState, harnessName).length > 0;
+    } catch {
+      return false;
     }
   }
 
@@ -567,7 +669,111 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
         }
       );
 
-    this.registerRemoveSubcommand(removeCmd);
+    this.registerHarnessRemoveSubcommand(removeCmd);
+  }
+
+  /**
+   * Harness remove subcommand. Mirrors the shared base remove flow but adds the
+   * `--keep` / `--discard` flags needed to express intent when removing an imperative-build
+   * orphan harness (one not managed by CloudFormation — see {@link removeOrphan}). For a
+   * normal CDK-managed harness these flags are ignored and behavior is identical to the base.
+   */
+  private registerHarnessRemoveSubcommand(removeCmd: Command): void {
+    removeCmd
+      .command(this.kind)
+      .description(`Remove ${this.article} ${this.label.toLowerCase()} from the project`)
+      .option('--name <name>', 'Name of resource to remove [non-interactive]')
+      .option('-y, --yes', 'Skip confirmation prompt [non-interactive]')
+      .option('--json', 'Output as JSON [non-interactive]')
+      .option(
+        '--keep',
+        'For a preview-build orphan: delete it from AWS but keep it in agentcore.json (it moves to GA; the next deploy recreates it under CloudFormation)'
+      )
+      .option(
+        '--discard',
+        'For a preview-build orphan: delete it from AWS and remove it from agentcore.json'
+      )
+      .action(async (cliOptions: { name?: string; yes?: boolean; json?: boolean; keep?: boolean; discard?: boolean }) => {
+        try {
+          if (!findConfigRoot()) {
+            console.error('No agentcore project found. Run `agentcore create` first.');
+            process.exit(1);
+          }
+
+          if (cliOptions.keep && cliOptions.discard) {
+            const error = '--keep and --discard are mutually exclusive';
+            console.log(JSON.stringify({ success: false, error }));
+            process.exit(1);
+          }
+          const orphanAction: OrphanAction | undefined = cliOptions.keep
+            ? 'keep'
+            : cliOptions.discard
+              ? 'discard'
+              : undefined;
+
+          // Any flag triggers non-interactive CLI mode
+          if (cliOptions.name || cliOptions.yes || cliOptions.json || orphanAction) {
+            if (!cliOptions.name) {
+              console.log(JSON.stringify({ success: false, error: '--name is required' }));
+              process.exit(1);
+            }
+
+            const result = await withCommandRunTelemetry<SubCommand<'remove', typeof this.kind>, Result>(
+              `remove.${this.kind}`,
+              {},
+              () => this.remove(cliOptions.name!, { orphanAction })
+            );
+            // The orphan no-flag refusal made no changes — surface it as a clean human error on
+            // stderr (with a non-zero exit) rather than a JSON blob, so a user who expected a
+            // deletion plainly sees that nothing happened and what to do. Scoped to that exact
+            // case (orphan + no --keep/--discard, non-JSON); every other path keeps the
+            // machine-readable JSON convention untouched.
+            if (!result.success && !orphanAction && !cliOptions.json && (await this.isOrphan(cliOptions.name))) {
+              console.error(`Error: ${result.error.message}`);
+              process.exit(1);
+            }
+            console.log(
+              JSON.stringify({
+                success: result.success,
+                resourceType: this.kind,
+                resourceName: cliOptions.name,
+                message: result.success ? `Removed ${this.label.toLowerCase()} '${cliOptions.name}'` : undefined,
+                note: result.success ? SOURCE_CODE_NOTE : undefined,
+                error: !result.success ? result.error.message : undefined,
+              })
+            );
+            process.exit(result.success ? 0 : 1);
+          } else {
+            // TUI fallback — dynamic imports to avoid pulling ink (async) into registry
+            requireTTY();
+            const [{ render }, { default: React }, { RemoveFlow }] = await Promise.all([
+              import('ink'),
+              import('react'),
+              import('../tui/screens/remove'),
+            ]);
+            const { clear, unmount } = render(
+              React.createElement(RemoveFlow, {
+                isInteractive: false,
+                force: cliOptions.yes,
+                initialResourceType: this.kind,
+                initialResourceName: cliOptions.name,
+                onExit: () => {
+                  clear();
+                  unmount();
+                  process.exit(0);
+                },
+              })
+            );
+          }
+        } catch (error) {
+          if (cliOptions.json) {
+            console.log(JSON.stringify({ success: false, error: getErrorMessage(error) }));
+          } else {
+            console.error(`Error: ${getErrorMessage(error)}`);
+          }
+          process.exit(1);
+        }
+      });
   }
 
   addScreen(): AddScreenComponent {

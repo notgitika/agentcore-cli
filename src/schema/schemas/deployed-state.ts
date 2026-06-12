@@ -153,7 +153,8 @@ export const HarnessDeployedStateSchema = z.object({
   status: z.string().min(1),
   agentRuntimeArn: z.string().optional(),
   memoryArn: z.string().optional(),
-  configHash: z.string().optional(),
+  /** Which subsystem provisioned this harness. Stamped 'cloudformation' by the CDK deploy path. */
+  provisioner: z.enum(['cloudformation']).optional(),
 });
 
 export type HarnessDeployedState = z.infer<typeof HarnessDeployedStateSchema>;
