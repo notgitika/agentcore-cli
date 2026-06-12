@@ -2,9 +2,9 @@ name: Build and Test
 
 on:
   push:
-    branches: ['main', 'feat/summit_release']
+    branches: ['main', 'feat/**']
   pull_request:
-    branches: ['main', 'feat/summit_release']
+    branches: ['main', 'feat/**']
 
 permissions:
   contents: read
