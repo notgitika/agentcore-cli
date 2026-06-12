@@ -145,6 +145,14 @@ export interface AddHarnessCliOptions {
   customClaims?: string;
   clientId?: string;
   clientSecret?: string;
+  privateEndpointLatticeArn?: string;
+  privateEndpointVpcId?: string;
+  privateEndpointSubnets?: string;
+  privateEndpointIpType?: string;
+  privateEndpointSecurityGroups?: string;
+  privateEndpointRoutingDomain?: string;
+  privateEndpointTags?: string;
+  privateEndpointOverrides?: string;
   json?: boolean;
 }
 

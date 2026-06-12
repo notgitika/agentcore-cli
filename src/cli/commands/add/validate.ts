@@ -1125,5 +1125,21 @@ export function validateAddHarnessOptions(options: AddHarnessCliOptions): Valida
     return { valid: false, error: 'OAuth client credentials are only valid with CUSTOM_JWT authorizer' };
   }
 
+  // PrivateLink (private-endpoint) flags only apply to the CUSTOM_JWT inbound authorizer; reject
+  // them for any other authorizer rather than silently dropping the config (mirrors the OAuth guard).
+  const hasPrivateEndpointFlag = [
+    options.privateEndpointLatticeArn,
+    options.privateEndpointVpcId,
+    options.privateEndpointSubnets,
+    options.privateEndpointIpType,
+    options.privateEndpointSecurityGroups,
+    options.privateEndpointRoutingDomain,
+    options.privateEndpointTags,
+    options.privateEndpointOverrides,
+  ].some(Boolean);
+  if (hasPrivateEndpointFlag && options.authorizerType !== 'CUSTOM_JWT') {
+    return { valid: false, error: '--private-endpoint-* flags are only valid with CUSTOM_JWT authorizer' };
+  }
+
   return { valid: true };
 }

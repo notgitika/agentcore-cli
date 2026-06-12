@@ -62,6 +62,7 @@ export function AddHarnessScreen({
   const jwtFlow = useJwtConfigFlow({
     onComplete: jwtConfig => wizard.setJwtConfig(jwtConfig),
     onBack: () => wizard.goBack(),
+    enablePrivateEndpoint: true,
   });
 
   const modelProviderItems: SelectableItem[] = useMemo(
@@ -303,11 +304,17 @@ export function AddHarnessScreen({
   const helpText = isJwtConfigStep
     ? jwtFlow.subStep === 'constraintPicker'
       ? HELP_TEXT.MULTI_SELECT
-      : jwtFlow.subStep === 'customClaims'
-        ? jwtFlow.claimsManagerMode === 'add' || jwtFlow.claimsManagerMode === 'edit'
-          ? '↑/↓ field · ←/→ cycle · Enter next/save · Esc cancel'
-          : 'Navigate · Enter select · Esc back'
-        : HELP_TEXT.TEXT_INPUT
+      : jwtFlow.subStep === 'privateEndpointType' || jwtFlow.subStep === 'vpcIpType'
+        ? HELP_TEXT.NAVIGATE_SELECT
+        : jwtFlow.subStep === 'customClaims'
+          ? jwtFlow.claimsManagerMode === 'add' || jwtFlow.claimsManagerMode === 'edit'
+            ? '↑/↓ field · ←/→ cycle · Enter next/save · Esc cancel'
+            : 'Navigate · Enter select · Esc back'
+          : jwtFlow.subStep === 'domainOverrides'
+            ? jwtFlow.overridesManagerMode === 'add' || jwtFlow.overridesManagerMode === 'edit'
+              ? HELP_TEXT.TEXT_INPUT
+              : 'Navigate · Enter select · Esc back'
+            : HELP_TEXT.TEXT_INPUT
     : isAdvancedStep || isToolsSelectStep
       ? 'Space toggle · Enter confirm · Esc back'
       : isModelProviderStep ||
@@ -378,6 +385,25 @@ export function AddHarnessScreen({
         fields.push({
           label: 'Custom Claims',
           value: `${wizard.config.jwtConfig.customClaims.length} claim(s) configured`,
+        });
+      }
+      const pe = wizard.config.jwtConfig.privateEndpoint;
+      if (pe?.selfManagedLatticeResource) {
+        fields.push({
+          label: 'Private Endpoint',
+          value: `VPC Lattice (${pe.selfManagedLatticeResource.resourceConfigurationIdentifier})`,
+        });
+      } else if (pe?.managedVpcResource) {
+        const v = pe.managedVpcResource;
+        fields.push({
+          label: 'Private Endpoint',
+          value: `Managed VPC ${v.vpcIdentifier} · ${v.subnetIds.length} subnet(s) · ${v.endpointIpAddressType}`,
+        });
+      }
+      if (wizard.config.jwtConfig.privateEndpointOverrides?.length) {
+        fields.push({
+          label: 'Domain Overrides',
+          value: `${wizard.config.jwtConfig.privateEndpointOverrides.length} per-domain override(s)`,
         });
       }
       if (wizard.config.jwtConfig.clientId) {
@@ -835,12 +861,27 @@ export function AddHarnessScreen({
             audience={jwtFlow.audience}
             clients={jwtFlow.clients}
             scopes={jwtFlow.scopes}
+            latticeResourceId={jwtFlow.latticeResourceId}
+            vpcId={jwtFlow.vpcId}
+            vpcSubnets={jwtFlow.vpcSubnets}
+            vpcSecurityGroups={jwtFlow.vpcSecurityGroups}
+            vpcRoutingDomain={jwtFlow.vpcRoutingDomain}
             onDiscoveryUrl={jwtFlow.handlers.handleDiscoveryUrl}
             onConstraintsPicked={jwtFlow.handlers.handleConstraintsPicked}
             onAudience={jwtFlow.handlers.handleAudience}
             onClients={jwtFlow.handlers.handleClients}
             onScopes={jwtFlow.handlers.handleScopes}
             onCustomClaimsDone={jwtFlow.handlers.handleCustomClaimsDone}
+            onPrivateEndpointType={jwtFlow.handlers.handlePrivateEndpointType}
+            onLatticeResourceId={jwtFlow.handlers.handleLatticeResourceId}
+            onVpcId={jwtFlow.handlers.handleVpcId}
+            onVpcSubnets={jwtFlow.handlers.handleVpcSubnets}
+            onVpcIpType={jwtFlow.handlers.handleVpcIpType}
+            onVpcSecurityGroups={jwtFlow.handlers.handleVpcSecurityGroups}
+            onVpcRoutingDomain={jwtFlow.handlers.handleVpcRoutingDomain}
+            domainOverrides={jwtFlow.domainOverrides}
+            onDomainOverridesDone={jwtFlow.handlers.handleDomainOverridesDone}
+            onOverridesManagerModeChange={jwtFlow.handlers.handleOverridesManagerModeChange}
             onClientId={jwtFlow.handlers.handleClientId}
             onClientIdSkip={jwtFlow.handlers.handleClientIdSkip}
             onClientSecret={jwtFlow.handlers.handleClientSecret}

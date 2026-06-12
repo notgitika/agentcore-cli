@@ -1,6 +1,7 @@
 import { APP_DIR, ConfigIO, type Result, findConfigRoot } from '../../lib';
 import type {
   AgentCoreProjectSpec,
+  EndpointIpAddressType,
   HarnessApiFormat,
   HarnessGatewayOutboundAuth,
   HarnessModelProvider,
@@ -8,6 +9,7 @@ import type {
   MemoryStrategy,
   MemoryStrategyType,
   NetworkMode,
+  PrivateEndpoint,
   RuntimeAuthorizerType,
 } from '../../schema';
 import { DEFAULT_EPISODIC_REFLECTION_NAMESPACES, DEFAULT_STRATEGY_NAMESPACES, HarnessSpecSchema } from '../../schema';
@@ -523,6 +525,26 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
       .option('--custom-claims <json>', 'Custom claims JSON array (for CUSTOM_JWT)')
       .option('--client-id <id>', 'OAuth client ID (for CUSTOM_JWT)')
       .option('--client-secret <secret>', 'OAuth client secret (for CUSTOM_JWT)')
+      .option(
+        '--private-endpoint-lattice-arn <id-or-arn>',
+        'PrivateLink: VPC Lattice resource-config id/ARN to reach the OIDC discovery endpoint (for CUSTOM_JWT)'
+      )
+      .option(
+        '--private-endpoint-vpc-id <vpc-id>',
+        'PrivateLink: VPC id for a service-managed endpoint to the OIDC discovery endpoint (for CUSTOM_JWT)'
+      )
+      .option('--private-endpoint-subnets <ids>', 'PrivateLink: comma-separated subnet IDs (with --private-endpoint-vpc-id)')
+      .option('--private-endpoint-ip-type <type>', 'PrivateLink: endpoint IP address type: IPV4 or IPV6 (with --private-endpoint-vpc-id)')
+      .option(
+        '--private-endpoint-security-groups <ids>',
+        'PrivateLink: comma-separated security group IDs, max 5 (with --private-endpoint-vpc-id)'
+      )
+      .option('--private-endpoint-routing-domain <domain>', 'PrivateLink: routing domain (with --private-endpoint-vpc-id)')
+      .option('--private-endpoint-tags <json>', 'PrivateLink: tags JSON object (with --private-endpoint-vpc-id)')
+      .option(
+        '--private-endpoint-overrides <json>',
+        'PrivateLink: JSON array (max 5) of {domain, privateEndpoint} per-domain overrides (for CUSTOM_JWT)'
+      )
       .option('--json', 'Output as JSON')
       .action(
         async (cliOptions: {
@@ -562,6 +584,14 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
           customClaims?: string;
           clientId?: string;
           clientSecret?: string;
+          privateEndpointLatticeArn?: string;
+          privateEndpointVpcId?: string;
+          privateEndpointSubnets?: string;
+          privateEndpointIpType?: string;
+          privateEndpointSecurityGroups?: string;
+          privateEndpointRoutingDomain?: string;
+          privateEndpointTags?: string;
+          privateEndpointOverrides?: string;
           json?: boolean;
         }) => {
           try {
@@ -664,6 +694,10 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
                           : undefined,
                         clientId: cliOptions.clientId,
                         clientSecret: cliOptions.clientSecret,
+                        privateEndpoint: this.buildPrivateEndpointFromFlags(cliOptions),
+                        privateEndpointOverrides: cliOptions.privateEndpointOverrides
+                          ? (JSON.parse(cliOptions.privateEndpointOverrides) as JwtConfigOptions['privateEndpointOverrides'])
+                          : undefined,
                       }
                     : undefined,
               });
@@ -845,5 +879,42 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
       ...(options.idleTimeout !== undefined && { idleRuntimeSessionTimeout: options.idleTimeout }),
       ...(options.maxLifetime !== undefined && { maxLifetime: options.maxLifetime }),
     };
+  }
+
+  /**
+   * Build the PrivateLink `privateEndpoint` (PrivateLink inbound) from CLI flags. Returns the
+   * self-managed-lattice arm when --private-endpoint-lattice-arn is set, the managed-vpc arm when
+   * --private-endpoint-vpc-id is set, or undefined when neither. The schema enforces exactly-one-of
+   * downstream; this just shapes whichever the user provided.
+   */
+  private buildPrivateEndpointFromFlags(options: {
+    privateEndpointLatticeArn?: string;
+    privateEndpointVpcId?: string;
+    privateEndpointSubnets?: string;
+    privateEndpointIpType?: string;
+    privateEndpointSecurityGroups?: string;
+    privateEndpointRoutingDomain?: string;
+    privateEndpointTags?: string;
+  }): PrivateEndpoint | undefined {
+    if (options.privateEndpointLatticeArn) {
+      return { selfManagedLatticeResource: { resourceConfigurationIdentifier: options.privateEndpointLatticeArn } };
+    }
+    if (options.privateEndpointVpcId) {
+      return {
+        managedVpcResource: {
+          vpcIdentifier: options.privateEndpointVpcId,
+          subnetIds: options.privateEndpointSubnets?.split(',').map(s => s.trim()) ?? [],
+          endpointIpAddressType: options.privateEndpointIpType as EndpointIpAddressType,
+          ...(options.privateEndpointSecurityGroups && {
+            securityGroupIds: options.privateEndpointSecurityGroups.split(',').map(s => s.trim()),
+          }),
+          ...(options.privateEndpointRoutingDomain && { routingDomain: options.privateEndpointRoutingDomain }),
+          ...(options.privateEndpointTags && {
+            tags: JSON.parse(options.privateEndpointTags) as Record<string, string>,
+          }),
+        },
+      };
+    }
+    return undefined;
   }
 }

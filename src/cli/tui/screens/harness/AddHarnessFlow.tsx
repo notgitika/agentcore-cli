@@ -99,6 +99,8 @@ export function AddHarnessFlow({ isInteractive = true, onExit, onBack, onDev, on
               customClaims: config.jwtConfig.customClaims,
               clientId: config.jwtConfig.clientId,
               clientSecret: config.jwtConfig.clientSecret,
+              privateEndpoint: config.jwtConfig.privateEndpoint,
+              privateEndpointOverrides: config.jwtConfig.privateEndpointOverrides,
             }
           : undefined,
       });
