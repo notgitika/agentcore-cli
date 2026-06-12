@@ -8,6 +8,8 @@ export type AddHarnessStep =
   | 'model-provider'
   | 'api-format'
   | 'api-key-arn'
+  | 'api-base'
+  | 'additional-params'
   | 'container'
   | 'container-uri'
   | 'container-dockerfile'
@@ -46,6 +48,8 @@ export interface AddHarnessConfig {
   modelId: string;
   apiFormat?: HarnessApiFormat;
   apiKeyArn?: string;
+  apiBase?: string;
+  additionalParams?: Record<string, unknown>;
   skipMemory?: boolean;
   containerMode?: ContainerMode;
   containerUri?: string;
@@ -78,6 +82,8 @@ export const HARNESS_STEP_LABELS: Record<AddHarnessStep, string> = {
   'model-provider': 'Model provider',
   'api-format': 'API format',
   'api-key-arn': 'API key ARN',
+  'api-base': 'API base URL',
+  'additional-params': 'Additional params',
   container: 'Custom environment',
   'container-uri': 'Container URI',
   'container-dockerfile': 'Dockerfile path',
@@ -115,6 +121,7 @@ export const DEFAULT_MODEL_IDS: Record<HarnessModelProvider, string> = {
   bedrock: 'global.anthropic.claude-sonnet-4-6',
   open_ai: 'gpt-5',
   gemini: 'gemini-2.5-flash',
+  lite_llm: 'anthropic/claude-sonnet-4-5',
 };
 
 export const DEFAULT_BEDROCK_MANTLE_MODEL_ID = 'openai.gpt-oss-120b';
@@ -130,6 +137,11 @@ export const MODEL_PROVIDER_OPTIONS = [
     id: 'gemini' as const,
     title: 'Google Gemini',
     description: `Default: ${DEFAULT_MODEL_IDS.gemini} (requires API key ARN)`,
+  },
+  {
+    id: 'lite_llm' as const,
+    title: 'LiteLLM',
+    description: `Default: ${DEFAULT_MODEL_IDS.lite_llm} (API key ARN optional)`,
   },
 ] as const;
 

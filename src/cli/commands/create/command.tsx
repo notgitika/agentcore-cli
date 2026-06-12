@@ -12,6 +12,7 @@ import { LIFECYCLE_TIMEOUT_MAX, LIFECYCLE_TIMEOUT_MIN } from '../../../schema';
 import { ANSI, COMMAND_DESCRIPTIONS } from '../../constants';
 import { getErrorMessage } from '../../errors';
 import { isPreviewEnabled } from '../../feature-flags';
+import { ADDITIONAL_PARAMS_JSON_ERROR } from '../../primitives/constants';
 import { harnessPrimitive } from '../../primitives/registry';
 import { runCliCommand, withCommandRunTelemetry } from '../../telemetry/cli-command-run.js';
 import {
@@ -93,6 +94,8 @@ const AGENT_PATH_FLAGS = ['framework', 'language', 'build', 'protocol', 'type', 
 const HARNESS_ONLY_FLAGS = [
   'modelId',
   'apiKeyArn',
+  'apiBase',
+  'additionalParams',
   'maxIterations',
   'maxTokens',
   'timeout',
@@ -184,10 +187,20 @@ async function handleCreateHarnessCLI(options: CreateOptions): Promise<void> {
         bedrock: 'global.anthropic.claude-sonnet-4-6',
         open_ai: 'gpt-5',
         gemini: 'gemini-2.5-flash',
+        lite_llm: 'anthropic/claude-sonnet-4-5',
       };
       const modelId = options.modelId ?? defaultModelIds[provider] ?? 'global.anthropic.claude-sonnet-4-6';
 
       const containerOption = harnessPrimitive!.parseContainerFlag(options.container);
+
+      let additionalParams: Record<string, unknown> | undefined;
+      if (options.additionalParams) {
+        try {
+          additionalParams = JSON.parse(options.additionalParams) as Record<string, unknown>;
+        } catch {
+          throw new Error(ADDITIONAL_PARAMS_JSON_ERROR);
+        }
+      }
 
       const { efsMounts: harnessEfsMounts, s3Mounts: harnessS3Mounts } = await resolveAndValidateFilesystemMounts(
         options,
@@ -201,6 +214,8 @@ async function handleCreateHarnessCLI(options: CreateOptions): Promise<void> {
         modelProvider: provider,
         modelId,
         apiKeyArn: options.apiKeyArn,
+        apiBase: options.apiBase,
+        additionalParams,
         containerUri: containerOption.containerUri,
         dockerfilePath: containerOption.dockerfilePath,
         skipMemory: options.harnessMemory === false,
@@ -442,6 +457,14 @@ export const registerCreate = (program: Command) => {
     createCmd
       .option('--model-id <id>', 'Model ID for harness [non-interactive] [preview]')
       .option('--api-key-arn <arn>', 'API key ARN for non-Bedrock harness providers [non-interactive] [preview]')
+      .option(
+        '--api-base <url>',
+        'Base URL for the harness model provider API endpoint (lite_llm) [non-interactive] [preview]'
+      )
+      .option(
+        '--additional-params <json>',
+        'Provider-specific harness params as a JSON object (lite_llm) [non-interactive] [preview]'
+      )
       .option('--no-harness-memory', 'Skip auto-creating memory for harness [non-interactive] [preview]')
       .option('--max-iterations <n>', 'Max agent loop iterations (harness) [non-interactive] [preview]')
       .option('--max-tokens <n>', 'Max tokens per iteration (harness) [non-interactive] [preview]')

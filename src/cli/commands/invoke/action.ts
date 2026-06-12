@@ -758,10 +758,12 @@ export function buildHarnessBaseOpts(
   harnessSpec?: Partial<HarnessModel>
 ): Partial<import('../../aws/agentcore-harness').InvokeHarnessOptions> {
   const baseOpts: Partial<import('../../aws/agentcore-harness').InvokeHarnessOptions> = {};
-  if (options.modelId || options.modelProvider || options.apiKeyArn) {
+  if (options.modelId || options.modelProvider || options.apiKeyArn || options.apiBase || options.additionalParams) {
     const provider = options.modelProvider ?? harnessSpec?.provider;
     const modelId = options.modelId ?? harnessSpec?.modelId ?? '';
     const apiKeyArn = options.apiKeyArn ?? harnessSpec?.apiKeyArn;
+    const apiBase = options.apiBase ?? harnessSpec?.apiBase;
+    const additionalParams = options.additionalParams ?? harnessSpec?.additionalParams;
     switch (provider) {
       case 'open_ai':
         baseOpts.model = {
@@ -771,6 +773,16 @@ export function buildHarnessBaseOpts(
       case 'gemini':
         baseOpts.model = {
           geminiModelConfig: { modelId, ...(apiKeyArn && { apiKeyArn }) },
+        };
+        break;
+      case 'lite_llm':
+        baseOpts.model = {
+          liteLlmModelConfig: {
+            modelId,
+            ...(apiKeyArn && { apiKeyArn }),
+            ...(apiBase && { apiBase }),
+            ...(additionalParams && { additionalParams }),
+          },
         };
         break;
       default:

@@ -66,6 +66,10 @@ export function useAddHarnessWizard() {
       steps.push('api-key-arn');
     }
 
+    if (config.modelProvider === 'lite_llm') {
+      steps.push('api-base', 'additional-params');
+    }
+
     steps.push('container');
     if (config.containerMode === 'uri') {
       steps.push('container-uri');
@@ -254,7 +258,14 @@ export function useAddHarnessWizard() {
   );
 
   const setModelProvider = useCallback((modelProvider: HarnessModelProvider) => {
-    setConfig(c => ({ ...c, modelProvider, modelId: DEFAULT_MODEL_IDS[modelProvider], apiFormat: undefined }));
+    setConfig(c => ({
+      ...c,
+      modelProvider,
+      modelId: DEFAULT_MODEL_IDS[modelProvider],
+      apiFormat: undefined,
+      // apiBase / additionalParams only apply to lite_llm — clear them when switching away.
+      ...(modelProvider !== 'lite_llm' && { apiBase: undefined, additionalParams: undefined }),
+    }));
     if (modelProvider === 'bedrock' && isPreviewEnabled()) {
       setStep('api-format');
     } else if (modelProvider !== 'bedrock') {
@@ -283,6 +294,24 @@ export function useAddHarnessWizard() {
     (apiKeyArn: string) => {
       setConfig(c => ({ ...c, apiKeyArn }));
       const next = nextStep('api-key-arn');
+      if (next) setStep(next);
+    },
+    [nextStep]
+  );
+
+  const setApiBase = useCallback(
+    (apiBase: string) => {
+      setConfig(c => ({ ...c, apiBase: apiBase || undefined }));
+      const next = nextStep('api-base');
+      if (next) setStep(next);
+    },
+    [nextStep]
+  );
+
+  const setAdditionalParams = useCallback(
+    (additionalParams: Record<string, unknown> | undefined) => {
+      setConfig(c => ({ ...c, additionalParams }));
+      const next = nextStep('additional-params');
       if (next) setStep(next);
     },
     [nextStep]
@@ -556,6 +585,8 @@ export function useAddHarnessWizard() {
     setModelProvider,
     setApiFormat,
     setApiKeyArn,
+    setApiBase,
+    setAdditionalParams,
     setContainerMode,
     setContainerUri,
     setDockerfilePath,

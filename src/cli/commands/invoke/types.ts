@@ -35,10 +35,14 @@ export interface InvokeOptions {
   verbose?: boolean;
   /** Override model ID for this invocation (harness only) */
   modelId?: string;
-  /** Override model provider for this invocation (harness only): bedrock, open_ai, gemini */
+  /** Override model provider for this invocation (harness only): bedrock, open_ai, gemini, lite_llm */
   modelProvider?: string;
-  /** Override API key ARN for this invocation (harness only, open_ai/gemini) */
+  /** Override API key ARN for this invocation (harness only, open_ai/gemini; optional for lite_llm) */
   apiKeyArn?: string;
+  /** Override LiteLLM API base URL for this invocation (harness only, lite_llm) */
+  apiBase?: string;
+  /** Override LiteLLM additional params for this invocation (harness only, lite_llm; JSON object) */
+  additionalParams?: Record<string, unknown>;
   /** Override tools for this invocation (harness only, comma-separated) */
   tools?: string;
   /** Override max iterations (harness only) */

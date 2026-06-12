@@ -56,7 +56,7 @@ describe('HarnessToolTypeSchema', () => {
 });
 
 describe('HarnessModelProviderSchema', () => {
-  it.each(['bedrock', 'open_ai', 'gemini'])('accepts "%s"', provider => {
+  it.each(['bedrock', 'open_ai', 'gemini', 'lite_llm'])('accepts "%s"', provider => {
     expect(HarnessModelProviderSchema.safeParse(provider).success).toBe(true);
   });
 
@@ -376,6 +376,33 @@ describe('HarnessModelSchema', () => {
     expect(HarnessModelSchema.safeParse({ provider: 'open_ai', modelId: 'gpt-4o' }).success).toBe(false);
     expect(HarnessModelSchema.safeParse({ provider: 'gemini', modelId: 'gemini-2.5-pro' }).success).toBe(false);
     expect(HarnessModelSchema.safeParse({ provider: 'bedrock', modelId: 'claude' }).success).toBe(true);
+  });
+
+  it('accepts lite_llm model without apiKeyArn (key is optional)', () => {
+    const result = HarnessModelSchema.safeParse({ provider: 'lite_llm', modelId: 'anthropic/claude-sonnet-4-5' });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts lite_llm model with apiBase and additionalParams', () => {
+    const result = HarnessModelSchema.safeParse({
+      provider: 'lite_llm',
+      modelId: 'anthropic/claude-sonnet-4-5',
+      apiBase: 'https://proxy.example.com/v1',
+      additionalParams: { reasoning_effort: 'high' },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects apiBase for non-lite_llm providers', () => {
+    expect(HarnessModelSchema.safeParse({ provider: 'bedrock', modelId: 'm', apiBase: 'https://x' }).success).toBe(
+      false
+    );
+  });
+
+  it('rejects additionalParams for non-lite_llm providers', () => {
+    expect(
+      HarnessModelSchema.safeParse({ provider: 'bedrock', modelId: 'm', additionalParams: { foo: 'bar' } }).success
+    ).toBe(false);
   });
 
   it('rejects temperature above 2.0', () => {

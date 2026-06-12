@@ -27,8 +27,11 @@ export const HarnessNameSchema = z
 // Model Configuration
 // ============================================================================
 
-export const HarnessModelProviderSchema = z.enum(['bedrock', 'open_ai', 'gemini']);
+export const HarnessModelProviderSchema = z.enum(['bedrock', 'open_ai', 'gemini', 'lite_llm']);
 export type HarnessModelProvider = z.infer<typeof HarnessModelProviderSchema>;
+
+/** Max length of the LiteLLM apiBase URL (Smithy: HarnessLiteLlmApiBase, 1–16383). */
+export const MAX_LITE_LLM_API_BASE_LENGTH = 16383;
 
 export const BedrockApiFormatSchema = z.enum(['converse_stream', 'responses', 'chat_completions']);
 export type BedrockApiFormat = z.infer<typeof BedrockApiFormatSchema>;
@@ -49,6 +52,10 @@ export const HarnessModelSchema = z
     topP: z.number().min(0).max(1).optional(),
     topK: z.number().int().min(0).max(500).optional(),
     maxTokens: z.number().int().min(1).optional(),
+    /** LiteLLM only: base URL for the third-party model provider's API endpoint. */
+    apiBase: z.string().min(1).max(MAX_LITE_LLM_API_BASE_LENGTH).optional(),
+    /** LiteLLM only: provider-specific parameters passed through to the model provider unchanged. */
+    additionalParams: z.record(z.string(), z.unknown()).optional(),
   })
   .superRefine((model, ctx) => {
     if (model.topK !== undefined && model.provider !== 'gemini') {
@@ -73,12 +80,26 @@ export const HarnessModelSchema = z
         });
       }
     }
-    // CFN requires ApiKeyArn for the open_ai and gemini model configs (bedrock does not).
+    // CFN requires ApiKeyArn for the open_ai and gemini model configs (bedrock and lite_llm do not).
     if (model.apiKeyArn === undefined && (model.provider === 'open_ai' || model.provider === 'gemini')) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: `apiKeyArn is required for the "${model.provider}" provider`,
         path: ['apiKeyArn'],
+      });
+    }
+    if (model.apiBase !== undefined && model.provider !== 'lite_llm') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'apiBase is only supported for the "lite_llm" provider',
+        path: ['apiBase'],
+      });
+    }
+    if (model.additionalParams !== undefined && model.provider !== 'lite_llm') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'additionalParams is only supported for the "lite_llm" provider',
+        path: ['additionalParams'],
       });
     }
   });

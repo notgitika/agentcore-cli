@@ -43,10 +43,23 @@ export interface GeminiModelConfig {
   maxTokens?: number;
 }
 
+export interface LiteLlmModelConfig {
+  modelId: string;
+  apiKeyArn?: string;
+  /** Base URL for the third-party model provider's API endpoint. */
+  apiBase?: string;
+  temperature?: number;
+  topP?: number;
+  maxTokens?: number;
+  /** Provider-specific parameters passed through to the model provider unchanged. */
+  additionalParams?: Record<string, unknown>;
+}
+
 export interface HarnessModelConfiguration {
   bedrockModelConfig?: BedrockModelConfig;
   openAiModelConfig?: OpenAiModelConfig;
   geminiModelConfig?: GeminiModelConfig;
+  liteLlmModelConfig?: LiteLlmModelConfig;
 }
 
 export type HarnessSystemPrompt = { text: string }[];

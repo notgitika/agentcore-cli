@@ -24,7 +24,7 @@ import { DEFAULT_MEMORY_EXPIRY_DAYS } from '../tui/screens/generate/defaults';
 import { BasePrimitive } from './BasePrimitive';
 import { buildAuthorizerConfigFromJwtConfig, createManagedOAuthCredential } from './auth-utils';
 import type { JwtConfigOptions } from './auth-utils';
-import { SOURCE_CODE_NOTE } from './constants';
+import { ADDITIONAL_PARAMS_JSON_ERROR, SOURCE_CODE_NOTE } from './constants';
 import type { AddScreenComponent, RemovableResource } from './types';
 import { ResourceNotFoundError, ValidationError, toError } from '@/lib/errors/types';
 import type { Command } from '@commander-js/extra-typings';
@@ -37,6 +37,10 @@ export interface AddHarnessOptions {
   modelId: string;
   apiFormat?: HarnessApiFormat;
   apiKeyArn?: string;
+  /** LiteLLM only: base URL for the third-party model provider's API endpoint. */
+  apiBase?: string;
+  /** LiteLLM only: provider-specific parameters passed through to the model provider unchanged. */
+  additionalParams?: Record<string, unknown>;
   systemPrompt?: string;
   skipMemory?: boolean;
   containerUri?: string;
@@ -175,6 +179,8 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
           modelId: options.modelId,
           ...(options.apiFormat && { apiFormat: options.apiFormat }),
           ...(options.apiKeyArn && { apiKeyArn: options.apiKeyArn }),
+          ...(options.apiBase && { apiBase: options.apiBase }),
+          ...(options.additionalParams && { additionalParams: options.additionalParams }),
         },
         tools,
         skills: [],
@@ -448,13 +454,18 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
       .command('harness')
       .description('Add a harness to the project')
       .option('--name <name>', 'Harness name (start with letter, alphanumeric + underscores, max 48 chars)')
-      .option('--model-provider <provider>', 'Model provider: bedrock, open_ai, gemini')
+      .option('--model-provider <provider>', 'Model provider: bedrock, open_ai, gemini, lite_llm')
       .option('--model-id <id>', 'Model ID (e.g., anthropic.claude-3-5-sonnet-20240620-v1:0)')
       .option(
         '--api-format <format>',
         'API format: converse_stream, responses, chat_completions (bedrock); responses, chat_completions (open_ai)'
       )
-      .option('--api-key-arn <arn>', 'API key ARN for non-Bedrock providers')
+      .option('--api-key-arn <arn>', 'API key ARN for non-Bedrock providers (optional for lite_llm)')
+      .option('--api-base <url>', 'Base URL for the model provider API endpoint (lite_llm only)')
+      .option(
+        '--additional-params <json>',
+        'Provider-specific params passed through unchanged, as a JSON object (lite_llm only)'
+      )
       .option('--container <uri-or-path>', 'Container image URI or path to a Dockerfile')
       .option('--no-memory', 'Skip auto-creating memory')
       .option('--max-iterations <n>', 'Max iterations', parseInt)
@@ -501,6 +512,8 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
           modelId?: string;
           apiFormat?: string;
           apiKeyArn?: string;
+          apiBase?: string;
+          additionalParams?: string;
           container?: string;
           memory?: boolean;
           maxIterations?: number;
@@ -575,12 +588,28 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
 
               const containerOption = this.parseContainerFlag(cliOptions.container);
 
+              let additionalParams: Record<string, unknown> | undefined;
+              if (cliOptions.additionalParams) {
+                try {
+                  additionalParams = JSON.parse(cliOptions.additionalParams) as Record<string, unknown>;
+                } catch {
+                  if (cliOptions.json) {
+                    console.log(JSON.stringify({ success: false, error: ADDITIONAL_PARAMS_JSON_ERROR }));
+                  } else {
+                    console.error(ADDITIONAL_PARAMS_JSON_ERROR);
+                  }
+                  process.exit(1);
+                }
+              }
+
               const result = await this.add({
                 name: cliOptions.name,
                 modelProvider: provider,
                 modelId,
                 apiFormat: cliOptions.apiFormat as HarnessApiFormat | undefined,
                 apiKeyArn: cliOptions.apiKeyArn,
+                apiBase: cliOptions.apiBase,
+                additionalParams,
                 containerUri: containerOption.containerUri,
                 dockerfilePath: containerOption.dockerfilePath,
                 skipMemory: cliOptions.memory === false,

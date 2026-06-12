@@ -116,6 +116,8 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
   const isModelProviderStep = wizard.step === 'model-provider';
   const isApiFormatStep = wizard.step === 'api-format';
   const isApiKeyArnStep = wizard.step === 'api-key-arn';
+  const isApiBaseStep = wizard.step === 'api-base';
+  const isAdditionalParamsStep = wizard.step === 'additional-params';
   const isContainerStep = wizard.step === 'container';
   const isContainerUriStep = wizard.step === 'container-uri';
   const isContainerDockerfileStep = wizard.step === 'container-dockerfile';
@@ -267,6 +269,14 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
 
     if (wizard.config.apiKeyArn) {
       fields.push({ label: 'API Key ARN', value: wizard.config.apiKeyArn });
+    }
+
+    if (wizard.config.apiBase) {
+      fields.push({ label: 'API Base URL', value: wizard.config.apiBase });
+    }
+
+    if (wizard.config.additionalParams) {
+      fields.push({ label: 'Additional Params', value: JSON.stringify(wizard.config.additionalParams) });
     }
 
     if (wizard.config.skipMemory !== undefined) {
@@ -455,11 +465,64 @@ export function AddHarnessScreen({ existingHarnessNames, onComplete, onExit }: A
         {isApiKeyArnStep && (
           <TextInput
             key="api-key-arn"
-            prompt="API Key ARN (Secrets Manager)"
+            prompt={
+              wizard.config.modelProvider === 'lite_llm'
+                ? 'API Key ARN (AgentCore Identity, optional — leave blank to skip)'
+                : 'API Key ARN (AgentCore Identity)'
+            }
             initialValue=""
+            // LiteLLM's key is optional — let an empty value through to skip it.
+            allowEmpty={wizard.config.modelProvider === 'lite_llm'}
             onSubmit={wizard.setApiKeyArn}
             onCancel={() => wizard.goBack()}
-            customValidation={value => isValidArn(value) || ARN_VALIDATION_MESSAGE}
+            customValidation={value =>
+              // LiteLLM's key is optional — allow an empty value to skip it.
+              (wizard.config.modelProvider === 'lite_llm' && value.trim().length === 0) ||
+              isValidArn(value) ||
+              ARN_VALIDATION_MESSAGE
+            }
+          />
+        )}
+
+        {isApiBaseStep && (
+          <TextInput
+            key="api-base"
+            prompt="API base URL (optional — leave blank to use the provider default)"
+            initialValue=""
+            allowEmpty
+            onSubmit={wizard.setApiBase}
+            onCancel={() => wizard.goBack()}
+          />
+        )}
+
+        {isAdditionalParamsStep && (
+          <TextInput
+            key="additional-params"
+            prompt='Additional params as a JSON object (optional, e.g. {"reasoning_effort":"high"})'
+            initialValue=""
+            allowEmpty
+            onSubmit={value => {
+              const trimmed = value.trim();
+              if (trimmed.length === 0) {
+                wizard.setAdditionalParams(undefined);
+                return;
+              }
+              wizard.setAdditionalParams(JSON.parse(trimmed) as Record<string, unknown>);
+            }}
+            onCancel={() => wizard.goBack()}
+            customValidation={value => {
+              const trimmed = value.trim();
+              if (trimmed.length === 0) return true;
+              try {
+                const parsed = JSON.parse(trimmed) as unknown;
+                if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+                  return 'Additional params must be a JSON object';
+                }
+                return true;
+              } catch {
+                return 'Additional params must be valid JSON';
+              }
+            }}
           />
         )}
 

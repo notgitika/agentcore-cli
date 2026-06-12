@@ -2,6 +2,7 @@ import { ValidationError, serializeResult } from '../../../lib';
 import { COMMAND_DESCRIPTIONS } from '../../constants';
 import { getErrorMessage } from '../../errors';
 import { isPreviewEnabled } from '../../feature-flags';
+import { ADDITIONAL_PARAMS_JSON_ERROR } from '../../primitives/constants';
 import { withCommandRunTelemetry } from '../../telemetry/cli-command-run.js';
 import { renderTUI } from '../../tui';
 import { requireProject, requireTTY } from '../../tui/guards';
@@ -180,11 +181,16 @@ export const registerInvoke = (program: Command) => {
       .option('--model-id <id>', 'Override model for this invocation (harness only) [non-interactive] [preview]')
       .option(
         '--model-provider <provider>',
-        'Override model provider: bedrock, open_ai, gemini (harness only) [non-interactive] [preview]'
+        'Override model provider: bedrock, open_ai, gemini, lite_llm (harness only) [non-interactive] [preview]'
       )
       .option(
         '--api-key-arn <arn>',
         'Override API key ARN for open_ai/gemini (harness only) [non-interactive] [preview]'
+      )
+      .option('--api-base <url>', 'Override LiteLLM API base URL (harness only, lite_llm) [non-interactive] [preview]')
+      .option(
+        '--additional-params <json>',
+        'Override LiteLLM additional params as a JSON object (harness only, lite_llm) [non-interactive] [preview]'
       )
       .option('--tools <tools>', 'Override tools, comma-separated (harness only) [non-interactive] [preview]')
       .option('--max-iterations <n>', 'Override max iterations (harness only) [non-interactive] [preview]', parseInt)
@@ -322,6 +328,8 @@ Model & Runtime Overrides (harness only) [non-interactive] [preview]
         modelId?: string;
         modelProvider?: string;
         apiKeyArn?: string;
+        apiBase?: string;
+        additionalParams?: string;
         tools?: string;
         maxIterations?: number;
         maxTokens?: number;
@@ -410,6 +418,20 @@ Model & Runtime Overrides (harness only) [non-interactive] [preview]
                 headers = parseHeaderFlags(cliOptions.header);
               }
 
+              let additionalParams: Record<string, unknown> | undefined;
+              if (cliOptions.additionalParams) {
+                try {
+                  additionalParams = JSON.parse(cliOptions.additionalParams) as Record<string, unknown>;
+                } catch {
+                  if (cliOptions.json) {
+                    console.log(JSON.stringify({ success: false, error: ADDITIONAL_PARAMS_JSON_ERROR }));
+                  } else {
+                    console.error(ADDITIONAL_PARAMS_JSON_ERROR);
+                  }
+                  process.exit(1);
+                }
+              }
+
               const options: InvokeOptions = {
                 prompt: resolved.prompt,
                 agentName: cliOptions.runtime,
@@ -433,6 +455,8 @@ Model & Runtime Overrides (harness only) [non-interactive] [preview]
                 modelId: cliOptions.modelId,
                 modelProvider: cliOptions.modelProvider,
                 apiKeyArn: cliOptions.apiKeyArn,
+                apiBase: cliOptions.apiBase,
+                additionalParams,
                 tools: cliOptions.tools,
                 maxIterations: cliOptions.maxIterations,
                 maxTokens: cliOptions.maxTokens,

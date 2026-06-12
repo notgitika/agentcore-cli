@@ -52,6 +52,8 @@ export function AddHarnessFlow({ isInteractive = true, onExit, onBack, onDev, on
         modelId: config.modelId,
         apiFormat: config.apiFormat,
         apiKeyArn: config.apiKeyArn,
+        apiBase: config.apiBase,
+        additionalParams: config.additionalParams,
         skipMemory: config.skipMemory,
         containerUri: config.containerUri,
         dockerfilePath: config.dockerfilePath,
