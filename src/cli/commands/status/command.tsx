@@ -25,7 +25,6 @@ const VALID_RESOURCE_TYPES = [
   'policy-engine',
   'policy',
   'config-bundle',
-  'ab-test',
   'dataset',
   'knowledge-base',
   ...(isPreviewEnabled() ? (['harness'] as const) : []),
@@ -183,7 +182,6 @@ export const registerStatus = (program: Command) => {
         const policyEngines = filtered.filter(r => r.resourceType === 'policy-engine');
         const policies = filtered.filter(r => r.resourceType === 'policy');
         const configBundles = filtered.filter(r => r.resourceType === 'config-bundle');
-        const abTests = filtered.filter(r => r.resourceType === 'ab-test');
         const datasets = filtered.filter(r => r.resourceType === 'dataset');
         const knowledgeBases = filtered.filter(r => r.resourceType === 'knowledge-base');
         const harnesses = filtered.filter(r => r.resourceType === 'harness');
@@ -326,22 +324,6 @@ export const registerStatus = (program: Command) => {
                 <Text bold>Config Bundles</Text>
                 {configBundles.map(entry => (
                   <ResourceEntry key={`${entry.resourceType}-${entry.name}`} entry={entry} />
-                ))}
-              </Box>
-            )}
-
-            {abTests.length > 0 && (
-              <Box flexDirection="column" marginTop={1}>
-                <Text bold>AB Tests</Text>
-                {abTests.map(entry => (
-                  <Box key={`${entry.resourceType}-${entry.name}`} flexDirection="column">
-                    <ResourceEntry entry={entry} />
-                    {entry.invocationUrl && (
-                      <Text dimColor>
-                        {'  '}Invocation URL: {entry.invocationUrl}
-                      </Text>
-                    )}
-                  </Box>
                 ))}
               </Box>
             )}

@@ -22,7 +22,7 @@ export const registerBatchEvaluations = (program: Command) => {
           console.log(
             JSON.stringify({
               success: true,
-              batchEvaluations: records.map(r => serializeResult({ success: true, ...r })),
+              batchEvaluations: records,
             })
           );
         } else {

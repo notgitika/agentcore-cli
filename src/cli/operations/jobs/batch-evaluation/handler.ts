@@ -6,7 +6,7 @@
  *               call, persist the record. Dataset Phase-1 (invoke scenarios + ingestion wait) is the
  *               caller's responsibility — it supplies sessionIds/sessionMetadata.
  *  - refresh(): GET latest status; map 404 → NOT_FOUND. On terminal status, fetch per-session scores
- *               from the CloudWatch output log on terminal status. Throws on failure (refreshOne retries).
+ *               from the CloudWatch output log once (resultsFetched guards + enables retry).
  *  - stop():    StopBatchEvaluation.
  *  - archive(): DeleteBatchEvaluation.
  */
@@ -22,10 +22,10 @@ import {
 import type { BatchEvaluationResultEntry } from '../../../aws/agentcore-batch-evaluation';
 import { detectRegion } from '../../../aws/region';
 import { ExecLogger } from '../../../logging/exec-logger';
-import { NOT_FOUND_STATUS } from '../constants';
-import { regionFromArn, resolveJobRegion } from '../region';
+import { NOT_FOUND_STATUS } from '../shared/constants';
+import { regionFromArn, resolveJobRegion } from '../shared/region';
 import { resolveAgentState } from '../shared/resolve-agent-state';
-import type { BatchEvaluationHandler, BatchEvaluationJobRecord, StartBatchEvaluationJobOptions } from '../types';
+import type { BatchEvaluationHandler, BatchEvaluationJobRecord, StartBatchEvaluationJobOptions } from '../shared/types';
 import {
   buildCloudWatchFilterConfig,
   buildCloudWatchSource,
@@ -34,51 +34,33 @@ import {
 } from './build-source';
 import { CloudWatchLogsClient, GetLogEventsCommand } from '@aws-sdk/client-cloudwatch-logs';
 
-/** Read per-session evaluation scores from the batch's CloudWatch output log stream (paginated). */
+/** Read per-session evaluation scores from the batch's CloudWatch output log stream. */
 async function fetchResultsFromCloudWatch(
   region: string,
   logGroupName: string,
   logStreamName: string
 ): Promise<BatchEvaluationResultEntry[]> {
   const client = new CloudWatchLogsClient({ region });
+  const response = await client.send(new GetLogEventsCommand({ logGroupName, logStreamName, startFromHead: true }));
+
   const results: BatchEvaluationResultEntry[] = [];
-  let nextToken: string | undefined;
-
-  for (;;) {
-    const response = await client.send(
-      new GetLogEventsCommand({
-        logGroupName,
-        logStreamName,
-        startFromHead: true,
-        ...(nextToken ? { nextForwardToken: nextToken } : {}),
-      })
-    );
-
-    for (const event of response.events ?? []) {
-      if (!event.message) continue;
-      try {
-        const parsed = JSON.parse(event.message) as Record<string, unknown>;
-        const attrs = (parsed.attributes ?? {}) as Record<string, unknown>;
-        const evaluatorId = attrs['gen_ai.evaluation.name'] as string | undefined;
-        if (!evaluatorId) continue;
-        results.push({
-          evaluatorId,
-          score: attrs['gen_ai.evaluation.score.value'] as number | undefined,
-          label: attrs['gen_ai.evaluation.score.label'] as string | undefined,
-          explanation: attrs['gen_ai.evaluation.explanation'] as string | undefined,
-        });
-      } catch {
-        // skip non-JSON / malformed entries
-      }
+  for (const event of response.events ?? []) {
+    if (!event.message) continue;
+    try {
+      const parsed = JSON.parse(event.message) as Record<string, unknown>;
+      const attrs = (parsed.attributes ?? {}) as Record<string, unknown>;
+      const evaluatorId = attrs['gen_ai.evaluation.name'] as string | undefined;
+      if (!evaluatorId) continue;
+      results.push({
+        evaluatorId,
+        score: attrs['gen_ai.evaluation.score.value'] as number | undefined,
+        label: attrs['gen_ai.evaluation.score.label'] as string | undefined,
+        explanation: attrs['gen_ai.evaluation.explanation'] as string | undefined,
+      });
+    } catch {
+      // skip non-JSON / malformed entries
     }
-
-    // GetLogEvents returns the same nextForwardToken when there are no more pages.
-    if (!response.nextForwardToken || response.nextForwardToken === nextToken) {
-      break;
-    }
-    nextToken = response.nextForwardToken;
   }
-
   return results;
 }
 
@@ -170,6 +152,7 @@ export const batchEvaluationHandler: BatchEvaluationHandler = {
         evaluators: resolvedEvaluators,
         source: opts.source,
         dataset: opts.dataset,
+        ...(opts.kmsKeyArn ? { kmsKeyArn: opts.kmsKeyArn } : {}),
       };
       return { success: true, record };
     } catch (err) {
@@ -185,7 +168,7 @@ export const batchEvaluationHandler: BatchEvaluationHandler = {
       response = await getBatchEvaluation({ region, batchEvaluationId: record.id });
     } catch (err) {
       if (err instanceof JobNotFoundError) {
-        return { success: true, record: { ...record, status: NOT_FOUND_STATUS } };
+        return { success: true, record: { ...record, status: NOT_FOUND_STATUS, resultsFetched: true } };
       }
       return { success: false, error: toError(err) };
     }
@@ -195,6 +178,7 @@ export const batchEvaluationHandler: BatchEvaluationHandler = {
       status: response.status,
       completedAt: response.updatedAt ?? record.completedAt,
       evaluationResults: response.evaluationResults ?? record.evaluationResults,
+      kmsKeyArn: response.kmsKeyArn ?? record.kmsKeyArn,
     };
 
     // Fetch per-session scores from the CloudWatch output log once the job is terminal.
@@ -202,15 +186,20 @@ export const batchEvaluationHandler: BatchEvaluationHandler = {
       response.status
     );
     const cw = response.outputConfig?.cloudWatchConfig;
-    if (isTerminalStatus && !record.results?.length && cw) {
+    if (isTerminalStatus && !record.resultsFetched && cw) {
       try {
         const results = await fetchResultsFromCloudWatch(region, cw.logGroupName, cw.logStreamName);
-        if (results.length > 0) {
+        // Never clobber populated results with an empty re-read.
+        if (results.length > 0 || !record.results?.length) {
           updated.results = results;
         }
-      } catch (err) {
-        return { success: false, error: toError(err) };
+        updated.resultsFetched = true;
+      } catch {
+        // leave resultsFetched false so the next get()/list() retries
       }
+    } else if (isTerminalStatus && !cw) {
+      // Terminal with no output log destination — nothing to fetch; mark settled.
+      updated.resultsFetched = true;
     }
     return { success: true, record: updated };
   },

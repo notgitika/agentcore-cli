@@ -32,6 +32,7 @@ describe('GatewayTargetTypeSchema', () => {
       'lambdaFunctionArn',
       'httpRuntime',
       'connector',
+      'passthrough',
     ]);
   });
 

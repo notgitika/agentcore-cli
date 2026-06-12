@@ -6,6 +6,7 @@ import type {
   GatewayPolicyEngineConfiguration,
   GatewayTargetType,
   NodeRuntime,
+  PassthroughProtocolType,
   SchemaSource,
   ToolDefinition,
 } from '../../../../schema';
@@ -100,6 +101,11 @@ export type AddGatewayTargetStep =
   | 'runtime-endpoint'
   | 'kb-select'
   | 'kb-id'
+  | 'passthrough-endpoint'
+  | 'passthrough-protocol'
+  | 'passthrough-stickiness'
+  | 'signing-service'
+  | 'signing-region'
   | 'confirm';
 
 export type TargetLanguage = 'Python' | 'TypeScript' | 'Other';
@@ -119,9 +125,11 @@ export interface GatewayTargetWizardState {
   host?: ComputeHost;
   toolDefinition?: ToolDefinition;
   outboundAuth?: {
-    type: 'OAUTH' | 'API_KEY' | 'NONE';
+    type: 'OAUTH' | 'API_KEY' | 'NONE' | 'GATEWAY_IAM_ROLE' | 'JWT_PASSTHROUGH';
     credentialName?: string;
     scopes?: string[];
+    service?: string;
+    region?: string;
   };
   restApiId?: string;
   stage?: string;
@@ -140,6 +148,18 @@ export interface GatewayTargetWizardState {
    * `bedrock-agentic-retrieve` is gateway-managed by the Add Knowledge Base flow.
    */
   connectorId?: 'bedrock-knowledge-bases' | 'bedrock-agentic-retrieve';
+  /** Passthrough endpoint URL for passthrough targets */
+  passthroughEndpoint?: string;
+  /** Passthrough protocol type for passthrough targets */
+  passthroughProtocol?: PassthroughProtocolType;
+  /** Stickiness routing identifier for passthrough targets */
+  stickinessIdentifier?: string;
+  /** Stickiness timeout in seconds for passthrough targets */
+  stickinessTimeout?: number;
+  /** SigV4 signing service for passthrough GATEWAY_IAM_ROLE auth */
+  signingService?: string;
+  /** SigV4 signing region for passthrough GATEWAY_IAM_ROLE auth */
+  signingRegion?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -229,13 +249,31 @@ export type ConnectorTargetConfig =
   | BedrockKnowledgeBasesConnectorTargetConfig
   | BedrockAgenticRetrieveConnectorTargetConfig;
 
+export interface PassthroughTargetConfig {
+  targetType: 'passthrough';
+  name: string;
+  gateway: string;
+  passthroughEndpoint: string;
+  protocolType?: PassthroughProtocolType;
+  stickinessIdentifier?: string;
+  stickinessTimeout?: number;
+  outboundAuth?: {
+    type: 'OAUTH' | 'API_KEY' | 'NONE' | 'GATEWAY_IAM_ROLE' | 'JWT_PASSTHROUGH';
+    credentialName?: string;
+    scopes?: string[];
+    service?: string;
+    region?: string;
+  };
+}
+
 export type AddGatewayTargetConfig =
   | McpServerTargetConfig
   | ApiGatewayTargetConfig
   | SchemaBasedTargetConfig
   | LambdaFunctionArnTargetConfig
   | HttpRuntimeTargetConfig
-  | ConnectorTargetConfig;
+  | ConnectorTargetConfig
+  | PassthroughTargetConfig;
 
 export const MCP_TOOL_STEP_LABELS: Record<AddGatewayTargetStep, string> = {
   name: 'Name',
@@ -256,6 +294,11 @@ export const MCP_TOOL_STEP_LABELS: Record<AddGatewayTargetStep, string> = {
   'runtime-endpoint': 'Endpoint',
   'kb-select': 'Knowledge Base',
   'kb-id': 'KB ID',
+  'passthrough-endpoint': 'Endpoint',
+  'passthrough-protocol': 'Protocol',
+  'passthrough-stickiness': 'Stickiness',
+  'signing-service': 'Signing Service',
+  'signing-region': 'Signing Region',
   confirm: 'Confirm',
 };
 
@@ -300,10 +343,23 @@ export const TARGET_TYPE_OPTIONS = [
     title: 'Knowledge Base',
     description: 'Wire an existing Knowledge Base to this gateway as a connector target',
   },
+  {
+    id: 'passthrough',
+    title: 'Passthrough',
+    description: 'Route to external HTTPS endpoint',
+  },
 ] as const;
 
 /** Sentinel ID for the "Enter an existing KB ID manually..." option in the KB-select step. */
 export const ENTER_KB_ID_MANUALLY = '__enter_kb_id__' as const;
+
+/** Passthrough protocol options. CUSTOM is the default (first). */
+export const PASSTHROUGH_PROTOCOL_OPTIONS = [
+  { id: 'CUSTOM', title: 'CUSTOM', description: 'Generic HTTP/REST endpoint (default)' },
+  { id: 'MCP', title: 'MCP', description: 'Model Context Protocol server' },
+  { id: 'A2A', title: 'A2A', description: 'Agent-to-Agent protocol' },
+  { id: 'INFERENCE', title: 'INFERENCE', description: 'Model inference endpoint' },
+] as const;
 
 export const TARGET_LANGUAGE_OPTIONS = [
   { id: 'Python', title: 'Python', description: 'FastMCP Python server' },
@@ -321,6 +377,8 @@ const AUTH_OPTION_LABELS = {
   NONE: { title: 'No authorization', description: 'No outbound authentication' },
   OAUTH: { title: 'OAuth 2LO', description: 'OAuth 2.0 client credentials' },
   API_KEY: { title: 'API Key', description: 'API key credential' },
+  GATEWAY_IAM_ROLE: { title: 'Gateway IAM Role', description: 'Gateway signs with SigV4' },
+  JWT_PASSTHROUGH: { title: 'JWT Passthrough', description: 'Forward caller JWT token' },
 } as const;
 
 /** Derive the outbound auth UI options for a given target type from the centralized config. */

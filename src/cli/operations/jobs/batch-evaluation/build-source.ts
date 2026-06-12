@@ -7,7 +7,7 @@ import { ValidationError } from '../../../../lib';
 import type { DeployedState } from '../../../../schema';
 import type { CloudWatchFilterConfig } from '../../../aws/agentcore-batch-evaluation';
 import { resolveEndpointName, runtimeLogGroup } from '../../../aws/cloudwatch';
-import { BATCH_EVAL_NAME_REGEX } from '../constants';
+import { BATCH_EVAL_NAME_REGEX } from '../shared/constants';
 
 /**
  * Resolve evaluator references to the SHORT ids the batch API expects.

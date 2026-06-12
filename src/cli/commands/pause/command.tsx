@@ -1,12 +1,11 @@
 import { ConfigIO, serializeResult } from '../../../lib';
-import { listABTests, updateABTest } from '../../aws/agentcore-ab-tests';
-import { COMMAND_DESCRIPTIONS } from '../../constants';
 import { getErrorMessage } from '../../errors';
 import { handlePauseResume } from '../../operations/eval';
 import type { OnlineEvalActionOptions } from '../../operations/eval';
+import { createJobEngine } from '../../operations/jobs';
+import { runCliCommand } from '../../telemetry/cli-command-run';
+import { COMMAND_DESCRIPTIONS } from '../../tui/copy';
 import { requireProject } from '../../tui/guards';
-import { getRegion } from '../shared/region-utils';
-import { waitForRunningThenStop } from './promote-utils';
 import type { Command } from '@commander-js/extra-typings';
 import { Text, render } from 'ink';
 import React from 'react';
@@ -71,93 +70,34 @@ function registerOnlineEvalSubcommand(parent: Command, action: 'pause' | 'resume
     });
 }
 
-export async function resolveABTestId(
-  testName: string,
-  region: string
-): Promise<{ abTestId: string; region: string; error?: string }> {
-  let projectName: string | undefined;
-  try {
-    const configIO = new ConfigIO();
-    const deployedState = await configIO.readDeployedState();
-    const awsTargets = await configIO.readAWSDeploymentTargets();
-
-    try {
-      const projectSpec = await configIO.readProjectSpec();
-      projectName = projectSpec.name;
-    } catch {
-      // Project spec unavailable
-    }
-
-    for (const [targetName, target] of Object.entries(deployedState.targets ?? {})) {
-      const abTests = target.resources?.abTests;
-      if (abTests?.[testName]) {
-        const targetConfig = awsTargets.find(t => t.name === targetName);
-        const resolvedRegion = targetConfig?.region ?? region;
-        return { abTestId: abTests[testName].abTestId, region: resolvedRegion };
-      }
-    }
-  } catch {
-    // No deployed state
-  }
-
-  try {
-    const result = await listABTests({ region, maxResults: 100 });
-    // Match against both prefixed name ({projectName}_{testName}) and bare testName (backwards compat)
-    const prefixedName = projectName ? `${projectName}_${testName}` : undefined;
-    const match =
-      result.abTests.find(t => prefixedName != null && t.name === prefixedName) ??
-      result.abTests.find(t => t.name === testName);
-    if (match) return { abTestId: match.abTestId, region };
-  } catch {
-    // API call failed
-  }
-
-  return { abTestId: '', region, error: `AB test "${testName}" not found in deployed state or API.` };
-}
-
 function registerABTestSubcommand(parent: Command, action: 'pause' | 'resume') {
-  const executionStatus = action === 'pause' ? 'PAUSED' : 'RUNNING';
-  const pastTense = action === 'pause' ? 'Paused' : 'Resumed';
+  const verb = action === 'pause' ? 'Pause' : 'Resume';
 
   parent
     .command('ab-test')
-    .description(`[preview] ${action === 'pause' ? 'Pause' : 'Resume'} a deployed A/B test`)
-    .argument('<name>', 'AB test name')
-    .option('--region <region>', 'AWS region')
+    .description(`[preview] ${verb} a running A/B test`)
+    .requiredOption('-i, --id <id>', 'A/B test ID')
+    .option('--region <region>', 'AWS region (auto-detected if omitted)')
     .option('--json', 'Output as JSON')
-    .action(async (name: string, cliOptions: { region?: string; json?: boolean }) => {
-      try {
-        const region = await getRegion(cliOptions.region);
-        const { abTestId, error } = await resolveABTestId(name, region);
-        if (error) {
-          if (cliOptions.json) {
-            console.log(JSON.stringify({ success: false, error }));
-          } else {
-            console.error(error);
-          }
-          process.exit(1);
-        }
+    .action((cliOptions: { id: string; region?: string; json?: boolean }) => {
+      requireProject();
 
-        const result = await updateABTest({
-          region,
-          abTestId,
-          executionStatus,
-        });
-
-        if (cliOptions.json) {
-          console.log(JSON.stringify({ success: true, ...result }));
-        } else {
-          console.log(`${pastTense} AB test "${name}" (execution: ${result.executionStatus})`);
+      return runCliCommand(action === 'pause' ? 'pause.job' : 'resume.job', !!cliOptions.json, async () => {
+        const engine = createJobEngine(new ConfigIO());
+        const result =
+          action === 'pause'
+            ? await engine.pause('ab-test', cliOptions.id)
+            : await engine.resume('ab-test', cliOptions.id);
+        if (!result.success) {
+          throw result.error;
         }
-        process.exit(0);
-      } catch (error) {
         if (cliOptions.json) {
-          console.log(JSON.stringify({ success: false, error: getErrorMessage(error) }));
+          console.log(JSON.stringify({ success: true, id: cliOptions.id }));
         } else {
-          console.error(`Error: ${getErrorMessage(error)}`);
+          console.log(`\n✓ A/B test ${cliOptions.id} ${action === 'pause' ? 'paused' : 'resumed'}.\n`);
         }
-        process.exit(1);
-      }
+        return { job_type: 'ab-test' };
+      });
     });
 }
 
@@ -233,71 +173,4 @@ export const registerResume = (program: Command) => {
   registerOnlineEvalSubcommand(resumeCmd, 'resume');
   registerOnlineInsightsSubcommand(resumeCmd, 'resume');
   registerABTestSubcommand(resumeCmd, 'resume');
-};
-
-export const registerPromote = (program: Command) => {
-  const promoteCmd = program.command('promote').description('Promote resources');
-
-  promoteCmd
-    .command('ab-test')
-    .description('Promote the winning treatment of an A/B test')
-    .argument('<name>', 'AB test name')
-    .option('--region <region>', 'AWS region')
-    .option('--json', 'Output as JSON')
-    .action(async (name: string, cliOptions: { region?: string; json?: boolean }) => {
-      try {
-        const region = await getRegion(cliOptions.region);
-        const { abTestId, error } = await resolveABTestId(name, region);
-        if (error) {
-          if (cliOptions.json) {
-            console.log(JSON.stringify({ success: false, error }));
-          } else {
-            console.error(error);
-          }
-          process.exit(1);
-        }
-
-        const result = await waitForRunningThenStop(region, abTestId, name);
-
-        // Apply promotion to agentcore.json
-        const { promoteABTestConfig } = await import('../../operations/ab-test/promote');
-        let promoted = false;
-        let mode: string | undefined;
-        let promotionDetail = '';
-        try {
-          const promoResult = await promoteABTestConfig(abTestId, name);
-          promoted = promoResult.promoted;
-          mode = promoResult.mode;
-          promotionDetail = promoResult.promotionDetail;
-        } catch {
-          // Config read/write failed
-        }
-
-        if (cliOptions.json) {
-          console.log(
-            JSON.stringify({
-              success: true,
-              ...result,
-              ...(mode && { mode }),
-              promoted,
-              ...(promotionDetail && { promotionDetail }),
-            })
-          );
-        } else {
-          console.log(`AB test "${name}" stopped.`);
-          if (promoted) {
-            console.log(`\n${promotionDetail}`);
-            console.log(`\nRun: agentcore deploy`);
-          }
-        }
-        process.exit(0);
-      } catch (error) {
-        if (cliOptions.json) {
-          console.log(JSON.stringify({ success: false, error: getErrorMessage(error) }));
-        } else {
-          console.error(`Error: ${getErrorMessage(error)}`);
-        }
-        process.exit(1);
-      }
-    });
 };

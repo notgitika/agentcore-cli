@@ -52,6 +52,16 @@ export const registerArchive = (program: Command) => {
     );
 
   archiveCmd
+    .command('ab-test')
+    .description('[preview] Archive (delete) an A/B test on the service and clear local history')
+    .requiredOption('-i, --id <id>', 'A/B test ID to archive')
+    .option('--region <region>', 'AWS region (auto-detected if omitted)')
+    .option('--json', 'Output as JSON')
+    .action((cliOptions: { id: string; region?: string; json?: boolean }) =>
+      executeArchive('ab-test', cliOptions, 'A/B test')
+    );
+
+  archiveCmd
     .command('insights')
     .description('[preview] Archive an insights job record on the service and clear local history')
     .requiredOption('-i, --id <id>', 'Insights job ID to archive')

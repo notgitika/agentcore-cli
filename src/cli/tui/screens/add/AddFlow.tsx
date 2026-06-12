@@ -3,7 +3,6 @@ import { VPC_ENDPOINT_WARNING } from '../../../commands/shared/vpc-utils';
 import { computeDefaultCredentialEnvVarName } from '../../../primitives/credential-utils';
 import { ErrorPrompt } from '../../components';
 import { useAvailableAgents } from '../../hooks/useCreateMcp';
-import { AddABTestFlow } from '../ab-test';
 import { AddAgentFlow } from '../agent/AddAgentFlow';
 import type { AddAgentConfig } from '../agent/types';
 import { FRAMEWORK_OPTIONS } from '../agent/types';
@@ -43,7 +42,6 @@ type FlowState =
   | { name: 'policy-wizard' }
   | { name: 'dataset-wizard' }
   | { name: 'config-bundle-wizard' }
-  | { name: 'ab-test-wizard' }
   | { name: 'runtime-endpoint-wizard' }
   | { name: 'payment-manager-wizard' }
   | { name: 'payment-connector-wizard' }
@@ -208,8 +206,6 @@ function getInitialFlowState(resource?: AddResourceType): FlowState {
       return { name: 'dataset-wizard' };
     case 'config-bundle':
       return { name: 'config-bundle-wizard' };
-    case 'ab-test':
-      return { name: 'ab-test-wizard' };
     case 'payment-manager':
       return { name: 'payment-manager-wizard' };
     case 'payment-connector':
@@ -275,9 +271,6 @@ export function AddFlow(props: AddFlowProps) {
         break;
       case 'config-bundle':
         setFlow({ name: 'config-bundle-wizard' });
-        break;
-      case 'ab-test':
-        setFlow({ name: 'ab-test-wizard' });
         break;
       case 'runtime-endpoint':
         setFlow({ name: 'runtime-endpoint-wizard' });
@@ -583,19 +576,6 @@ export function AddFlow(props: AddFlowProps) {
   if (flow.name === 'config-bundle-wizard') {
     return (
       <AddConfigBundleFlow
-        isInteractive={props.isInteractive}
-        onExit={props.onExit}
-        onBack={() => setFlow({ name: 'select' })}
-        onDev={props.onDev}
-        onDeploy={props.onDeploy}
-      />
-    );
-  }
-
-  // AB test wizard
-  if (flow.name === 'ab-test-wizard') {
-    return (
-      <AddABTestFlow
         isInteractive={props.isInteractive}
         onExit={props.onExit}
         onBack={() => setFlow({ name: 'select' })}

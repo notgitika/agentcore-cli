@@ -26,10 +26,14 @@ export type ClusteringConfig = z.infer<typeof ClusteringConfigSchema>;
 export const OnlineEvalConfigSchema = z
   .object({
     name: OnlineEvalConfigNameSchema,
-    /** Agent name to monitor (must match a project agent) */
-    agent: z.string().min(1, 'Agent name is required'),
+    /** Agent name to monitor (must match a project agent). Required when using managed AgentCore agents. */
+    agent: z.string().min(1, 'Agent name is required').optional(),
     /** Optional runtime endpoint name to scope monitoring to a specific endpoint */
     endpoint: z.string().min(1).optional(),
+    /** CloudWatch log group names for custom/3rd-party agents (1-5 entries) */
+    logGroupNames: z.array(z.string().min(1)).min(1).max(5).optional(),
+    /** Service names to filter traces for custom/3rd-party agents */
+    serviceNames: z.array(z.string().min(1)).min(1).optional(),
     /** Evaluator names (custom), Builtin.* IDs, or evaluator ARNs */
     evaluators: z.array(z.string().min(1)).optional(),
     /** Insight IDs for continuous analysis */
@@ -43,6 +47,18 @@ export const OnlineEvalConfigSchema = z
     /** Whether to enable execution on create (default: true) */
     enableOnCreate: z.boolean().optional(),
     tags: TagsSchema.optional(),
+  })
+  .refine(data => data.agent ?? data.logGroupNames, {
+    message: 'Either "agent" or "logGroupNames" must be provided',
+  })
+  .refine(data => !(data.agent && data.logGroupNames), {
+    message: '"agent" and "logGroupNames" are mutually exclusive',
+  })
+  .refine(data => !data.endpoint || data.agent, {
+    message: '"endpoint" requires "agent"',
+  })
+  .refine(data => !data.serviceNames || data.logGroupNames, {
+    message: '"serviceNames" requires "logGroupNames"',
   })
   .refine(
     data => {

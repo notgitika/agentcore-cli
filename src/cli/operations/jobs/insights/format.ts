@@ -1,6 +1,6 @@
 /** Presentation helpers for insights job CLI output (history table + detail view). */
 import { formatJobDate } from '../shared/format';
-import type { InsightsJobRecord } from '../types';
+import type { InsightsJobRecord } from '../shared/types';
 
 export function printInsightsHistory(records: InsightsJobRecord[]): void {
   if (records.length === 0) {

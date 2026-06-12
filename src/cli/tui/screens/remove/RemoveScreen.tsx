@@ -17,7 +17,6 @@ export type RemoveResourceType =
   | 'gateway-target'
   | 'knowledge-base'
   | 'config-bundle'
-  | 'ab-test'
   | 'runtime-endpoint'
   | 'dataset'
   | 'payment'
@@ -43,7 +42,6 @@ const REMOVE_RESOURCES: { id: RemoveResourceType; title: string; description: st
     description: 'Remove a knowledge base (cascade-prunes connector gateway targets)',
   },
   { id: 'config-bundle', title: 'Configuration Bundle [preview]', description: 'Remove a configuration bundle' },
-  { id: 'ab-test', title: 'AB Test [preview]', description: 'Remove an A/B test' },
   { id: 'runtime-endpoint', title: 'Runtime Endpoint', description: 'Remove a runtime endpoint' },
   { id: 'dataset', title: 'Dataset', description: 'Remove a dataset' },
   { id: 'all', title: 'All', description: 'Reset entire agentcore project' },
@@ -74,8 +72,6 @@ interface RemoveScreenProps {
   policyCount: number;
   /** Number of configuration bundles available for removal */
   configBundleCount: number;
-  /** Number of AB tests available for removal */
-  abTestCount: number;
   /** Number of runtime endpoints available for removal */
   runtimeEndpointCount: number;
   /** Number of datasets available for removal */
@@ -100,7 +96,6 @@ export function RemoveScreen({
   policyEngineCount,
   policyCount,
   configBundleCount,
-  abTestCount,
   runtimeEndpointCount,
   datasetCount,
   knowledgeBaseCount,
@@ -178,12 +173,6 @@ export function RemoveScreen({
             description = 'No configuration bundles to remove';
           }
           break;
-        case 'ab-test':
-          if (abTestCount === 0) {
-            disabled = true;
-            description = 'No AB tests to remove';
-          }
-          break;
         case 'runtime-endpoint':
           if (runtimeEndpointCount === 0) {
             disabled = true;
@@ -227,7 +216,6 @@ export function RemoveScreen({
     policyEngineCount,
     policyCount,
     configBundleCount,
-    abTestCount,
     runtimeEndpointCount,
     datasetCount,
     knowledgeBaseCount,

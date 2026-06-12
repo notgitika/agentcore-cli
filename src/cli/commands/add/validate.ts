@@ -399,7 +399,7 @@ export async function validateAddGatewayTargetOptions(options: AddGatewayTargetO
     return {
       valid: false,
       error:
-        '--type is required. Valid options: mcp-server, api-gateway, open-api-schema, smithy-model, lambda-function-arn, http-runtime, connector',
+        '--type is required. Valid options: mcp-server, api-gateway, open-api-schema, smithy-model, lambda-function-arn, http-runtime, connector, passthrough',
     };
   }
 
@@ -411,12 +411,13 @@ export async function validateAddGatewayTargetOptions(options: AddGatewayTargetO
     'lambda-function-arn': 'lambdaFunctionArn',
     'http-runtime': 'httpRuntime',
     connector: 'connector',
+    passthrough: 'passthrough',
   };
   const mappedType = typeMap[options.type];
   if (!mappedType) {
     return {
       valid: false,
-      error: `Invalid type: ${options.type}. Valid options: mcp-server, api-gateway, open-api-schema, smithy-model, lambda-function-arn, http-runtime, connector`,
+      error: `Invalid type: ${options.type}. Valid options: mcp-server, api-gateway, open-api-schema, smithy-model, lambda-function-arn, http-runtime, connector, passthrough`,
     };
   }
   options.type = mappedType;
@@ -655,6 +656,72 @@ export async function validateAddGatewayTargetOptions(options: AddGatewayTargetO
     if (options.language && options.language !== 'Other') {
       return { valid: false, error: '--language is not applicable for connector type' };
     }
+    options.language = 'Other';
+    return { valid: true };
+  }
+
+  // Passthrough targets: validate early and return
+  if (mappedType === 'passthrough') {
+    const passthroughEndpoint = (options as Record<string, string | undefined>).passthroughEndpoint;
+    if (!passthroughEndpoint) {
+      return { valid: false, error: '--passthrough-endpoint is required for passthrough type' };
+    }
+    if (!/^https:\/\/[a-zA-Z0-9\-.]+(:[0-9]{1,5})?(\/.*)?$/.test(passthroughEndpoint)) {
+      return { valid: false, error: '--passthrough-endpoint must be a valid HTTPS URL' };
+    }
+    if (options.language && options.language !== 'Other') {
+      return { valid: false, error: '--language is not applicable for passthrough type' };
+    }
+
+    const PASSTHROUGH_DISALLOWED_OPTIONS = [
+      'host',
+      'restApiId',
+      'stage',
+      'lambdaArn',
+      'toolSchemaFile',
+      'toolFilterPath',
+      'toolFilterMethods',
+      'schema',
+      'runtime',
+      'runtimeEndpoint',
+    ] as const;
+
+    for (const opt of PASSTHROUGH_DISALLOWED_OPTIONS) {
+      if (options[opt]) {
+        return {
+          valid: false,
+          error: `--${opt.replace(/([A-Z])/g, '-$1').toLowerCase()} is not applicable for passthrough type`,
+        };
+      }
+    }
+
+    const stickinessTimeoutRaw = (options as Record<string, string | undefined>).stickinessTimeout;
+    if (stickinessTimeoutRaw) {
+      const timeout = parseInt(stickinessTimeoutRaw, 10);
+      if (isNaN(timeout) || timeout < 1 || timeout > 86400) {
+        return { valid: false, error: '--stickiness-timeout must be a number between 1 and 86400' };
+      }
+    }
+
+    // Validate outbound auth for passthrough
+    if (options.outboundAuthType) {
+      const normalizedAuth = options.outboundAuthType.toUpperCase().replace(/-/g, '_');
+      if (normalizedAuth === 'GATEWAY_IAM_ROLE') {
+        // signingService validation is done in the primitive action handler
+      } else if (normalizedAuth === 'JWT_PASSTHROUGH') {
+        // No additional fields required
+      } else if (normalizedAuth === 'OAUTH') {
+        if (!options.credentialName) {
+          const hasInlineOAuth = !!(options.oauthClientId ?? options.oauthClientSecret ?? options.oauthDiscoveryUrl);
+          if (!hasInlineOAuth) {
+            return { valid: false, error: '--credential-name or inline OAuth fields required for OAUTH auth' };
+          }
+        }
+      } else if (normalizedAuth !== 'NONE') {
+        return { valid: false, error: `Unsupported outbound auth type for passthrough: ${options.outboundAuthType}` };
+      }
+    }
+
     options.language = 'Other';
     return { valid: true };
   }

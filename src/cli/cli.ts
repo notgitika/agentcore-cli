@@ -1,5 +1,4 @@
 import { getOrCreateInstallationId } from '../lib/schemas/io/global-config';
-import { registerABTestCommand } from './commands/abtest';
 import { registerAdd } from './commands/add';
 import { registerAddTool } from './commands/add/tool-command';
 import { registerArchive } from './commands/archive';
@@ -20,8 +19,8 @@ import { registerInsights } from './commands/insights';
 import { registerInvoke } from './commands/invoke';
 import { registerLogs } from './commands/logs';
 import { registerPackage } from './commands/package';
-import { registerPause, registerPromote } from './commands/pause';
-import { registerRecommendations } from './commands/recommendations';
+import { registerPause } from './commands/pause';
+import { registerPromote } from './commands/promote';
 import { registerRemove } from './commands/remove';
 import { registerRemoveTool } from './commands/remove/tool-command';
 import { registerResume } from './commands/resume';
@@ -32,6 +31,7 @@ import { registerTelemetry } from './commands/telemetry';
 import { registerTraces } from './commands/traces';
 import { registerUpdate } from './commands/update';
 import { registerValidate } from './commands/validate';
+import { registerView } from './commands/view';
 import { COMMAND_DESCRIPTIONS, PACKAGE_VERSION } from './constants';
 import { isPreviewEnabled } from './feature-flags';
 import { printPostCommandNotices, printTelemetryNotice } from './notices';
@@ -105,7 +105,7 @@ export function registerCommands(program: Command) {
   registerLogs(program);
   registerPackage(program);
   registerPause(program);
-  registerRecommendations(program);
+  registerView(program);
   registerBatchEvaluations(program);
   const removeCmd = registerRemove(program);
   registerResume(program);
@@ -132,9 +132,6 @@ export function registerCommands(program: Command) {
     registerAddTool(addCmd);
     registerRemoveTool(removeCmd);
   }
-
-  // Register AB test detail command
-  registerABTestCommand(program);
 }
 
 export const main = async (argv: string[]) => {

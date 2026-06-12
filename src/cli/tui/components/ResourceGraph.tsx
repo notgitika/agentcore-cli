@@ -21,7 +21,6 @@ const ICONS = {
   'policy-engine': '▣',
   policy: '▢',
   'config-bundle': '⬡',
-  'ab-test': '⚗',
   dataset: '▤',
   harness: '⬢',
   'runtime-endpoint': '◉',
@@ -138,7 +137,6 @@ export function ResourceGraph({ project, mcp, agentName, resourceStatuses }: Res
   const policyEngines = project.policyEngines ?? [];
   const configBundles = project.configBundles ?? [];
   const datasets = project.datasets ?? [];
-  const abTests = project.abTests ?? [];
   const payments = project.payments ?? [];
 
   // Build lookup map and collect pending-removal resources in a single pass
@@ -386,28 +384,6 @@ export function ResourceGraph({ project, mcp, agentName, resourceStatuses }: Res
         </Box>
       )}
 
-      {/* AB Tests */}
-      {abTests.length > 0 && (
-        <Box flexDirection="column">
-          <SectionHeader>AB Tests</SectionHeader>
-          {abTests.map(test => {
-            const rsEntry = statusMap.get(`ab-test:${test.name}`);
-            return (
-              <ResourceRow
-                key={test.name}
-                icon={ICONS['ab-test']}
-                color="white"
-                name={test.name}
-                detail={rsEntry?.detail ?? test.description}
-                deploymentState={rsEntry?.deploymentState}
-                identifier={rsEntry?.identifier}
-                invocationUrl={rsEntry?.invocationUrl}
-              />
-            );
-          })}
-        </Box>
-      )}
-
       {/* Payments — manager (parent) with its connectors (children) */}
       {payments.length > 0 && (
         <Box flexDirection="column">
@@ -570,8 +546,7 @@ export function ResourceGraph({ project, mcp, agentName, resourceStatuses }: Res
           <Text color="magenta">{ICONS['online-eval']}</Text> online-eval{'  '}
           <Text color="magenta">{ICONS.gateway}</Text> gateway{'  '}
           <Text color="red">{ICONS['policy-engine']}</Text> policy engine{'  '}
-          <Text color="white">{ICONS['config-bundle']}</Text> config bundle{'  '}
-          <Text color="white">{ICONS['ab-test']}</Text> ab test
+          <Text color="white">{ICONS['config-bundle']}</Text> config bundle
         </Text>
       </Box>
     </Box>

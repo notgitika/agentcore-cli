@@ -14,7 +14,6 @@ export type ResourceType =
   | 'policy-engine'
   | 'policy'
   | 'config-bundle'
-  | 'ab-test'
   | 'dataset'
   | 'knowledge-base'
   | 'payment-manager'

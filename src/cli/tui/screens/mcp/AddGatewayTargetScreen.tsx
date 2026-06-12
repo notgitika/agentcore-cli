@@ -1,4 +1,4 @@
-import type { ApiGatewayHttpMethod, GatewayTargetType } from '../../../../schema';
+import type { ApiGatewayHttpMethod, GatewayTargetType, PassthroughProtocolType } from '../../../../schema';
 import { REAL_KB_ID_PATTERN, ToolNameSchema } from '../../../../schema';
 import { ConfirmReview, Panel, Screen, StepIndicator, TextInput, WizardSelect } from '../../components';
 import type { SelectableItem } from '../../components';
@@ -11,12 +11,15 @@ import type {
   AddGatewayTargetStep,
   ApiGatewayTargetConfig,
   GatewayTargetWizardState,
+  McpServerTargetConfig,
+  PassthroughTargetConfig,
   SchemaBasedTargetConfig,
 } from './types';
 import {
   API_GATEWAY_AUTH_OPTIONS,
   ENTER_KB_ID_MANUALLY,
   MCP_TOOL_STEP_LABELS,
+  PASSTHROUGH_PROTOCOL_OPTIONS,
   TARGET_TYPE_OPTIONS,
   getOutboundAuthOptions,
 } from './types';
@@ -84,6 +87,7 @@ export function AddGatewayTargetScreen({
   // null = showing the auth type picker; 'OAUTH'/'API_KEY' = showing credential list.
   const [pendingCredType, setPendingCredType] = useState<'OAUTH' | 'API_KEY' | null>(null);
   const [filterPath, setFilterPathLocal] = useState<string | null>(null);
+  const [customSigningService, setCustomSigningService] = useState(false);
 
   // ── Step flags ──
   const isGatewayStep = wizard.step === 'gateway';
@@ -101,12 +105,16 @@ export function AddGatewayTargetScreen({
   const isRuntimeEndpointStep = wizard.step === 'runtime-endpoint';
   const isKbSelectStep = wizard.step === 'kb-select';
   const isKbIdStep = wizard.step === 'kb-id';
+  const isPassthroughEndpointStep = wizard.step === 'passthrough-endpoint';
+  const isPassthroughProtocolStep = wizard.step === 'passthrough-protocol';
+  const isPassthroughStickinessStep = wizard.step === 'passthrough-stickiness';
   const isConfirmStep = wizard.step === 'confirm';
   const isAuthStep = isOutboundAuthStep || isApiGatewayAuthStep;
   const noGatewaysAvailable = isGatewayStep && existingGateways.length === 0;
 
   // ── Selectable item lists ──
-  const isHttpRuntimeTarget = wizard.config.targetType === 'httpRuntime';
+  const isNonMcpTarget = wizard.config.targetType === 'httpRuntime' || wizard.config.targetType === 'passthrough';
+  const isHttpRuntimeTarget = isNonMcpTarget;
   const runtimeItems: SelectableItem[] = useMemo(
     () => existingRuntimeNames.map(r => ({ id: r, title: r })),
     [existingRuntimeNames]
@@ -142,6 +150,10 @@ export function AddGatewayTargetScreen({
         description: o.description,
       })),
     [wizard.config.targetType]
+  );
+  const passthroughProtocolItems: SelectableItem[] = useMemo(
+    () => PASSTHROUGH_PROTOCOL_OPTIONS.map(o => ({ id: o.id, title: o.title, description: o.description })),
+    []
   );
   const apiGatewayAuthItems: SelectableItem[] = useMemo(
     () => API_GATEWAY_AUTH_OPTIONS.map(o => ({ id: o.id, title: o.title, description: o.description })),
@@ -257,13 +269,15 @@ export function AddGatewayTargetScreen({
     isActive: isKbSelectStep,
   });
 
-  // Outbound auth type selection (for mcpServer, openApiSchema)
+  // Outbound auth type selection (for mcpServer, openApiSchema, passthrough)
   const outboundAuthNav = useListNavigation({
     items: outboundAuthItems,
     onSelect: item => {
-      const authType = item.id as 'OAUTH' | 'API_KEY' | 'NONE';
+      const authType = item.id as 'OAUTH' | 'API_KEY' | 'NONE' | 'GATEWAY_IAM_ROLE' | 'JWT_PASSTHROUGH';
       if (authType === 'NONE') {
         completeAuth({ type: 'NONE' });
+      } else if (authType === 'GATEWAY_IAM_ROLE' || authType === 'JWT_PASSTHROUGH') {
+        wizard.setOutboundAuth({ type: authType });
       } else {
         selectAuthType(authType);
       }
@@ -317,6 +331,33 @@ export function AddGatewayTargetScreen({
     isActive: isAuthStep && pendingCredType === 'API_KEY',
   });
 
+  // Passthrough protocol selection
+  const passthroughProtocolNav = useListNavigation({
+    items: passthroughProtocolItems,
+    onSelect: item => wizard.setPassthroughProtocol(item.id as PassthroughProtocolType),
+    onExit: () => wizard.goBack(),
+    isActive: isPassthroughProtocolStep,
+  });
+
+  // Signing service selection for passthrough GATEWAY_IAM_ROLE
+  const signingServiceNav = useListNavigation({
+    items: [
+      { id: 'execute-api', title: 'execute-api' },
+      { id: 'lambda', title: 'lambda' },
+      { id: 'bedrock-agentcore', title: 'bedrock-agentcore' },
+      { id: 'custom', title: 'Custom...' },
+    ],
+    onSelect: item => {
+      if (item.id === 'custom') {
+        setCustomSigningService(true);
+      } else {
+        wizard.setSigningService(item.id);
+      }
+    },
+    onExit: () => wizard.goBack(),
+    isActive: wizard.step === 'signing-service' && !customSigningService,
+  });
+
   // Confirm step
   useListNavigation({
     items: [{ id: 'confirm', title: 'Confirm' }],
@@ -367,6 +408,17 @@ export function AddGatewayTargetScreen({
           gateway: c.gateway!,
           knowledgeBaseId: c.knowledgeBaseId!,
         });
+      } else if (c.targetType === 'passthrough') {
+        onComplete({
+          targetType: 'passthrough',
+          name: c.name,
+          gateway: c.gateway!,
+          passthroughEndpoint: c.passthroughEndpoint!,
+          protocolType: c.passthroughProtocol ?? 'CUSTOM',
+          stickinessIdentifier: c.stickinessIdentifier,
+          stickinessTimeout: c.stickinessTimeout,
+          outboundAuth: c.outboundAuth,
+        } as PassthroughTargetConfig);
       } else {
         onComplete({
           targetType: 'mcpServer',
@@ -375,7 +427,7 @@ export function AddGatewayTargetScreen({
           endpoint: c.endpoint!,
           gateway: c.gateway!,
           toolDefinition: c.toolDefinition!,
-          outboundAuth: c.outboundAuth,
+          outboundAuth: c.outboundAuth as McpServerTargetConfig['outboundAuth'],
         });
       }
     },
@@ -387,6 +439,7 @@ export function AddGatewayTargetScreen({
   });
 
   // ── Render ──
+  const isSigningRegionStep = wizard.step === 'signing-region';
   const helpText = isConfirmStep
     ? HELP_TEXT.CONFIRM_CANCEL
     : isTextStep ||
@@ -397,7 +450,10 @@ export function AddGatewayTargetScreen({
         isLambdaArnStep ||
         isToolSchemaStep ||
         isRuntimeStep ||
-        isKbIdStep
+        isKbIdStep ||
+        isPassthroughEndpointStep ||
+        isPassthroughStickinessStep ||
+        isSigningRegionStep
       ? HELP_TEXT.TEXT_INPUT
       : HELP_TEXT.NAVIGATE_SELECT;
 
@@ -661,6 +717,72 @@ export function AddGatewayTargetScreen({
           />
         )}
 
+        {isPassthroughEndpointStep && (
+          <TextInput
+            prompt="Passthrough HTTPS endpoint URL"
+            placeholder="https://example.com/api"
+            onSubmit={wizard.setPassthroughEndpoint}
+            onCancel={() => wizard.goBack()}
+            customValidation={(value: string) => {
+              if (!value.startsWith('https://')) return 'Must start with https://';
+              if (!/^https:\/\/[a-zA-Z0-9\-.]+(:[0-9]{1,5})?(\/.*)?$/.test(value)) return 'Must be a valid HTTPS URL';
+              return true;
+            }}
+          />
+        )}
+
+        {isPassthroughProtocolStep && (
+          <WizardSelect
+            title="Select passthrough protocol"
+            description="What protocol does the backend speak? CUSTOM is a generic HTTP/REST endpoint."
+            items={passthroughProtocolItems}
+            selectedIndex={passthroughProtocolNav.selectedIndex}
+          />
+        )}
+
+        {isPassthroughStickinessStep && (
+          <TextInput
+            prompt="Stickiness identifier (leave empty to skip)"
+            placeholder="$context.header.x-session-id"
+            allowEmpty
+            onSubmit={(value: string) => {
+              if (!value.trim()) {
+                wizard.setStickinessConfig(undefined, undefined);
+              } else {
+                // For simplicity in TUI, use default timeout (skip timeout input)
+                wizard.setStickinessConfig(value.trim(), undefined);
+              }
+            }}
+            onCancel={() => wizard.goBack()}
+          />
+        )}
+
+        {wizard.step === 'signing-service' && (
+          <WizardSelect
+            title="Select signing service"
+            description="Which AWS service should the gateway sign requests for?"
+            items={[
+              { id: 'execute-api', title: 'execute-api', description: 'API Gateway' },
+              { id: 'lambda', title: 'lambda', description: 'AWS Lambda' },
+              { id: 'bedrock-agentcore', title: 'bedrock-agentcore', description: 'Bedrock AgentCore' },
+              { id: 'custom', title: 'Custom...', description: 'Enter a custom service name' },
+            ]}
+            selectedIndex={signingServiceNav.selectedIndex}
+          />
+        )}
+
+        {wizard.step === 'signing-region' && (
+          <TextInput
+            prompt="Signing region (leave empty for project default)"
+            placeholder="us-east-1"
+            allowEmpty
+            onSubmit={(value: string) => {
+              wizard.setSigningRegion(value.trim() || undefined);
+            }}
+            onCancel={() => wizard.goBack()}
+          />
+        )}
+
         {isConfirmStep && (
           <ConfirmReview
             fields={[
@@ -701,6 +823,20 @@ export function AddGatewayTargetScreen({
                     { label: 'Knowledge Base', value: wizard.config.knowledgeBaseId ?? '' },
                   ]
                 : []),
+              ...(wizard.config.targetType === 'passthrough'
+                ? [
+                    { label: 'Endpoint', value: wizard.config.passthroughEndpoint ?? '' },
+                    { label: 'Protocol', value: wizard.config.passthroughProtocol ?? 'CUSTOM' },
+                    ...(wizard.config.stickinessIdentifier
+                      ? [
+                          { label: 'Stickiness ID', value: wizard.config.stickinessIdentifier },
+                          ...(wizard.config.stickinessTimeout
+                            ? [{ label: 'Stickiness Timeout', value: String(wizard.config.stickinessTimeout) }]
+                            : []),
+                        ]
+                      : []),
+                  ]
+                : []),
               ...(wizard.config.targetType === 'mcpServer' && wizard.config.endpoint
                 ? [{ label: 'Endpoint', value: wizard.config.endpoint }]
                 : []),
@@ -719,7 +855,16 @@ export function AddGatewayTargetScreen({
               ...(wizard.config.targetType !== 'lambdaFunctionArn' && wizard.config.outboundAuth
                 ? [
                     { label: 'Auth Type', value: wizard.config.outboundAuth.type },
-                    { label: 'Credential', value: wizard.config.outboundAuth.credentialName ?? 'None' },
+                    ...(wizard.config.outboundAuth.type === 'GATEWAY_IAM_ROLE'
+                      ? [
+                          { label: 'Signing Service', value: wizard.config.outboundAuth.service ?? '' },
+                          ...(wizard.config.outboundAuth.region
+                            ? [{ label: 'Signing Region', value: wizard.config.outboundAuth.region }]
+                            : []),
+                        ]
+                      : wizard.config.outboundAuth.type !== 'JWT_PASSTHROUGH'
+                        ? [{ label: 'Credential', value: wizard.config.outboundAuth.credentialName ?? 'None' }]
+                        : []),
                   ]
                 : wizard.config.targetType === 'apiGateway'
                   ? [{ label: 'Auth Type', value: 'IAM (default)' }]

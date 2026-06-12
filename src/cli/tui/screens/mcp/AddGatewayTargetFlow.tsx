@@ -150,6 +150,15 @@ export function AddGatewayTargetFlow({
         .catch((err: unknown) => {
           setFlow({ name: 'error', message: err instanceof Error ? err.message : 'Unknown error' });
         });
+    } else if (config.targetType === 'passthrough') {
+      void gatewayTargetPrimitive
+        .createPassthroughTarget(config)
+        .then((result: { toolName: string }) => {
+          setFlow({ name: 'create-success', toolName: result.toolName, projectPath: '' });
+        })
+        .catch((err: unknown) => {
+          setFlow({ name: 'error', message: err instanceof Error ? err.message : 'Unknown error' });
+        });
     } else {
       setFlow({ name: 'error', message: `Unsupported target type: ${(config as { targetType: string }).targetType}` });
     }

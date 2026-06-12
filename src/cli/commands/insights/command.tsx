@@ -22,7 +22,7 @@ export const registerInsights = (program: Command) => {
           console.log(
             JSON.stringify({
               success: true,
-              insights: records.map(r => serializeResult({ success: true, ...r })),
+              insights: records,
             })
           );
         } else {

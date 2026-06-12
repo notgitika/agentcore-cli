@@ -18,6 +18,7 @@ import type {
   ConnectorId,
   DirectoryPath,
   FilePath,
+  PassthroughProtocolType,
 } from '../../schema';
 import {
   AgentCoreCliMcpDefsSchema,
@@ -50,7 +51,7 @@ import type {
 } from '../tui/screens/mcp/types';
 import { DEFAULT_HANDLER, DEFAULT_NODE_VERSION, DEFAULT_PYTHON_VERSION } from '../tui/screens/mcp/types';
 import { BasePrimitive } from './BasePrimitive';
-import { SOURCE_CODE_NOTE } from './constants';
+import { PASSTHROUGH_PROTOCOL_TYPES, SOURCE_CODE_NOTE } from './constants';
 import type { AddResult, AddScreenComponent } from './types';
 import type { Command } from '@commander-js/extra-typings';
 import { existsSync } from 'fs';
@@ -279,7 +280,7 @@ export class GatewayTargetPrimitive extends BasePrimitive<AddGatewayTargetOption
       .option('--gateway <name>', 'Gateway to attach this target to [non-interactive]')
       .option(
         '--type <type>',
-        'Target type: mcp-server, api-gateway, open-api-schema, smithy-model, lambda-function-arn, http-runtime, connector [non-interactive]'
+        'Target type: mcp-server, api-gateway, open-api-schema, smithy-model, lambda-function-arn, http-runtime, connector, passthrough [non-interactive]'
       )
       .option(
         '--connector <id>',
@@ -328,6 +329,21 @@ export class GatewayTargetPrimitive extends BasePrimitive<AddGatewayTargetOption
       )
       .option('--runtime <name>', 'Runtime from your project (for http-runtime type) [non-interactive]')
       .option('--runtime-endpoint <name>', 'Runtime endpoint / version alias (for http-runtime type) [non-interactive]')
+      .option('--passthrough-endpoint <url>', 'HTTPS endpoint URL for passthrough targets [non-interactive]')
+      .option(
+        '--passthrough-protocol <type>',
+        'Passthrough protocol: MCP | A2A | INFERENCE | CUSTOM (default: CUSTOM) [non-interactive]'
+      )
+      .option('--stickiness-identifier <expr>', 'Session routing expression for passthrough targets [non-interactive]')
+      .option('--stickiness-timeout <seconds>', 'Sticky session timeout in seconds (1-86400) [non-interactive]')
+      .option(
+        '--signing-service <name>',
+        'SigV4 signing service name for passthrough GATEWAY_IAM_ROLE auth [non-interactive]'
+      )
+      .option(
+        '--signing-region <region>',
+        'SigV4 signing region for passthrough (defaults to project region) [non-interactive]'
+      )
       .option('--json', 'Output as JSON [non-interactive]')
       .addHelpText(
         'after',
@@ -359,7 +375,12 @@ Target types and their options:
     --connector <id>               bedrock-knowledge-bases or bedrock-agentic-retrieve
     --knowledge-base-id <id>       Project KB name or 10-char external KB id (repeatable for agentic-retrieve)
 
-  Auth (mcp-server, open-api-schema, smithy-model, lambda-function-arn):
+  passthrough — Route to an external HTTPS endpoint
+    --passthrough-endpoint <url>   HTTPS endpoint URL
+    --stickiness-identifier <expr> Session routing expression (optional)
+    --stickiness-timeout <seconds> Sticky session timeout in seconds (optional)
+
+  Auth (mcp-server, open-api-schema, smithy-model, lambda-function-arn, passthrough):
     --outbound-auth <type>         oauth, api-key, or none
     --credential-name <name>       Existing credential name
 `
@@ -383,12 +404,17 @@ Target types and their options:
           }
 
           // Map CLI flag values to internal types
-          const outboundAuthMap: Record<string, 'OAUTH' | 'API_KEY' | 'NONE'> = {
-            oauth: 'OAUTH',
-            'api-key': 'API_KEY',
-            api_key: 'API_KEY',
-            none: 'NONE',
-          };
+          const outboundAuthMap: Record<string, 'OAUTH' | 'API_KEY' | 'NONE' | 'GATEWAY_IAM_ROLE' | 'JWT_PASSTHROUGH'> =
+            {
+              oauth: 'OAUTH',
+              'api-key': 'API_KEY',
+              api_key: 'API_KEY',
+              none: 'NONE',
+              gateway_iam_role: 'GATEWAY_IAM_ROLE',
+              'gateway-iam-role': 'GATEWAY_IAM_ROLE',
+              jwt_passthrough: 'JWT_PASSTHROUGH',
+              'jwt-passthrough': 'JWT_PASSTHROUGH',
+            };
 
           const cliType = cliOptions.type ?? '';
           const telemetryTargetType = GATEWAY_TARGET_TYPE_MAP[cliType] ?? ('unknown' as const);
@@ -462,7 +488,10 @@ Target types and their options:
               ...(cliOptions.outboundAuthType
                 ? {
                     outboundAuth: {
-                      type: outboundAuthMap[cliOptions.outboundAuthType.toLowerCase()] ?? 'NONE',
+                      type: (outboundAuthMap[cliOptions.outboundAuthType.toLowerCase()] ?? 'NONE') as
+                        | 'OAUTH'
+                        | 'API_KEY'
+                        | 'NONE',
                       credentialName: cliOptions.credentialName,
                     },
                   }
@@ -585,6 +614,77 @@ Target types and their options:
             return telemetryAttrs;
           }
 
+          // Handle passthrough targets (no code generation)
+          if (cliOptions.type === 'passthrough') {
+            const passthroughEndpoint = (cliOptions as Record<string, string | undefined>).passthroughEndpoint;
+            if (!passthroughEndpoint) {
+              throw new ValidationError('--passthrough-endpoint is required for passthrough type');
+            }
+            const stickinessIdentifier = (cliOptions as Record<string, string | undefined>).stickinessIdentifier;
+            const stickinessTimeoutRaw = (cliOptions as Record<string, string | undefined>).stickinessTimeout;
+            const stickinessTimeout = stickinessTimeoutRaw ? parseInt(stickinessTimeoutRaw, 10) : undefined;
+            const signingService = (rawOptions as Record<string, string | undefined>).signingService;
+            const signingRegion = (rawOptions as Record<string, string | undefined>).signingRegion;
+            const protocolTypeRaw = (rawOptions as Record<string, string | undefined>).passthroughProtocol;
+            const protocolType = protocolTypeRaw?.toUpperCase() ?? 'CUSTOM';
+            if (!PASSTHROUGH_PROTOCOL_TYPES.includes(protocolType as PassthroughProtocolType)) {
+              throw new ValidationError(
+                `Invalid --passthrough-protocol "${protocolTypeRaw}". Must be one of: ${PASSTHROUGH_PROTOCOL_TYPES.join(', ')}`
+              );
+            }
+
+            // Build outboundAuth based on the auth type
+            let passthroughOutboundAuth:
+              | { type: string; credentialName?: string; scopes?: string[]; service?: string; region?: string }
+              | undefined;
+            if (cliOptions.outboundAuthType) {
+              const mappedAuthType = outboundAuthMap[cliOptions.outboundAuthType.toLowerCase()] ?? 'NONE';
+              if (mappedAuthType === 'GATEWAY_IAM_ROLE') {
+                if (!signingService) {
+                  throw new ValidationError(
+                    '--signing-service is required when --outbound-auth is GATEWAY_IAM_ROLE for passthrough targets'
+                  );
+                }
+                passthroughOutboundAuth = {
+                  type: 'GATEWAY_IAM_ROLE',
+                  service: signingService,
+                  ...(signingRegion && { region: signingRegion }),
+                };
+              } else if (mappedAuthType === 'JWT_PASSTHROUGH') {
+                passthroughOutboundAuth = { type: 'JWT_PASSTHROUGH' };
+              } else if (mappedAuthType === 'OAUTH') {
+                passthroughOutboundAuth = {
+                  type: 'OAUTH',
+                  credentialName: cliOptions.credentialName,
+                  scopes: cliOptions.oauthScopes?.split(',').map(s => s.trim()),
+                };
+              } else if (mappedAuthType !== 'NONE') {
+                passthroughOutboundAuth = {
+                  type: mappedAuthType,
+                  credentialName: cliOptions.credentialName,
+                  scopes: cliOptions.oauthScopes?.split(',').map(s => s.trim()),
+                };
+              }
+            }
+
+            const result = await this.createPassthroughTarget({
+              name: cliOptions.name!,
+              gateway: cliOptions.gateway!,
+              passthroughEndpoint,
+              protocolType: protocolType as PassthroughProtocolType,
+              stickinessIdentifier,
+              stickinessTimeout,
+              outboundAuth: passthroughOutboundAuth,
+            });
+            const output = { success: true, toolName: result.toolName };
+            if (cliOptions.json) {
+              console.log(JSON.stringify(output));
+            } else {
+              console.log(`Added gateway target '${result.toolName}'`);
+            }
+            return telemetryAttrs;
+          }
+
           // Handle MCP server targets (existing endpoint, no code generation)
           if (cliOptions.type === 'mcpServer' && cliOptions.endpoint) {
             const config: McpServerTargetConfig = {
@@ -601,7 +701,10 @@ Target types and their options:
               ...(cliOptions.outboundAuthType
                 ? {
                     outboundAuth: {
-                      type: outboundAuthMap[cliOptions.outboundAuthType.toLowerCase()] ?? 'NONE',
+                      type: (outboundAuthMap[cliOptions.outboundAuthType.toLowerCase()] ?? 'NONE') as
+                        | 'OAUTH'
+                        | 'API_KEY'
+                        | 'NONE',
                       credentialName: cliOptions.credentialName,
                     },
                   }
@@ -971,6 +1074,76 @@ Target types and their options:
       upsertAgenticRetrieveTarget(gateway, config.knowledgeBaseId);
     }
 
+    await this.writeProjectSpec(project);
+
+    return { toolName: config.name };
+  }
+
+  /**
+   * Create a passthrough target that routes HTTP traffic to an external HTTPS endpoint.
+   * No code generation — this registers an endpoint for HTTP passthrough.
+   */
+  async createPassthroughTarget(config: {
+    name: string;
+    gateway: string;
+    passthroughEndpoint: string;
+    protocolType?: PassthroughProtocolType;
+    stickinessIdentifier?: string;
+    stickinessTimeout?: number;
+    outboundAuth?: { type: string; credentialName?: string; scopes?: string[]; service?: string; region?: string };
+  }): Promise<{ toolName: string }> {
+    const project = await this.readProjectSpec();
+
+    const gateway = project.agentCoreGateways.find(g => g.name === config.gateway);
+    if (!gateway) {
+      throw new Error(`Gateway "${config.gateway}" not found.`);
+    }
+
+    if (!gateway.targets) {
+      gateway.targets = [];
+    }
+
+    if (gateway.targets.some(t => t.name === config.name)) {
+      throw new Error(`Target "${config.name}" already exists in gateway "${gateway.name}".`);
+    }
+
+    // Build outboundAuth object based on auth type
+    let outboundAuth: AgentCoreGatewayTarget['outboundAuth'];
+    if (config.outboundAuth && config.outboundAuth.type !== 'NONE') {
+      if (config.outboundAuth.type === 'GATEWAY_IAM_ROLE') {
+        outboundAuth = {
+          type: 'GATEWAY_IAM_ROLE',
+          service: config.outboundAuth.service,
+          ...(config.outboundAuth.region && { region: config.outboundAuth.region }),
+        };
+      } else if (config.outboundAuth.type === 'JWT_PASSTHROUGH') {
+        outboundAuth = { type: 'JWT_PASSTHROUGH' };
+      } else {
+        outboundAuth = {
+          type: config.outboundAuth.type as 'OAUTH' | 'API_KEY',
+          credentialName: config.outboundAuth.credentialName!,
+          ...(config.outboundAuth.scopes && { scopes: config.outboundAuth.scopes }),
+        };
+      }
+    }
+
+    const target: AgentCoreGatewayTarget = {
+      name: config.name,
+      targetType: 'passthrough',
+      passthrough: {
+        endpoint: config.passthroughEndpoint,
+        protocolType: config.protocolType ?? 'CUSTOM',
+        ...(config.stickinessIdentifier && {
+          stickinessConfiguration: {
+            identifier: config.stickinessIdentifier,
+            ...(config.stickinessTimeout && { timeout: config.stickinessTimeout }),
+          },
+        }),
+      },
+      ...(outboundAuth && { outboundAuth }),
+    };
+
+    gateway.targets.push(target);
     await this.writeProjectSpec(project);
 
     return { toolName: config.name };

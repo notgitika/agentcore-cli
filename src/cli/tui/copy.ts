@@ -49,6 +49,7 @@ export const COMMAND_DESCRIPTIONS = {
   recommend: '[preview] Run optimization recommendations for system prompts and tool descriptions.',
   recommendations: '[preview] View recommendation jobs and their results.',
   batchEvaluations: '[preview] View batch evaluation jobs and their results.',
+  abTests: '[preview] View A/B test jobs and their results.',
   insights: '[preview] Manage insights analysis jobs.',
   run: 'Run evaluations, batch evaluations, insights, or optimization recommendations.',
   stop: 'Stop a running batch evaluation or A/B test.',

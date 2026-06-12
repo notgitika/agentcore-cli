@@ -8,7 +8,6 @@ import type { RemovableMemory } from '../../primitives/MemoryPrimitive';
 import type { RemovablePolicyResource } from '../../primitives/PolicyPrimitive';
 import type { RemovableRuntimeEndpoint } from '../../primitives/RuntimeEndpointPrimitive';
 import {
-  abTestPrimitive,
   agentPrimitive,
   configBundlePrimitive,
   credentialPrimitive,
@@ -188,19 +187,6 @@ export function useRemovableConfigBundles() {
   return { configBundles, ...rest };
 }
 
-export function useRemovableABTests() {
-  const { items: abTests, ...rest } = useRemovableResources(() => abTestPrimitive.getRemovable());
-  return { abTests, ...rest };
-}
-
-export function useRemoveABTest() {
-  return useRemoveResource(
-    (name: string) => abTestPrimitive.remove(name),
-    'ab-test',
-    name => name
-  );
-}
-
 export function useRemovableRuntimeEndpoints() {
   const { items: endpoints, ...rest } = useRemovableResources<RemovableRuntimeEndpoint>(() =>
     runtimeEndpointPrimitive.getRemovable()
@@ -306,11 +292,6 @@ export function useRemovalPreview() {
     [loadPreview]
   );
 
-  const loadABTestPreview = useCallback(
-    (name: string) => loadPreview(n => abTestPrimitive.previewRemove(n), name),
-    [loadPreview]
-  );
-
   const loadRuntimeEndpointPreview = useCallback(
     (name: string) => loadPreview(n => runtimeEndpointPrimitive.previewRemove(n), name),
     [loadPreview]
@@ -335,7 +316,6 @@ export function useRemovalPreview() {
     loadPolicyEnginePreview,
     loadPolicyPreview,
     loadConfigBundlePreview,
-    loadABTestPreview,
     loadRuntimeEndpointPreview,
     reset,
   };

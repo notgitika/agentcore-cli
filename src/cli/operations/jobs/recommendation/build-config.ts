@@ -15,7 +15,7 @@ import type {
 import { runtimeLogGroup } from '../../../aws/cloudwatch';
 import { arnPrefix } from '../../../aws/partition';
 import type { ExecLogger } from '../../../logging/exec-logger';
-import { fetchSessionSpans } from '../../recommendation/fetch-session-spans';
+import { fetchSessionSpans } from './fetch-session-spans';
 import { readFileSync } from 'fs';
 
 /** Resolve an evaluator reference to a full ARN (ARN passthrough, Builtin.* expansion, or deployed lookup). */
@@ -133,7 +133,7 @@ export async function buildRecommendationConfig(opts: BuildConfigOptions): Promi
     if (opts.batchEvaluationArn) {
       batchEvalArn = opts.batchEvaluationArn;
     } else if (opts.fromInsights) {
-      const { loadRecord } = await import('../storage');
+      const { loadRecord } = await import('../shared/storage');
       const record = loadRecord('insights', opts.fromInsights);
       if (!record) {
         throw new Error(`Insights run "${opts.fromInsights}" not found.`);

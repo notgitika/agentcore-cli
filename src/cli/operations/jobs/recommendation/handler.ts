@@ -13,11 +13,11 @@ import type { Result } from '../../../../lib/result';
 import { deleteRecommendation, getRecommendation, startRecommendation } from '../../../aws/agentcore-recommendation';
 import { detectRegion } from '../../../aws/region';
 import { ExecLogger } from '../../../logging/exec-logger';
-import { applyRecommendationToBundle } from '../../recommendation/apply-to-bundle';
-import { NOT_FOUND_STATUS } from '../constants';
-import { regionFromArn, resolveJobRegion } from '../region';
+import { NOT_FOUND_STATUS } from '../shared/constants';
+import { regionFromArn, resolveJobRegion } from '../shared/region';
 import { resolveAgentState } from '../shared/resolve-agent-state';
-import type { RecommendationHandler, RecommendationJobRecord, StartRecommendationJobOptions } from '../types';
+import type { RecommendationHandler, RecommendationJobRecord, StartRecommendationJobOptions } from '../shared/types';
+import { applyRecommendationToBundle } from './apply-to-bundle';
 import {
   buildRecommendationConfig,
   extractAccountIdFromArn,
@@ -179,7 +179,7 @@ export const recommendationHandler: RecommendationHandler = {
         name,
         type: opts.type,
         recommendationConfig,
-        kmsKeyArn: opts.kmsKeyArn,
+        ...(opts.kmsKeyArn ? { kmsKeyArn: opts.kmsKeyArn } : {}),
       });
       logger?.log(`Response: ${JSON.stringify(startResult, null, 2)}`);
       logger?.endStep('success');
@@ -202,6 +202,7 @@ export const recommendationHandler: RecommendationHandler = {
         bundleVersion: opts.bundleVersion,
         systemPromptJsonPath: resolvedSystemPromptJsonPath,
         toolDescJsonPaths: opts.toolDescJsonPaths,
+        ...(opts.kmsKeyArn ? { kmsKeyArn: opts.kmsKeyArn } : {}),
       };
       return { success: true, record };
     } catch (err) {

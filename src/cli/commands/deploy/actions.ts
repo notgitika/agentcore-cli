@@ -43,7 +43,6 @@ import {
 } from '../../operations/deploy';
 import { computeProjectDeployHash } from '../../operations/deploy/change-detection';
 import { formatTargetStatus, getGatewayTargetStatuses } from '../../operations/deploy/gateway-status';
-import { deleteOrphanedABTests, setupABTests } from '../../operations/deploy/post-deploy-ab-tests';
 import { syncDatasets } from '../../operations/deploy/post-deploy-datasets';
 import { autoIngestKnowledgeBases } from '../../operations/deploy/post-deploy-knowledge-bases';
 import { enableOnlineEvalConfigs } from '../../operations/deploy/post-deploy-online-evals';
@@ -664,6 +663,7 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       configBundles,
       knowledgeBases,
       payments,
+      abTestNames: (context.projectSpec.abTests ?? []).map(t => t.name),
     });
 
     if (deployHash) {
@@ -815,77 +815,9 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       endStep(ingestResult.hasErrors ? 'error' : 'success');
     }
 
-    // Pre-gateway: Delete orphaned AB tests so their gateway rules are cleaned up
-    // before we attempt to delete orphaned HTTP gateways.
-    const existingABTestsForCleanup = deployedState.targets?.[target.name]?.resources?.abTests;
-    if (existingABTestsForCleanup && Object.keys(existingABTestsForCleanup).length > 0) {
-      const deleteResult = await deleteOrphanedABTests({
-        region: target.region,
-        projectSpec: context.projectSpec,
-        existingABTests: existingABTestsForCleanup,
-      });
-
-      if (deleteResult.hasErrors) {
-        const errors = deleteResult.results.filter(r => r.status === 'error');
-        const errorMessages = errors.map(err => `"${err.testName}": ${err.error}`).join('; ');
-        logger.log(`AB test orphan cleanup warnings: ${errorMessages}`, 'warn');
-        postDeployWarnings.push(...errors.map(err => `AB test "${err.testName}": ${err.error}`));
-      }
-
-      // Surface warnings (e.g., "AB test was stopped before deletion")
-      for (const r of deleteResult.results) {
-        if (r.warning) {
-          logger.log(r.warning, 'warn');
-          postDeployWarnings.push(r.warning);
-        }
-      }
-
-      // Update deployed state to remove deleted AB tests
-      if (deleteResult.results.some(r => r.status === 'deleted')) {
-        const updatedState = await configIO.readDeployedState().catch(() => deployedState);
-        const targetResources = updatedState.targets[target.name]?.resources;
-        if (targetResources?.abTests) {
-          for (const r of deleteResult.results) {
-            if (r.status === 'deleted') delete targetResources.abTests[r.testName];
-          }
-          await configIO.writeDeployedState(updatedState);
-          deployedState = updatedState;
-        }
-      }
-    }
-
-    // Config bundles are now managed via CloudFormation (no post-deploy API step needed).
-    // State is extracted from stack outputs above.
-
-    // Post-deploy: Create/update AB tests
-    const abTestSpecs = context.projectSpec.abTests ?? [];
-    if (abTestSpecs.length > 0) {
-      const existingABTests = deployedState.targets?.[target.name]?.resources?.abTests;
-      const deployedResources = deployedState.targets?.[target.name]?.resources;
-      const abTestResult = await setupABTests({
-        region: target.region,
-        projectSpec: context.projectSpec,
-        existingABTests,
-        deployedResources,
-      });
-
-      // Merge AB test state into deployed state
-      if (Object.keys(abTestResult.abTests).length > 0) {
-        const updatedState = await configIO.readDeployedState().catch(() => deployedState);
-        const targetResources = updatedState.targets[target.name]?.resources;
-        if (targetResources) {
-          targetResources.abTests = abTestResult.abTests;
-          await configIO.writeDeployedState(updatedState);
-        }
-      }
-
-      if (abTestResult.hasErrors) {
-        const errors = abTestResult.results.filter(r => r.status === 'error');
-        const errorMessages = errors.map(err => `"${err.testName}": ${err.error}`).join('; ');
-        logger.log(`AB test setup warnings: ${errorMessages}`, 'warn');
-        postDeployWarnings.push(...errors.map(err => `AB test "${err.testName}": ${err.error}`));
-      }
-    }
+    // Config bundles are now managed via CloudFormation; their state is parsed
+    // from stack outputs above (no post-deploy API step). AB tests are managed
+    // as fire-and-forget jobs (agentcore run ab-test), not via the deploy path.
 
     // Post-deploy: Enable CloudWatch Transaction Search (non-blocking, silent)
     const hasHarnesses = isPreviewEnabled() && (context.projectSpec.harnesses ?? []).length > 0;

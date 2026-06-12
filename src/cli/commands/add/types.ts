@@ -76,7 +76,7 @@ export interface AddGatewayTargetOptions {
   language?: 'Python' | 'TypeScript' | 'Other';
   gateway?: string;
   host?: 'Lambda' | 'AgentCoreRuntime';
-  outboundAuthType?: 'OAUTH' | 'API_KEY' | 'NONE';
+  outboundAuthType?: 'OAUTH' | 'API_KEY' | 'NONE' | 'GATEWAY_IAM_ROLE' | 'JWT_PASSTHROUGH';
   credentialName?: string;
   oauthClientId?: string;
   oauthClientSecret?: string;
@@ -101,6 +101,11 @@ export interface AddGatewayTargetOptions {
    * bedrock-knowledge-bases.
    */
   knowledgeBaseId?: string[];
+  passthroughEndpoint?: string;
+  stickinessIdentifier?: string;
+  stickinessTimeout?: string;
+  signingService?: string;
+  signingRegion?: string;
   json?: boolean;
 }
 

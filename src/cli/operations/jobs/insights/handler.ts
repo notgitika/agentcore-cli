@@ -22,10 +22,10 @@ import { resolveEndpointName, runtimeLogGroup } from '../../../aws/cloudwatch';
 import { detectRegion } from '../../../aws/region';
 import { ExecLogger } from '../../../logging/exec-logger';
 import { resolveBatchEvaluatorIds } from '../batch-evaluation/build-source';
-import { NOT_FOUND_STATUS } from '../constants';
-import { regionFromArn, resolveJobRegion } from '../region';
+import { NOT_FOUND_STATUS } from '../shared/constants';
+import { regionFromArn, resolveJobRegion } from '../shared/region';
 import { resolveAgentState } from '../shared/resolve-agent-state';
-import type { InsightsHandler, InsightsJobRecord, StartInsightsJobOptions } from '../types';
+import type { InsightsHandler, InsightsJobRecord, StartInsightsJobOptions } from '../shared/types';
 
 /** Auto-generate a job name from project/agent/timestamp. */
 function resolveInsightsName(name: string | undefined, projectName: string, agent: string): string {

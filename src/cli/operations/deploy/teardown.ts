@@ -6,7 +6,6 @@ import { deleteConfigurationBundle } from '../../aws/agentcore-config-bundles';
 import { CdkToolkitWrapper, silentIoHost } from '../../cdk/toolkit-lib';
 import { type DiscoveredStack, findStack } from '../../cloudformation/stack-discovery';
 import { findOrphanHarnesses } from '../harness/orphan';
-import { deleteOrphanedABTests } from './post-deploy-ab-tests';
 import { StackSelectionStrategy } from '@aws-cdk/toolkit-lib';
 import { existsSync } from 'fs';
 import { join } from 'path';
@@ -120,10 +119,10 @@ export async function performStackTeardown(targetName: string): Promise<Result> 
     const deployedState = await configIO.readDeployedState();
     const resources = deployedState.targets?.[targetName]?.resources;
 
-    // Warn about imperative-build orphan harnesses. Unlike config bundles / AB tests (deleted
-    // below), an orphan harness is never auto-deleted — the user may want to migrate it to GA.
-    // CloudFormation can't delete it either (it never created it), so tearing the stack down
-    // leaves it running. Point the user at `remove harness` for an explicit, intentful delete.
+    // Warn about imperative-build orphan harnesses. Unlike config bundles (deleted below), an
+    // orphan harness is never auto-deleted — the user may want to migrate it to GA. CloudFormation
+    // can't delete it either (it never created it), so tearing the stack down leaves it running.
+    // Point the user at `remove harness` for an explicit, intentful delete.
     for (const orphan of findOrphanHarnesses(deployedState, undefined).filter(o => o.targetName === targetName)) {
       console.warn(
         `Warning: Harness "${orphan.name}" was created by the preview build and is not managed by ` +
@@ -132,7 +131,7 @@ export async function performStackTeardown(targetName: string): Promise<Result> 
       );
     }
 
-    if (resources?.configBundles || resources?.abTests) {
+    if (resources?.configBundles) {
       let region = deployedTarget?.target.region;
       if (!region) {
         try {
@@ -147,24 +146,6 @@ export async function performStackTeardown(targetName: string): Promise<Result> 
         console.warn('Warning: Could not determine region for resource cleanup — resources may need manual deletion');
       }
       if (region) {
-        const projectSpec = await configIO.readProjectSpec();
-        const emptySpec = { ...projectSpec, abTests: [] };
-
-        if (resources.abTests) {
-          const abResult = await deleteOrphanedABTests({
-            region,
-            projectSpec: emptySpec,
-            existingABTests: resources.abTests,
-          });
-          for (const r of abResult.results) {
-            if (r.status === 'deleted') {
-              console.log(`Deleted AB test "${r.testName}"`);
-            } else if (r.error) {
-              console.warn(`Warning: Failed to delete AB test "${r.testName}": ${r.error}`);
-            }
-          }
-        }
-
         for (const [bundleName, bundleState] of Object.entries(resources.configBundles ?? {})) {
           try {
             await deleteConfigurationBundle({ region, bundleId: bundleState.bundleId });

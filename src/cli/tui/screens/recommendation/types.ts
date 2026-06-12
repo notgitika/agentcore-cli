@@ -1,8 +1,8 @@
 import type {
-  RecommendationInputSourceKind,
+  RecommendationInputSource as RecommendationInputSourceKind,
   RecommendationType,
-  TraceSourceKind,
-} from '../../../operations/recommendation';
+  RecommendationTraceSource as TraceSourceKind,
+} from '../../../operations/jobs';
 
 export type RecommendationStep =
   | 'type'

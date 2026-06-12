@@ -207,11 +207,13 @@ export interface ResourceEvaluator {
 /** Online eval config details in the resources response */
 export interface ResourceOnlineEvalConfig {
   name: string;
-  agent: string;
+  agent?: string;
   evaluators?: string[];
   insights?: string[];
   samplingRate: number;
   description?: string;
+  logGroupNames?: string[];
+  serviceNames?: string[];
   deploymentStatus?: ResourceDeploymentStatus;
   deployed?: DeployedOnlineEvalState;
 }

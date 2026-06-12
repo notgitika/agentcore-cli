@@ -1,8 +1,8 @@
 import type {
-  RecommendationInputSourceKind,
+  RecommendationInputSource as RecommendationInputSourceKind,
   RecommendationType,
-  TraceSourceKind,
-} from '../../../operations/recommendation';
+  RecommendationTraceSource as TraceSourceKind,
+} from '../../../operations/jobs';
 import type { RecommendationStep, RecommendationWizardConfig } from './types';
 import { DEFAULT_LOOKBACK_DAYS } from './types';
 import { useCallback, useState } from 'react';

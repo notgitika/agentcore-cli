@@ -1,6 +1,6 @@
 /** Presentation helpers for batch-evaluation job CLI output (history table + detail view). */
 import { formatJobDate } from '../shared/format';
-import type { BatchEvaluationJobRecord } from '../types';
+import type { BatchEvaluationJobRecord } from '../shared/types';
 
 export function printBatchEvaluationHistory(records: BatchEvaluationJobRecord[]): void {
   if (records.length === 0) {

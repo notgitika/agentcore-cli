@@ -196,7 +196,9 @@ type GatewayTargetType =
   | 'smithyModel'
   | 'apiGateway'
   | 'lambdaFunctionArn'
-  | 'connector';
+  | 'httpRuntime'
+  | 'connector'
+  | 'passthrough';
 type ConnectorId = 'bedrock-knowledge-bases' | 'bedrock-agentic-retrieve';
 type PythonRuntime = 'PYTHON_3_10' | 'PYTHON_3_11' | 'PYTHON_3_12' | 'PYTHON_3_13' | 'PYTHON_3_14';
 type NodeRuntime = 'NODE_18' | 'NODE_20' | 'NODE_22';

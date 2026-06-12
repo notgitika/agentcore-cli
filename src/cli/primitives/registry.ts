@@ -1,5 +1,4 @@
 import { isPreviewEnabled } from '../feature-flags';
-import { ABTestPrimitive } from './ABTestPrimitive';
 import { AgentPrimitive } from './AgentPrimitive';
 import type { BasePrimitive } from './BasePrimitive';
 import { ConfigBundlePrimitive } from './ConfigBundlePrimitive';
@@ -37,7 +36,6 @@ export const knowledgeBasePrimitive = new KnowledgeBasePrimitive();
 export const policyEnginePrimitive = new PolicyEnginePrimitive();
 export const policyPrimitive = new PolicyPrimitive();
 export const configBundlePrimitive = new ConfigBundlePrimitive();
-export const abTestPrimitive = new ABTestPrimitive();
 export const runtimeEndpointPrimitive = new RuntimeEndpointPrimitive();
 export const paymentManagerPrimitive = new PaymentManagerPrimitive();
 export const paymentConnectorPrimitive = new PaymentConnectorPrimitive();
@@ -60,7 +58,6 @@ export const ALL_PRIMITIVES: BasePrimitive<unknown, RemovableResource>[] = [
   policyEnginePrimitive,
   policyPrimitive,
   configBundlePrimitive,
-  abTestPrimitive,
   runtimeEndpointPrimitive,
   paymentManagerPrimitive,
   paymentConnectorPrimitive,

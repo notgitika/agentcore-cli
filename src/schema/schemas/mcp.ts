@@ -19,6 +19,7 @@ export const GatewayTargetTypeSchema = z.enum([
   'lambdaFunctionArn',
   'httpRuntime',
   'connector',
+  'passthrough',
 ]);
 export type GatewayTargetType = z.infer<typeof GatewayTargetTypeSchema>;
 
@@ -26,7 +27,7 @@ export type GatewayTargetType = z.infer<typeof GatewayTargetTypeSchema>;
  * Target types that use the non-MCP (HTTP) protocol.
  * These targets require a gateway with protocolType: "None".
  */
-export const NON_MCP_TARGET_TYPES: readonly GatewayTargetType[] = ['httpRuntime'] as const;
+export const NON_MCP_TARGET_TYPES: readonly GatewayTargetType[] = ['httpRuntime', 'passthrough'] as const;
 
 /**
  * Target types that use the MCP protocol.
@@ -77,7 +78,7 @@ export const REAL_KB_ID_PATTERN = /^[A-Z0-9]{10}$/;
 // Auth schemas (GatewayAuthorizerTypeSchema, CustomJwtAuthorizerConfigSchema, etc.)
 // are defined in ./auth.ts and exported via the barrel (index.ts).
 
-export const OutboundAuthTypeSchema = z.enum(['OAUTH', 'API_KEY', 'NONE']);
+export const OutboundAuthTypeSchema = z.enum(['OAUTH', 'API_KEY', 'NONE', 'GATEWAY_IAM_ROLE', 'JWT_PASSTHROUGH']);
 export type OutboundAuthType = z.infer<typeof OutboundAuthTypeSchema>;
 
 export const OutboundAuthSchema = z
@@ -85,6 +86,8 @@ export const OutboundAuthSchema = z
     type: OutboundAuthTypeSchema.default('NONE'),
     credentialName: z.string().min(1).optional(),
     scopes: z.array(z.string()).optional(),
+    service: z.string().min(1).max(64).optional(),
+    region: z.string().min(1).max(32).optional(),
   })
   .strict();
 
@@ -115,6 +118,11 @@ export const TARGET_TYPE_AUTH_CONFIG: Record<
   // Connector targets call the underlying managed service (Bedrock KB, etc.)
   // via the gateway's IAM role. No outbound auth applies.
   connector: { authRequired: false, validAuthTypes: [], iamRoleFallback: true },
+  passthrough: {
+    authRequired: true,
+    validAuthTypes: ['GATEWAY_IAM_ROLE', 'OAUTH', 'JWT_PASSTHROUGH'],
+    iamRoleFallback: false,
+  },
 };
 
 // ============================================================================
@@ -393,6 +401,37 @@ export const HttpRuntimeConfigSchema = z
 export type HttpRuntimeConfig = z.infer<typeof HttpRuntimeConfigSchema>;
 
 // ============================================================================
+// Passthrough Target Configuration
+// ============================================================================
+
+export const StickinessConfigSchema = z
+  .object({
+    identifier: z.string().min(1).max(256),
+    timeout: z.number().int().min(1).max(86400).optional(),
+  })
+  .strict();
+export type StickinessConfig = z.infer<typeof StickinessConfigSchema>;
+
+/**
+ * Passthrough protocol type. HTTP is NOT valid — use CUSTOM for plain HTTP/REST backends.
+ */
+export const PassthroughProtocolTypeSchema = z.enum(['MCP', 'A2A', 'INFERENCE', 'CUSTOM']);
+export type PassthroughProtocolType = z.infer<typeof PassthroughProtocolTypeSchema>;
+
+export const PassthroughConfigSchema = z
+  .object({
+    endpoint: z
+      .string()
+      .min(1)
+      .regex(/^https:\/\/[a-zA-Z0-9\-.]+(:[0-9]{1,5})?(\/.*)?$/, 'Must be a valid HTTPS URL'),
+    /** Protocol type for the passthrough backend. Defaults to CUSTOM (generic HTTP/REST). */
+    protocolType: PassthroughProtocolTypeSchema.default('CUSTOM'),
+    stickinessConfiguration: StickinessConfigSchema.optional(),
+  })
+  .strict();
+export type PassthroughConfig = z.infer<typeof PassthroughConfigSchema>;
+
+// ============================================================================
 // Gateway Target
 // ============================================================================
 
@@ -457,6 +496,8 @@ export const AgentCoreGatewayTargetSchema = z
       )
       .min(1)
       .optional(),
+    /** Passthrough configuration. Required for passthrough target type. */
+    passthrough: PassthroughConfigSchema.optional(),
   })
   .strict()
   .superRefine((data, ctx) => {
@@ -645,6 +686,57 @@ export const AgentCoreGatewayTargetSchema = z
         });
       }
     }
+    if (data.targetType === 'passthrough') {
+      if (!data.passthrough) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'passthrough targets require a passthrough configuration (with an endpoint).',
+          path: ['passthrough'],
+        });
+      }
+      if (data.endpoint) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'passthrough targets should use passthrough.endpoint instead of endpoint.',
+          path: ['endpoint'],
+        });
+      }
+      if (data.compute) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'compute is not applicable for passthrough target type',
+          path: ['compute'],
+        });
+      }
+      if (data.apiGateway) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'apiGateway is not applicable for passthrough target type',
+          path: ['apiGateway'],
+        });
+      }
+      if (data.lambdaFunctionArn) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'lambdaFunctionArn is not applicable for passthrough target type',
+          path: ['lambdaFunctionArn'],
+        });
+      }
+      if (data.httpRuntime) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'httpRuntime is not applicable for passthrough target type',
+          path: ['httpRuntime'],
+        });
+      }
+      if (data.toolDefinitions && data.toolDefinitions.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'toolDefinitions is not applicable for passthrough target type',
+          path: ['toolDefinitions'],
+        });
+      }
+    }
     if (data.targetType === 'lambda' && !data.compute) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -773,11 +865,37 @@ export const AgentCoreGatewayTargetSchema = z
         path: ['outboundAuth'],
       });
     }
-    if (data.outboundAuth && data.outboundAuth.type !== 'NONE' && !data.outboundAuth.credentialName) {
+    if (
+      data.outboundAuth &&
+      data.outboundAuth.type !== 'NONE' &&
+      data.outboundAuth.type !== 'GATEWAY_IAM_ROLE' &&
+      data.outboundAuth.type !== 'JWT_PASSTHROUGH' &&
+      !data.outboundAuth.credentialName
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: `${data.outboundAuth.type} outbound auth requires a credentialName.`,
         path: ['outboundAuth', 'credentialName'],
+      });
+    }
+    // GATEWAY_IAM_ROLE on passthrough requires service
+    if (
+      data.targetType === 'passthrough' &&
+      data.outboundAuth?.type === 'GATEWAY_IAM_ROLE' &&
+      !data.outboundAuth.service
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'GATEWAY_IAM_ROLE outbound auth on passthrough targets requires a service name.',
+        path: ['outboundAuth', 'service'],
+      });
+    }
+    // JWT_PASSTHROUGH is only valid for passthrough targets
+    if (data.outboundAuth?.type === 'JWT_PASSTHROUGH' && data.targetType !== 'passthrough') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'JWT_PASSTHROUGH outbound auth is only valid for passthrough targets.',
+        path: ['outboundAuth', 'type'],
       });
     }
   });

@@ -1,6 +1,6 @@
 /** Presentation helpers for recommendation job CLI output (history table + detail view). */
 import { formatJobDate } from '../shared/format';
-import type { RecommendationJobRecord } from '../types';
+import type { RecommendationJobRecord } from '../shared/types';
 
 function shortType(type: string): string {
   if (type === 'SYSTEM_PROMPT_RECOMMENDATION') return 'System Prompt';
@@ -31,16 +31,24 @@ export function printRecommendationDetail(record: RecommendationJobRecord): void
   console.log(`Evaluators: ${record.evaluators.join(', ') || '(none)'}`);
   console.log(`Started: ${formatJobDate(record.createdAt)}`);
   if (record.completedAt) console.log(`Completed: ${formatJobDate(record.completedAt)}`);
+  if (record.kmsKeyArn) console.log(`KMS Key: ${record.kmsKeyArn}`);
 
   const sys = record.result?.systemPromptRecommendationResult;
   const tool = record.result?.toolDescriptionRecommendationResult;
   if (sys?.recommendedSystemPrompt) {
     console.log('\n+++ Recommended System Prompt +++');
     console.log(sys.recommendedSystemPrompt);
+    if (sys.explanation) {
+      console.log('\n--- Explanation ---');
+      console.log(sys.explanation);
+    }
   } else if (tool?.tools?.length) {
     for (const t of tool.tools) {
       console.log(`\nTool: ${t.toolName}`);
       console.log(`Recommended: ${t.recommendedToolDescription}`);
+      if (t.explanation) {
+        console.log(`Explanation: ${t.explanation}`);
+      }
     }
   } else if (record.status === 'FAILED') {
     console.log(`\nError: ${record.failureDetail ?? record.statusReasons?.join('; ') ?? 'unknown'}`);

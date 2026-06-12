@@ -9,10 +9,18 @@ interface RunScreenProps {
   onRunBatchEval: () => void;
   onRunRecommendation: () => void;
   onRunIngest: () => void;
+  onRunABTest: () => void;
   onExit: () => void;
 }
 
-export function RunScreen({ onRunEval, onRunBatchEval, onRunRecommendation, onRunIngest, onExit }: RunScreenProps) {
+export function RunScreen({
+  onRunEval,
+  onRunBatchEval,
+  onRunRecommendation,
+  onRunIngest,
+  onRunABTest,
+  onExit,
+}: RunScreenProps) {
   const items: SelectableItem[] = useMemo(
     () => [
       {
@@ -35,6 +43,11 @@ export function RunScreen({ onRunEval, onRunBatchEval, onRunRecommendation, onRu
         title: 'Ingest knowledge base',
         description: 'Start an ingestion job for a deployed knowledge base.',
       },
+      {
+        id: 'run-ab-test',
+        title: 'A/B Test',
+        description: 'Compare two config-bundle or gateway-target variants live through a gateway.',
+      },
     ],
     []
   );
@@ -46,6 +59,7 @@ export function RunScreen({ onRunEval, onRunBatchEval, onRunRecommendation, onRu
       else if (item.id === 'run-batch-eval') onRunBatchEval();
       else if (item.id === 'run-recommendation') onRunRecommendation();
       else if (item.id === 'run-ingest') onRunIngest();
+      else if (item.id === 'run-ab-test') onRunABTest();
     },
     onExit,
     isActive: true,

@@ -16,7 +16,6 @@ export type AddResourceType =
   | 'runtime-endpoint'
   | 'policy'
   | 'config-bundle'
-  | 'ab-test'
   | 'dataset'
   | 'payment-manager'
   | 'payment-connector';
@@ -35,7 +34,6 @@ const BASE_ADD_RESOURCES: { id: AddResourceType; title: string; description: str
   { id: 'policy', title: 'Policy', description: 'Cedar policies for gateway tools' },
   { id: 'dataset', title: 'Dataset', description: 'Evaluation dataset for testing agents' },
   { id: 'config-bundle', title: 'Configuration Bundle [preview]', description: 'Versioned component configurations' },
-  { id: 'ab-test', title: 'AB Test [preview]', description: 'Compare agent configurations with traffic splitting' },
   { id: 'payment-manager', title: 'Payment Manager', description: 'x402 crypto microtransactions config' },
   {
     id: 'payment-connector',

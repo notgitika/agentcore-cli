@@ -28,7 +28,6 @@ import {
 } from '../../../operations/deploy';
 import { computeProjectDeployHash } from '../../../operations/deploy/change-detection';
 import { getGatewayTargetStatuses } from '../../../operations/deploy/gateway-status';
-import { deleteOrphanedABTests, setupABTests } from '../../../operations/deploy/post-deploy-ab-tests';
 import { syncDatasets } from '../../../operations/deploy/post-deploy-datasets';
 import { autoIngestKnowledgeBases } from '../../../operations/deploy/post-deploy-knowledge-bases';
 import { enableOnlineEvalConfigs } from '../../../operations/deploy/post-deploy-online-evals';
@@ -173,7 +172,6 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
   });
   const [datasetSyncStep, setDatasetSyncStep] = useState<Step>({ label: 'Sync datasets', status: 'pending' });
   const [onlineEvalStep, setOnlineEvalStep] = useState<Step>({ label: 'Enable online evaluation', status: 'pending' });
-  const [abTestsStep, setAbTestsStep] = useState<Step>({ label: 'Sync AB tests', status: 'pending' });
   const [diffStep, setDiffStep] = useState<Step>({ label: 'Run CDK diff', status: 'pending' });
   const [diffSummaries, setDiffSummaries] = useState<StackDiffSummary[]>([]);
   const [numStacksWithChanges, setNumStacksWithChanges] = useState<number | undefined>();
@@ -205,7 +203,6 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     setAutoIngestStep({ label: 'Auto-ingest knowledge bases', status: 'pending' });
     setDatasetSyncStep({ label: 'Sync datasets', status: 'pending' });
     setOnlineEvalStep({ label: 'Enable online evaluation', status: 'pending' });
-    setAbTestsStep({ label: 'Sync AB tests', status: 'pending' });
     setPostDeployHasError(false);
     setPostDeployWarnings([]);
     setDeployOutput(null);
@@ -471,6 +468,7 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
       knowledgeBases,
       harnesses: deployedHarnesses,
       payments,
+      abTestNames: (ctx.projectSpec.abTests ?? []).map((t: { name: string }) => t.name),
     });
 
     try {
@@ -658,107 +656,9 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
       }
     }
 
-    // Config bundles are now managed via CloudFormation (no post-deploy API step needed).
-    // State is extracted from stack outputs above.
-
-    // Pre-gateway: Delete orphaned AB tests so their gateway rules are cleaned up
-    // before we attempt to delete orphaned HTTP gateways.
-    const existingABTests = deployedState.targets?.[target.name]?.resources?.abTests;
-    if (existingABTests && Object.keys(existingABTests).length > 0) {
-      try {
-        const deleteResult = await deleteOrphanedABTests({
-          region: target.region,
-          projectSpec: ctx.projectSpec,
-          existingABTests,
-        });
-
-        if (deleteResult.hasErrors) {
-          const errors = deleteResult.results.filter(r => r.status === 'error');
-          for (const err of errors) {
-            logger.log(`AB test delete "${err.testName}" error: ${err.error}`, 'warn');
-          }
-          setPostDeployHasError(true);
-          setPostDeployWarnings(prev => [...prev, ...errors.map(err => `AB test "${err.testName}": ${err.error}`)]);
-        }
-
-        // Surface warnings (e.g., "AB test was stopped before deletion")
-        for (const r of deleteResult.results) {
-          if (r.warning) {
-            logger.log(r.warning, 'warn');
-            setPostDeployWarnings(prev => [...prev, r.warning!]);
-          }
-        }
-
-        // Update deployed state to remove deleted AB tests
-        if (deleteResult.results.some(r => r.status === 'deleted')) {
-          const updatedState = await configIO.readDeployedState().catch(() => deployedState);
-          const targetResources = updatedState.targets[target.name]?.resources;
-          if (targetResources?.abTests) {
-            for (const r of deleteResult.results) {
-              if (r.status === 'deleted') delete targetResources.abTests[r.testName];
-            }
-            await configIO.writeDeployedState(updatedState);
-            deployedState = updatedState;
-          }
-        }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        logger.log(`AB test orphan cleanup failed: ${message}`, 'warn');
-        setPostDeployHasError(true);
-        setPostDeployWarnings(prev => [...prev, `AB test orphan cleanup failed: ${message}`]);
-      }
-    }
-
-    // Post-deploy: Create/update AB tests
-    const abTestSpecs = ctx.projectSpec.abTests ?? [];
-    if (abTestSpecs.length > 0) {
-      setAbTestsStep(prev => ({ ...prev, status: 'running' }));
-      logger.startStep('Sync AB tests');
-      try {
-        const existingABTests = deployedState.targets?.[target.name]?.resources?.abTests;
-        const deployedResources = deployedState.targets?.[target.name]?.resources;
-        const abTestResult = await setupABTests({
-          region: target.region,
-          projectSpec: ctx.projectSpec,
-          existingABTests,
-          deployedResources,
-        });
-
-        if (Object.keys(abTestResult.abTests).length > 0) {
-          const updatedState = await configIO.readDeployedState().catch(() => deployedState);
-          const targetResources = updatedState.targets[target.name]?.resources;
-          if (targetResources) {
-            targetResources.abTests = abTestResult.abTests;
-            await configIO.writeDeployedState(updatedState);
-          }
-        }
-
-        if (abTestResult.hasErrors) {
-          const errors = abTestResult.results.filter(r => r.status === 'error');
-          for (const err of errors) {
-            logger.log(`AB test "${err.testName}" setup error: ${err.error}`, 'warn');
-          }
-          setPostDeployHasError(true);
-          setPostDeployWarnings(prev => [...prev, ...errors.map(err => `AB test "${err.testName}": ${err.error}`)]);
-          logger.endStep('error', 'One or more AB tests failed to sync');
-          setAbTestsStep(prev => ({
-            ...prev,
-            status: 'error',
-            error: 'One or more AB tests failed to sync',
-          }));
-        } else {
-          logger.endStep('success');
-          setAbTestsStep(prev => ({ ...prev, status: 'success' }));
-        }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        logger.log(`AB test setup failed: ${message}`, 'warn');
-        setPostDeployHasError(true);
-        setPostDeployWarnings(prev => [...prev, `AB test setup failed: ${message}`]);
-        logger.endStep('error', message);
-        setAbTestsStep(prev => ({ ...prev, status: 'error', error: message }));
-      }
-    }
+    // Config bundles are now managed via CloudFormation; their state is parsed
+    // from stack outputs above (no post-deploy API step). AB tests are managed
+    // as fire-and-forget jobs (agentcore run ab-test), not via the deploy path.
 
     // Query gateway target sync statuses (non-blocking)
     const allStatuses: { name: string; status: string }[] = [];
@@ -1111,7 +1011,8 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
   const hasKnowledgeBases = (projectSpec?.knowledgeBases?.length ?? 0) > 0;
   const hasDatasets = (projectSpec?.datasets?.length ?? 0) > 0;
   const hasOnlineEvalConfigs = (projectSpec?.onlineEvalConfigs?.length ?? 0) > 0;
-  const hasAbTests = (projectSpec?.abTests?.length ?? 0) > 0;
+  const hasHarnesses = (projectSpec?.harnesses?.length ?? 0) > 0;
+  const isPreview = isPreviewEnabled();
 
   const steps = useMemo(() => {
     if (diffMode) {
@@ -1128,7 +1029,6 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
           ...(hasKnowledgeBases ? [autoIngestStep] : []),
           ...(hasDatasets ? [datasetSyncStep] : []),
           ...(hasOnlineEvalConfigs ? [onlineEvalStep] : []),
-          ...(hasAbTests ? [abTestsStep] : []),
         ];
 
     return [...preflightSteps, preDeployDiffStep, publishAssetsStep, deployStep, ...postDeploySteps];
@@ -1142,7 +1042,6 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     autoIngestStep,
     datasetSyncStep,
     onlineEvalStep,
-    abTestsStep,
     diffStep,
     skipPreflight,
     diffMode,
@@ -1150,7 +1049,8 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     needsKbHydration,
     hasDatasets,
     hasOnlineEvalConfigs,
-    hasAbTests,
+    hasHarnesses,
+    isPreview,
     context?.isTeardownDeploy,
     projectSpec,
   ]);

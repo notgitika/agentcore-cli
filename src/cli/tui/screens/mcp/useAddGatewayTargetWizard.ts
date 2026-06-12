@@ -1,5 +1,11 @@
 import { APP_DIR, MCP_APP_SUBDIR } from '../../../../lib';
-import type { ApiGatewayHttpMethod, GatewayTargetType, SchemaSource, ToolDefinition } from '../../../../schema';
+import type {
+  ApiGatewayHttpMethod,
+  GatewayTargetType,
+  PassthroughProtocolType,
+  SchemaSource,
+  ToolDefinition,
+} from '../../../../schema';
 import type { AddGatewayTargetStep, GatewayTargetWizardState } from './types';
 import { useCallback, useMemo, useState } from 'react';
 
@@ -55,6 +61,17 @@ export function useAddGatewayTargetWizard(
           // literal 10-char ID), then attach to a gateway. No outbound auth —
           // connector targets are managed by the gateway IAM role.
           baseSteps.push('kb-select', 'gateway');
+          break;
+        case 'passthrough':
+          baseSteps.push(
+            'passthrough-endpoint',
+            'passthrough-protocol',
+            'passthrough-stickiness',
+            'gateway',
+            'outbound-auth',
+            'signing-service',
+            'signing-region'
+          );
           break;
         case 'mcpServer':
         default:
@@ -134,6 +151,9 @@ export function useAddGatewayTargetWizard(
       case 'connector':
         setStep('kb-select');
         break;
+      case 'passthrough':
+        setStep('passthrough-endpoint');
+        break;
       case 'mcpServer':
       default:
         setStep('endpoint');
@@ -169,14 +189,24 @@ export function useAddGatewayTargetWizard(
   );
 
   const setOutboundAuth = useCallback(
-    (outboundAuth: { type: 'OAUTH' | 'API_KEY' | 'NONE'; credentialName?: string }) => {
+    (outboundAuth: {
+      type: 'OAUTH' | 'API_KEY' | 'NONE' | 'GATEWAY_IAM_ROLE' | 'JWT_PASSTHROUGH';
+      credentialName?: string;
+    }) => {
       setConfig(c => ({
         ...c,
         outboundAuth,
       }));
-      goToNextStep();
+      // For GATEWAY_IAM_ROLE, next step is signing-service (handled via steps array)
+      // For JWT_PASSTHROUGH and others, skip signing steps (go to confirm)
+      if (outboundAuth.type === 'GATEWAY_IAM_ROLE') {
+        setStep('signing-service');
+      } else {
+        // Skip signing-service and signing-region, go to confirm
+        setStep('confirm');
+      }
     },
-    [goToNextStep]
+    []
   );
 
   const reset = useCallback(() => {
@@ -265,10 +295,62 @@ export function useAddGatewayTargetWizard(
     [goToNextStep]
   );
 
+  const setPassthroughEndpoint = useCallback(
+    (passthroughEndpoint: string) => {
+      setConfig(c => ({ ...c, passthroughEndpoint }));
+      goToNextStep();
+    },
+    [goToNextStep]
+  );
+
+  const setPassthroughProtocol = useCallback(
+    (passthroughProtocol: PassthroughProtocolType) => {
+      setConfig(c => ({ ...c, passthroughProtocol }));
+      goToNextStep();
+    },
+    [goToNextStep]
+  );
+
+  const setStickinessConfig = useCallback(
+    (identifier?: string, timeout?: number) => {
+      setConfig(c => ({
+        ...c,
+        stickinessIdentifier: identifier,
+        stickinessTimeout: timeout,
+      }));
+      goToNextStep();
+    },
+    [goToNextStep]
+  );
+
   /** Switch from the kb-select picker to the manual literal-ID entry step. */
   const beginManualKbId = useCallback(() => {
     setStep('kb-id');
   }, []);
+
+  const setSigningService = useCallback(
+    (signingService: string) => {
+      setConfig(c => ({
+        ...c,
+        signingService,
+        outboundAuth: { ...c.outboundAuth!, service: signingService },
+      }));
+      goToNextStep();
+    },
+    [goToNextStep]
+  );
+
+  const setSigningRegion = useCallback(
+    (signingRegion?: string) => {
+      setConfig(c => ({
+        ...c,
+        signingRegion,
+        outboundAuth: { ...c.outboundAuth!, region: signingRegion },
+      }));
+      goToNextStep();
+    },
+    [goToNextStep]
+  );
 
   return {
     config,
@@ -293,6 +375,11 @@ export function useAddGatewayTargetWizard(
     setRuntimeEndpoint,
     setKnowledgeBaseId,
     beginManualKbId,
+    setPassthroughEndpoint,
+    setPassthroughProtocol,
+    setStickinessConfig,
+    setSigningService,
+    setSigningRegion,
     reset,
   };
 }

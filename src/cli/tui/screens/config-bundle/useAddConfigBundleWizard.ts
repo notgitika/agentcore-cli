@@ -28,13 +28,29 @@ function getDefaultConfig(): AddConfigBundleConfig {
 export function useAddConfigBundleWizard() {
   const [config, setConfig] = useState<AddConfigBundleConfig>(getDefaultConfig);
   const [step, setStep] = useState<AddConfigBundleStep>('name');
+  // True when the component-type/select steps were re-entered from the "add another?" loop,
+  // so back-navigation returns to the addAnother decision point (which holds "Continue" →
+  // branchName) instead of falling through the linear order back to `description`. Without this
+  // the user gets trapped: backing out of a second component drops all progress.
+  const [inAddAnotherLoop, setInAddAnotherLoop] = useState(false);
 
   const currentIndex = ALL_STEPS.indexOf(step);
 
   const goBack = useCallback(() => {
+    // If we're mid "add another component" loop, both componentType and componentSelect must
+    // return to the addAnother step (where Continue lives), not to the linear previous step.
+    if (inAddAnotherLoop && (step === 'componentType' || step === 'componentSelect')) {
+      if (step === 'componentSelect') {
+        setStep('componentType');
+        return;
+      }
+      setInAddAnotherLoop(false);
+      setStep('addAnother');
+      return;
+    }
     const prevStep = ALL_STEPS[currentIndex - 1];
     if (prevStep) setStep(prevStep);
-  }, [currentIndex]);
+  }, [currentIndex, inAddAnotherLoop, step]);
 
   const setName = useCallback((name: string) => {
     setConfig(c => ({ ...c, name }));
@@ -71,10 +87,12 @@ export function useAddConfigBundleWizard() {
 
   const addAnotherComponent = useCallback(() => {
     setConfig(c => ({ ...c, currentComponentType: undefined, currentComponentArn: undefined }));
+    setInAddAnotherLoop(true);
     setStep('componentType');
   }, []);
 
   const doneAddingComponents = useCallback(() => {
+    setInAddAnotherLoop(false);
     setStep('branchName');
   }, []);
 
@@ -90,6 +108,7 @@ export function useAddConfigBundleWizard() {
 
   const reset = useCallback(() => {
     setConfig(getDefaultConfig());
+    setInAddAnotherLoop(false);
     setStep('name');
   }, []);
 

@@ -49,7 +49,6 @@ export const FilterType = z.enum([
   'policy-engine',
   'policy',
   'config-bundle',
-  'ab-test',
   'dataset',
   'harness',
   'none',
@@ -64,6 +63,7 @@ export const GatewayTargetType = z.enum([
   'smithy-model',
   'lambda-function-arn',
   'http-runtime',
+  'passthrough',
   'unknown',
 ]);
 
@@ -75,6 +75,7 @@ export const GATEWAY_TARGET_TYPE_MAP: Record<string, z.infer<typeof GatewayTarge
   lambdaFunctionArn: 'lambda-function-arn',
   mcpServer: 'mcp-server',
   httpRuntime: 'http-runtime',
+  passthrough: 'passthrough',
 };
 export const AgentLanguage = z.enum(['python', 'typescript', 'other']);
 export const EvaluatorLevel = z.enum(['session', 'trace', 'tool_call']);
@@ -87,7 +88,7 @@ export const PolicyEngineMode = z.enum(['log_only', 'enforce']);
 export const AgentProtocol = z.enum(['http', 'mcp', 'a2a', 'agui']);
 export const RefType = z.enum(['arn', 'name']);
 export const ResourceType = z.enum(['gateway', 'agent']);
-export const JobType = z.enum(['recommendation', 'batch-evaluation', 'insights']);
+export const JobType = z.enum(['recommendation', 'batch-evaluation', 'ab-test', 'insights']);
 export const RecommendationKind = z.enum(['system-prompt', 'tool-description']);
 export const RecommendationInputSource = z.enum(['config-bundle', 'inline', 'file']);
 export const RecommendationTraceSource = z.enum(['cloudwatch', 'sessions', 'spans-file']);

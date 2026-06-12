@@ -4,6 +4,7 @@
  * Uses the AgentCore Evaluation DataPlane API (bedrock-agentcore)
  * with direct HTTP requests and SigV4 signing.
  */
+import { JobNotFoundError } from '../../lib';
 import { getCredentialProvider } from './account';
 import { dataPlaneEndpoint } from './stage-endpoint';
 import { Sha256 } from '@aws-crypto/sha256-js';
@@ -130,6 +131,7 @@ export interface GetABTestResult {
   currentRunId?: string;
   stopReason?: string;
   failureReason?: string;
+  errorDetails?: string[];
   startedAt?: string;
   stoppedAt?: string;
   maxDurationExpiresAt?: string;
@@ -247,7 +249,11 @@ async function signedRequestToEndpoint(
 
   if (!response.ok) {
     const errorBody = await response.text();
-    throw new Error(`ABTest API error (${response.status}): ${errorBody}`);
+    const message = `ABTest API error (${response.status}): ${errorBody}`;
+    if (response.status === 404) {
+      throw new JobNotFoundError(message, { errorSource: 'service' });
+    }
+    throw new Error(message);
   }
 
   if (response.status === 204) return {};

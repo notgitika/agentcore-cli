@@ -21,7 +21,6 @@ export interface RemoveLoggerOptions {
     | 'policy-engine'
     | 'policy'
     | 'config-bundle'
-    | 'ab-test'
     | 'dataset'
     | 'knowledge-base'
     | 'payment-manager'

@@ -718,6 +718,14 @@ export interface BuildDeployedStateOptions {
   configBundles?: Record<string, ConfigBundleDeployedState>;
   knowledgeBases?: Record<string, KnowledgeBaseDeployedState>;
   payments?: Record<string, PaymentDeployedState>;
+  /**
+   * Names of A/B tests currently declared in the project spec. AB test state is managed
+   * post-deploy (not via CFN outputs) and carried forward across deploys; passing the
+   * current spec names lets us prune entries for tests the user has since removed, so
+   * stale (e.g. preview) entries self-heal instead of lingering in deployed-state.
+   * If omitted, all existing AB test entries are carried forward unchanged.
+   */
+  abTestNames?: string[];
 }
 
 /**
@@ -744,6 +752,7 @@ export function buildDeployedState(opts: BuildDeployedStateOptions): DeployedSta
     configBundles,
     knowledgeBases,
     payments,
+    abTestNames,
   } = opts;
   const targetState: TargetDeployedState = {
     resources: {
@@ -806,10 +815,18 @@ export function buildDeployedState(opts: BuildDeployedStateOptions): DeployedSta
     }
   }
 
-  // Carry forward AB tests from existing state (managed post-deploy, not via CFN outputs)
+  // Carry forward AB tests from existing state (managed post-deploy, not via CFN outputs).
+  // Prune entries for tests no longer declared in the project spec so stale (e.g. preview)
+  // entries self-heal. When abTestNames is undefined, carry forward everything unchanged.
   const existingABTests = existingState?.targets?.[targetName]?.resources?.abTests;
   if (existingABTests && Object.keys(existingABTests).length > 0) {
-    targetState.resources!.abTests = existingABTests;
+    const carriedABTests =
+      abTestNames === undefined
+        ? existingABTests
+        : Object.fromEntries(Object.entries(existingABTests).filter(([specName]) => abTestNames.includes(specName)));
+    if (Object.keys(carriedABTests).length > 0) {
+      targetState.resources!.abTests = carriedABTests;
+    }
   }
 
   // Merge harness state. CFN-sourced records (freshly parsed, stamped

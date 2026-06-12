@@ -7,11 +7,15 @@ import type { RunEvalOptions } from '../../operations/eval';
 import { runKbIngestionByName } from '../../operations/ingest';
 import { createJobEngine, runDatasetPhase1, waitForTerminal } from '../../operations/jobs';
 import type {
+  ABTestJobRecord,
+  ABTestMode,
   BatchEvaluationJobRecord,
   InsightsJobRecord,
   RecommendationJobRecord,
+  StartABTestJobOptions,
   StartBatchEvaluationJobOptions,
 } from '../../operations/jobs';
+import { printABTestDetail } from '../../operations/jobs/ab-test/format';
 import { runCliCommand } from '../../telemetry/cli-command-run';
 import { requireProject } from '../../tui/guards';
 import type { Command } from '@commander-js/extra-typings';
@@ -177,8 +181,8 @@ export const registerRun = (program: Command) => {
   runCmd
     .command('batch-evaluation')
     .description('[preview] Run evaluators in batch across all agent sessions in CloudWatch')
-    .requiredOption('-r, --runtime <name>', 'Runtime name from project config')
-    .requiredOption('-e, --evaluator <ids...>', 'Evaluator name(s) — Builtin.* IDs')
+    .option('-r, --runtime <name>', 'Runtime name from project config [non-interactive]')
+    .option('-e, --evaluator <ids...>', 'Evaluator name(s) — Builtin.* IDs [non-interactive]')
     .option('-n, --name <name>', 'Name for the batch evaluation (auto-generated if omitted)')
     .option('-d, --lookback-days <days>', 'Lookback window in days (filters sessions by time range)')
     .option('-s, --session-ids <ids...>', 'Specific session IDs to evaluate')
@@ -198,8 +202,8 @@ export const registerRun = (program: Command) => {
     .option('--json', 'Output as JSON')
     .action(
       async (cliOptions: {
-        runtime: string;
-        evaluator: string[];
+        runtime?: string;
+        evaluator?: string[];
         name?: string;
         lookbackDays?: string;
         sessionIds?: string[];
@@ -213,6 +217,32 @@ export const registerRun = (program: Command) => {
         json?: boolean;
       }) => {
         requireProject();
+
+        if (!cliOptions.runtime && !cliOptions.json) {
+          const { requireTTY } = await import('../../tui/guards/tty');
+          requireTTY();
+          const { RunBatchEvalFlow } = await import('../../tui/screens/run-eval/RunBatchEvalFlow');
+          const { clear, unmount } = render(
+            <RunBatchEvalFlow
+              onExit={() => {
+                clear();
+                unmount();
+                process.exit(0);
+              }}
+            />
+          );
+          return;
+        }
+
+        if (!cliOptions.runtime || !cliOptions.evaluator?.length) {
+          const error = '--runtime and --evaluator are required in non-interactive mode';
+          if (cliOptions.json) {
+            console.log(JSON.stringify({ success: false, error }));
+          } else {
+            render(<Text color="red">{error}</Text>);
+          }
+          process.exit(1);
+        }
 
         const log = (message: string) => {
           if (!cliOptions.json) console.log(message);
@@ -244,7 +274,7 @@ export const registerRun = (program: Command) => {
           // Dataset mode (Phase-1): invoke scenarios + wait for ingestion, then start (caller-side, blocking).
           if (cliOptions.dataset) {
             const phase1 = await runDatasetPhase1({
-              agent: cliOptions.runtime,
+              agent: cliOptions.runtime!,
               datasetName: cliOptions.dataset,
               datasetVersion: cliOptions.datasetVersion,
               endpoint: cliOptions.endpoint,
@@ -258,8 +288,8 @@ export const registerRun = (program: Command) => {
           }
 
           const startResult = await engine.start('batch-evaluation', {
-            agent: cliOptions.runtime,
-            evaluators: cliOptions.evaluator,
+            agent: cliOptions.runtime!,
+            evaluators: cliOptions.evaluator!,
             name: cliOptions.name,
             region: cliOptions.region,
             endpoint: cliOptions.endpoint,
@@ -289,7 +319,7 @@ export const registerRun = (program: Command) => {
             console.log(`\n✓ Batch evaluation started: ${record.id} (${record.status})`);
             printBatchEvalResult(record);
             if (!cliOptions.wait) {
-              console.log(`\nNext: agentcore batch-evaluations ${record.id}`);
+              console.log(`\nNext: agentcore view batch-evaluation ${record.id}`);
             }
             console.log('');
           }
@@ -440,6 +470,22 @@ export const registerRun = (program: Command) => {
       }) => {
         requireProject();
 
+        if (!cliOptions.runtime && !cliOptions.json) {
+          const { requireTTY } = await import('../../tui/guards/tty');
+          requireTTY();
+          const { RecommendationFlow } = await import('../../tui/screens/recommendation/RecommendationFlow');
+          const { clear, unmount } = render(
+            <RecommendationFlow
+              onExit={() => {
+                clear();
+                unmount();
+                process.exit(0);
+              }}
+            />
+          );
+          return;
+        }
+
         const typeKey = cliOptions.type ?? 'system-prompt';
         const recType = RECOMMENDATION_TYPE_MAP[typeKey];
         if (!recType) {
@@ -552,7 +598,7 @@ export const registerRun = (program: Command) => {
             printRecommendationResult(record);
             if (!cliOptions.wait) {
               console.log(
-                `\nNext: agentcore recommendations ${record.id}` +
+                `\nNext: agentcore view recommendation ${record.id}` +
                   (inputSource === 'config-bundle'
                     ? ' — the new config bundle will be applied to agentcore.json automatically.'
                     : '')
@@ -644,6 +690,199 @@ export const registerRun = (program: Command) => {
         return { data_source_count: result.startedJobs.length };
       });
     });
+  const abTestCmd = runCmd
+    .command('ab-test')
+    .description('[preview] Start an A/B test comparing two config-bundle or gateway-target variants')
+    // ── Shared options ──
+    .option('-n, --name <name>', 'Name for the A/B test [non-interactive]')
+    .option('-g, --gateway <name>', 'Gateway name (must be deployed) [non-interactive]')
+    .option('-m, --mode <mode>', 'config-bundle | target-based (default: config-bundle)', 'config-bundle')
+    .option('--description <text>', 'Description')
+    .option('-r, --runtime <name>', 'Runtime name (recorded as the agent)')
+    .option('--control-weight <weight>', 'Control traffic weight 0-100 (default: 50)', '50')
+    .option('--treatment-weight <weight>', 'Treatment traffic weight 0-100 (default: 50)', '50')
+    .option('--max-duration-days <days>', 'Max test duration in days')
+    .option('--role-arn <arn>', 'Execution role ARN (auto-created if omitted)')
+    .option('--disable-on-create', 'Create without starting (default: enabled)')
+    .option('--region <region>', 'AWS region (auto-detected if omitted)')
+    .option('--wait', 'Block until terminal state')
+    .option('--json', 'Output as JSON')
+    // ── Config-bundle mode ──
+    .option('--control-bundle <name>', '[config-bundle] Control bundle name or ARN')
+    .option('--control-version <version>', '[config-bundle] Control bundle version (or LATEST)')
+    .option('--treatment-bundle <name>', '[config-bundle] Treatment bundle name or ARN')
+    .option('--treatment-version <version>', '[config-bundle] Treatment bundle version (or LATEST)')
+    .option('--online-eval <name>', '[config-bundle] Shared online eval config name or ARN')
+    .option('--traffic-header <name>', '[config-bundle] Route traffic on this header')
+    // ── Target-based mode ──
+    .option('--control-target <name>', '[target-based] Control gateway-target name')
+    .option('--treatment-target <name>', '[target-based] Treatment gateway-target name')
+    .option('--control-online-eval <name>', '[target-based] Online eval for control endpoint (required)')
+    .option('--treatment-online-eval <name>', '[target-based] Online eval for treatment endpoint (required)')
+    .option('--gateway-filter <paths>', '[target-based] Comma-separated target paths to scope');
+
+  abTestCmd.addHelpText(
+    'after',
+    `
+Config-bundle mode example:
+  agentcore run ab-test -n MyTest -g MyGateway \\
+    --control-bundle promptV1 --control-version 1 \\
+    --treatment-bundle promptV2 --treatment-version 2 \\
+    --online-eval QualityEval
+
+Target-based mode example:
+  agentcore run ab-test -n MyTest -g MyGateway --mode target-based \\
+    --control-target prod-target --treatment-target staging-target \\
+    --control-online-eval ProdEval --treatment-online-eval StagingEval
+`
+  );
+
+  abTestCmd.action(
+    async (cliOptions: {
+      name?: string;
+      gateway?: string;
+      mode: string;
+      description?: string;
+      runtime?: string;
+      controlBundle?: string;
+      controlVersion?: string;
+      treatmentBundle?: string;
+      treatmentVersion?: string;
+      onlineEval?: string;
+      trafficHeader?: string;
+      controlTarget?: string;
+      treatmentTarget?: string;
+      controlOnlineEval?: string;
+      treatmentOnlineEval?: string;
+      gatewayFilter?: string;
+      controlWeight: string;
+      treatmentWeight: string;
+      maxDurationDays?: string;
+      roleArn?: string;
+      disableOnCreate?: boolean;
+      region?: string;
+      wait?: boolean;
+      json?: boolean;
+    }) => {
+      requireProject();
+
+      if (!cliOptions.name && !cliOptions.json) {
+        const { requireTTY } = await import('../../tui/guards/tty');
+        requireTTY();
+        const { RunABTestFlow } = await import('../../tui/screens/run-ab-test/RunABTestFlow');
+        const { clear, unmount } = render(
+          <RunABTestFlow
+            onExit={() => {
+              clear();
+              unmount();
+              process.exit(0);
+            }}
+          />
+        );
+        return;
+      }
+
+      if (!cliOptions.name || !cliOptions.gateway) {
+        const error = '--name and --gateway are required in non-interactive mode';
+        if (cliOptions.json) {
+          console.log(JSON.stringify({ success: false, error }));
+        } else {
+          render(<Text color="red">{error}</Text>);
+        }
+        process.exit(1);
+      }
+
+      if (cliOptions.mode !== 'config-bundle' && cliOptions.mode !== 'target-based') {
+        const error = `Invalid --mode "${cliOptions.mode}". Must be one of: config-bundle, target-based`;
+        if (cliOptions.json) {
+          console.log(JSON.stringify({ success: false, error }));
+        } else {
+          render(<Text color="red">{error}</Text>);
+        }
+        process.exit(1);
+      }
+      const mode: ABTestMode = cliOptions.mode;
+
+      // Validate variant weights are integers in [0,100] and sum to 100.
+      const controlWeight = parseInt(cliOptions.controlWeight, 10);
+      const treatmentWeight = parseInt(cliOptions.treatmentWeight, 10);
+      const weightError =
+        isNaN(controlWeight) || controlWeight < 0 || controlWeight > 100
+          ? `Invalid --control-weight "${cliOptions.controlWeight}". Must be an integer between 0 and 100.`
+          : isNaN(treatmentWeight) || treatmentWeight < 0 || treatmentWeight > 100
+            ? `Invalid --treatment-weight "${cliOptions.treatmentWeight}". Must be an integer between 0 and 100.`
+            : controlWeight + treatmentWeight !== 100
+              ? `Variant weights must sum to 100 (got ${controlWeight} + ${treatmentWeight} = ${controlWeight + treatmentWeight}).`
+              : undefined;
+      if (weightError) {
+        if (cliOptions.json) {
+          console.log(JSON.stringify({ success: false, error: weightError }));
+        } else {
+          render(<Text color="red">{weightError}</Text>);
+        }
+        process.exit(1);
+      }
+
+      const maxDurationDays = cliOptions.maxDurationDays ? parseInt(cliOptions.maxDurationDays, 10) : undefined;
+
+      await runCliCommand('run.job', !!cliOptions.json, async () => {
+        const engine = createJobEngine(new ConfigIO());
+        const startOpts: StartABTestJobOptions = {
+          name: cliOptions.name!,
+          mode,
+          description: cliOptions.description,
+          gateway: cliOptions.gateway!,
+          agent: cliOptions.runtime,
+          controlBundle: cliOptions.controlBundle,
+          controlVersion: cliOptions.controlVersion,
+          treatmentBundle: cliOptions.treatmentBundle,
+          treatmentVersion: cliOptions.treatmentVersion,
+          onlineEval: cliOptions.onlineEval,
+          trafficHeaderName: cliOptions.trafficHeader,
+          runtime: cliOptions.runtime,
+          controlTarget: cliOptions.controlTarget,
+          treatmentTarget: cliOptions.treatmentTarget,
+          controlOnlineEval: cliOptions.controlOnlineEval,
+          treatmentOnlineEval: cliOptions.treatmentOnlineEval,
+          gatewayFilter: cliOptions.gatewayFilter,
+          controlWeight,
+          treatmentWeight,
+          maxDurationDays: maxDurationDays && !isNaN(maxDurationDays) ? maxDurationDays : undefined,
+          enableOnCreate: !cliOptions.disableOnCreate,
+          region: cliOptions.region,
+          roleArn: cliOptions.roleArn,
+          onProgress: cliOptions.json ? undefined : (_status, message) => console.log(message),
+        };
+
+        const startResult = await engine.start('ab-test', startOpts);
+        if (!startResult.success) {
+          throw startResult.error;
+        }
+        let record: ABTestJobRecord = startResult.record;
+
+        if (cliOptions.wait) {
+          const final = await waitForTerminal(engine, 'ab-test', record.id, {
+            onTick: status => {
+              if (!cliOptions.json) console.log(`Status: ${status}`);
+            },
+          });
+          if (final) record = final;
+        }
+
+        if (cliOptions.json) {
+          console.log(JSON.stringify(serializeResult({ success: true, ...record })));
+        } else {
+          console.log(`\n✓ A/B test started: ${record.id} (${record.status})`);
+          printABTestDetail(record);
+          if (!cliOptions.wait) {
+            console.log(`\nNext: agentcore view ab-test ${record.id}`);
+          }
+          console.log('');
+        }
+        return { job_type: 'ab-test', has_wait: !!cliOptions.wait };
+      });
+    }
+  );
 };
 
 /** Print a recommendation's optimized artifact (system prompt / tool descriptions) when available. */
