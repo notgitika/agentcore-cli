@@ -126,8 +126,8 @@ export const insightsHandler: InsightsHandler = {
       const startResult = await startBatchEvaluation({
         region,
         name: evalName,
-        insights: opts.insights.map(id => ({ insightId: id })),
-        ...(resolvedEvaluators && resolvedEvaluators.length > 0
+        ...(!opts.onlineEvalConfigArn && { insights: opts.insights.map(id => ({ insightId: id })) }),
+        ...(!opts.onlineEvalConfigArn && resolvedEvaluators && resolvedEvaluators.length > 0
           ? { evaluators: resolvedEvaluators.map(id => ({ evaluatorId: id })) }
           : {}),
         dataSourceConfig,
