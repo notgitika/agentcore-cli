@@ -9,7 +9,7 @@
  *
  * Insights jobs are NOT stoppable.
  */
-import { ConfigIO, JobNotFoundError, ResourceNotFoundError, toError } from '../../../../lib';
+import { ConfigIO, JobNotFoundError, ResourceNotFoundError, ValidationError, toError } from '../../../../lib';
 import type { Result } from '../../../../lib/result';
 import {
   deleteBatchEvaluation,
@@ -27,9 +27,18 @@ import { regionFromArn, resolveJobRegion } from '../shared/region';
 import { resolveAgentState } from '../shared/resolve-agent-state';
 import type { InsightsHandler, InsightsJobRecord, StartInsightsJobOptions } from '../shared/types';
 
-/** Auto-generate a job name from project/agent/timestamp. */
+const NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9_]{0,47}$/;
+
+/** Auto-generate a job name from project/agent/timestamp, validating user-provided names. */
 function resolveInsightsName(name: string | undefined, projectName: string, agent: string): string {
-  if (name) return name;
+  if (name) {
+    if (!NAME_PATTERN.test(name)) {
+      throw new ValidationError(
+        `Job name "${name}" is invalid. Must begin with a letter and contain only alphanumeric characters and underscores (max 48 chars).`
+      );
+    }
+    return name;
+  }
   return `${projectName}_${agent}_insights_${Date.now()}`.replace(/[^a-zA-Z0-9_]/g, '_').slice(0, 48);
 }
 
