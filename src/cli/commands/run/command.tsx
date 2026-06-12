@@ -4,6 +4,7 @@ import { COMMAND_DESCRIPTIONS } from '../../constants';
 import { getErrorMessage } from '../../errors';
 import { handleRunEval } from '../../operations/eval';
 import type { RunEvalOptions } from '../../operations/eval';
+import { runKbIngestionByName } from '../../operations/ingest';
 import { createJobEngine, runDatasetPhase1, waitForTerminal } from '../../operations/jobs';
 import type {
   BatchEvaluationJobRecord,
@@ -11,7 +12,6 @@ import type {
   RecommendationJobRecord,
   StartBatchEvaluationJobOptions,
 } from '../../operations/jobs';
-import { runKbIngestionByName } from '../../operations/ingest';
 import { runCliCommand } from '../../telemetry/cli-command-run';
 import { requireProject } from '../../tui/guards';
 import type { Command } from '@commander-js/extra-typings';

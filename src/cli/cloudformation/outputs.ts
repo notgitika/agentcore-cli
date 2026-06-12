@@ -579,12 +579,9 @@ export function parseHarnessOutputs(
     // deployed-state, which silently removes it from `status`/`invoke`. Surface
     // the gap so a partially-emitted or missing harness leaves a trace rather
     // than vanishing without explanation.
-    const missing = [
-      !idKey && 'Id',
-      !arnKey && 'Arn',
-      !statusKey && 'Status',
-      !roleArnKey && 'RoleArn',
-    ].filter((v): v is string => typeof v === 'string');
+    const missing = [!idKey && 'Id', !arnKey && 'Arn', !statusKey && 'Status', !roleArnKey && 'RoleArn'].filter(
+      (v): v is string => typeof v === 'string'
+    );
     if (missing.length === 4) {
       onWarn(
         `Harness "${harnessName}" produced no CloudFormation outputs; it will not appear in ` +

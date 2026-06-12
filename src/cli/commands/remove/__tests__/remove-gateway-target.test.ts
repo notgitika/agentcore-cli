@@ -48,7 +48,10 @@ describe('remove gateway-target command', () => {
     it('removes target from gateway', async () => {
       // Create a fresh gateway
       const tempGateway = `TempGw${Date.now()}`;
-      const gwResult = await runCLI(['add', 'gateway', '--name', tempGateway, '--json'], projectDir);
+      const gwResult = await runCLI(
+        ['add', 'gateway', '--name', tempGateway, '--protocol-type', 'MCP', '--json'],
+        projectDir
+      );
       expect(gwResult.exitCode, `gateway add failed: ${gwResult.stdout}`).toBe(0);
 
       // Add a target to the gateway

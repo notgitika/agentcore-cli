@@ -31,9 +31,7 @@ describe('OnlineEvalConfigSchema - evaluators and insights', () => {
     const result = OnlineEvalConfigSchema.safeParse(config);
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.issues.some(i => i.message.includes('Cannot specify both evaluators and insights'))).toBe(
-        true
-      );
+      expect(result.error.issues.some(i => i.message.includes('Cannot have both evaluators and insights'))).toBe(true);
     }
   });
 

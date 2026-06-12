@@ -354,18 +354,13 @@ export function TargetBasedABTestScreen({
     if (wizard.config.controlTargetInfo && controlEvalItems.length === 1 && !wizard.config.controlOnlineEval) {
       wizard.setControlEval(controlEvalItems[0]!.id);
     }
-  }, [wizard.config.controlTargetInfo, controlEvalItems, wizard.config.controlOnlineEval, wizard.setControlEval]);
+  }, [wizard, controlEvalItems]);
 
   useEffect(() => {
     if (wizard.config.treatmentTargetInfo && treatmentEvalItems.length === 1 && !wizard.config.treatmentOnlineEval) {
       wizard.setTreatmentEval(treatmentEvalItems[0]!.id);
     }
-  }, [
-    wizard.config.treatmentTargetInfo,
-    treatmentEvalItems,
-    wizard.config.treatmentOnlineEval,
-    wizard.setTreatmentEval,
-  ]);
+  }, [wizard, treatmentEvalItems]);
 
   // ── Enable items ────────────────────────────────────────────────────────
   const enableItems: SelectableItem[] = useMemo(

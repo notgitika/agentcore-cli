@@ -4,7 +4,14 @@ import { HELP_TEXT } from '../../constants';
 import { useListNavigation } from '../../hooks';
 import React, { useMemo } from 'react';
 
-type EvalHubView = 'run-eval' | 'runs' | 'run-batch-eval' | 'batch-eval-history' | 'run-insights' | 'insights-jobs' | 'online-dashboard';
+type EvalHubView =
+  | 'run-eval'
+  | 'runs'
+  | 'run-batch-eval'
+  | 'batch-eval-history'
+  | 'run-insights'
+  | 'insights-jobs'
+  | 'online-dashboard';
 
 interface EvalHubScreenProps {
   onSelect: (view: EvalHubView) => void;

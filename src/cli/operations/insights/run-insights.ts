@@ -8,9 +8,8 @@
  */
 import { ConfigIO, ResourceNotFoundError, toError } from '../../../lib';
 import type { DeployedState } from '../../../schema';
-import type { InsightConfig } from '../../aws/agentcore-batch-evaluation';
+import type { CloudWatchFilterConfig, InsightConfig } from '../../aws/agentcore-batch-evaluation';
 import { generateClientToken, getBatchEvaluation, startBatchEvaluation } from '../../aws/agentcore-batch-evaluation';
-import type { CloudWatchFilterConfig } from '../../aws/agentcore-batch-evaluation';
 import { resolveEndpointName, runtimeLogGroup } from '../../aws/cloudwatch';
 import { getRegion } from '../../commands/shared/region-utils';
 import { ExecLogger } from '../../logging/exec-logger';

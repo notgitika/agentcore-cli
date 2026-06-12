@@ -32,7 +32,7 @@ vi.mock('../AddKnowledgeBaseScreen', () => {
       const cfg = (globalThis as { __KB_FLOW_TEST_CFG?: unknown }).__KB_FLOW_TEST_CFG;
       React.useEffect(() => {
         if (cfg) onComplete(cfg);
-      }, [onComplete]);
+      }, [onComplete, cfg]);
       return null;
     },
   };

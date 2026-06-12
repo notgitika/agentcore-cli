@@ -24,7 +24,6 @@ import {
 import { getErrorMessage } from '../../errors';
 import { isPreviewEnabled } from '../../feature-flags';
 import { ExecLogger } from '../../logging';
-import { findOrphanHarnesses } from '../../operations/harness/orphan';
 import {
   assertEnvFileExists,
   bootstrapEnvironment,
@@ -53,6 +52,7 @@ import {
   hasPaymentCredentialProviders,
   setupPaymentCredentialProviders,
 } from '../../operations/deploy/pre-deploy-identity';
+import { findOrphanHarnesses } from '../../operations/harness/orphan';
 import { hydrateKnowledgeBaseDataSources } from '../../operations/knowledge-base/hydrate-data-sources';
 import { toStackName } from '../import/import-utils';
 import type { DeployResult } from './types';
@@ -941,4 +941,3 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     restoreEnv?.();
   }
 }
-

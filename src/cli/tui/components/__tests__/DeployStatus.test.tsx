@@ -161,17 +161,13 @@ describe('DeployStatus', () => {
       // the deploy TUI with "Invalid count value: -10".
       const messages = [makeMsg('overflow', 'CDK_TOOLKIT_I5502', { completed: 50, total: 30 })];
 
-      expect(() =>
-        render(<DeployStatus messages={messages} isComplete={false} hasError={false} />)
-      ).not.toThrow();
+      expect(() => render(<DeployStatus messages={messages} isComplete={false} hasError={false} />)).not.toThrow();
     });
 
     it('clamps when CDK reports a negative completed count', () => {
       const messages = [makeMsg('underflow', 'CDK_TOOLKIT_I5502', { completed: -5, total: 10 })];
 
-      expect(() =>
-        render(<DeployStatus messages={messages} isComplete={false} hasError={false} />)
-      ).not.toThrow();
+      expect(() => render(<DeployStatus messages={messages} isComplete={false} hasError={false} />)).not.toThrow();
     });
   });
 

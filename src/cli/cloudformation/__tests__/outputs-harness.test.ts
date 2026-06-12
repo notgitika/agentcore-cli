@@ -7,7 +7,10 @@ import { describe, expect, it, vi } from 'vitest';
 const noWarn = vi.fn();
 
 /** Build the four CDK output keys for a harness, mirroring the L3's output naming. */
-function harnessOutputs(name: string, overrides: Partial<Record<'Id' | 'Arn' | 'Status' | 'RoleRoleArn' | 'AgentRuntimeArn', string>> = {}) {
+function harnessOutputs(
+  name: string,
+  overrides: Partial<Record<'Id' | 'Arn' | 'Status' | 'RoleRoleArn' | 'AgentRuntimeArn', string>> = {}
+) {
   const p = toPascalId('Harness', name);
   const out: Record<string, string> = {};
   const def = {

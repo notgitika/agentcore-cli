@@ -145,7 +145,9 @@ export async function buildRecommendationConfig(opts: BuildConfigOptions): Promi
       }
       batchEvalArn = record.arn;
     } else {
-      throw new Error('Either --from-insights or --batch-evaluation-arn is required for batch-evaluation trace source.');
+      throw new Error(
+        'Either --from-insights or --batch-evaluation-arn is required for batch-evaluation trace source.'
+      );
     }
     agentTraces = { batchEvaluation: { batchEvaluationArn: batchEvalArn } };
   } else if (opts.traceSource === 'spans-file' && opts.spansFile) {

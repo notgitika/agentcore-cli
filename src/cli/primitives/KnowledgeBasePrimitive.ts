@@ -1,6 +1,4 @@
 import { APP_DIR, ValidationError, findConfigRoot, serializeResult, toError } from '../../lib';
-import { getErrorMessage } from '../errors';
-import { requireTTY } from '../tui/guards/tty';
 import type { Result } from '../../lib/result';
 import type {
   AgentCoreGatewayTarget,
@@ -10,6 +8,7 @@ import type {
   KnowledgeBase,
 } from '../../schema';
 import { CONNECTOR_ID, KnowledgeBaseSchema } from '../../schema';
+import { getErrorMessage } from '../errors';
 import { upsertAgenticRetrieveTarget } from '../operations/knowledge-base/agentic-retrieve-upsert';
 import {
   type DataSourceTypeFlag,
@@ -19,6 +18,7 @@ import {
 } from '../operations/knowledge-base/connector-config';
 import type { RemovalPreview } from '../operations/remove/types';
 import { runCliCommand } from '../telemetry/cli-command-run.js';
+import { requireTTY } from '../tui/guards/tty';
 import { BasePrimitive } from './BasePrimitive';
 import type { AddResult, AddScreenComponent, RemovableResource } from './types';
 import type { Command } from '@commander-js/extra-typings';

@@ -235,7 +235,7 @@ export function AddABTestScreen({
 
   useEffect(() => {
     wizard.setSkipCheck(shouldSkipStep);
-  }, [shouldSkipStep]); // wizard.setSkipCheck is stable (useCallback with no deps)
+  }, [shouldSkipStep, wizard]); // wizard.setSkipCheck is stable (useCallback with no deps)
 
   // Mode selection items
   const modeItems: SelectableItem[] = useMemo(

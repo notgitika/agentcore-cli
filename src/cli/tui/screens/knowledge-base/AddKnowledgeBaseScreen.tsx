@@ -222,8 +222,7 @@ export function AddKnowledgeBaseScreen({
   // to remove. Avoids showing a dead-end action when the user has just one
   // source and would have to cancel the wizard if they picked it (you can't
   // submit a KB with zero sources).
-  const addAnotherItems =
-    dataSources.length > 1 ? ADD_ANOTHER_OPTIONS_WITH_REMOVE : ADD_ANOTHER_OPTIONS;
+  const addAnotherItems = dataSources.length > 1 ? ADD_ANOTHER_OPTIONS_WITH_REMOVE : ADD_ANOTHER_OPTIONS;
   const addAnotherNav = useListNavigation({
     items: addAnotherItems,
     isActive: isAddAnotherStep,
@@ -248,9 +247,7 @@ export function AddKnowledgeBaseScreen({
     () =>
       dataSources.map((ds, idx) => {
         const label = DATA_SOURCE_TYPE_LABELS[ds.dataSourceType] ?? ds.dataSourceType;
-        const display = ds.value.startsWith(INLINE_JSON_PREFIX)
-          ? '<inline JSON>'
-          : ds.value;
+        const display = ds.value.startsWith(INLINE_JSON_PREFIX) ? '<inline JSON>' : ds.value;
         return { id: String(idx), title: `${label}: ${display}` };
       }),
     [dataSources]
@@ -313,11 +310,7 @@ export function AddKnowledgeBaseScreen({
   // The new-gateway-name and remove-source sub-steps map onto their parents
   // for the StepIndicator, mirroring the kb-id sub-step pattern in
   // useAddGatewayTargetWizard.
-  const indicatorStep: Step = isNewGatewayNameStep
-    ? 'gateway'
-    : isRemoveSourceStep
-      ? 'add-another'
-      : (step as Step);
+  const indicatorStep: Step = isNewGatewayNameStep ? 'gateway' : isRemoveSourceStep ? 'add-another' : step;
   const headerContent = <StepIndicator steps={STEPS} currentStep={indicatorStep} labels={STEP_LABELS} />;
 
   // Confirm view: render every captured source on its own line, prefixed by
@@ -338,7 +331,7 @@ export function AddKnowledgeBaseScreen({
         return `${label} ${display}`;
       })
       .join('\n');
-  }, [dataSources]);
+  }, [dataSources, name]);
 
   const gatewayConfirmValue = useMemo(() => {
     if (newGatewayName) return `${newGatewayName} (will be created)`;

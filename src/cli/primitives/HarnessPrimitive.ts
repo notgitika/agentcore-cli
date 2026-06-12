@@ -16,11 +16,11 @@ import { getErrorMessage } from '../errors';
 import { findOrphanHarnesses } from '../operations/harness/orphan';
 import type { OrphanHarness } from '../operations/harness/orphan';
 import type { RemovalPreview, SchemaChange } from '../operations/remove/types';
-import { getTemplatePath } from '../templates/templateRoot';
-import { DEFAULT_MEMORY_EXPIRY_DAYS } from '../tui/screens/generate/defaults';
 import { withCommandRunTelemetry } from '../telemetry/cli-command-run.js';
 import type { SubCommand } from '../telemetry/schemas/command-run.js';
+import { getTemplatePath } from '../templates/templateRoot';
 import { requireTTY } from '../tui/guards/tty';
+import { DEFAULT_MEMORY_EXPIRY_DAYS } from '../tui/screens/generate/defaults';
 import { BasePrimitive } from './BasePrimitive';
 import { buildAuthorizerConfigFromJwtConfig, createManagedOAuthCredential } from './auth-utils';
 import type { JwtConfigOptions } from './auth-utils';
@@ -366,11 +366,7 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
    * Remove a harness from the project spec: drop its entry, its convention-named memory
    * (`<name>Memory`), persist agentcore.json, and delete its on-disk directory.
    */
-  private async removeFromSpec(
-    harnessName: string,
-    configIO: ConfigIO,
-    project: AgentCoreProjectSpec
-  ): Promise<void> {
+  private async removeFromSpec(harnessName: string, configIO: ConfigIO, project: AgentCoreProjectSpec): Promise<void> {
     project.harnesses = (project.harnesses ?? []).filter(h => h.name !== harnessName);
 
     const associatedMemoryName = `${harnessName}Memory`;
@@ -689,91 +685,90 @@ export class HarnessPrimitive extends BasePrimitive<AddHarnessOptions, Removable
         '--keep',
         'For a preview-build orphan: delete it from AWS but keep it in agentcore.json (it moves to GA; the next deploy recreates it under CloudFormation)'
       )
-      .option(
-        '--discard',
-        'For a preview-build orphan: delete it from AWS and remove it from agentcore.json'
-      )
-      .action(async (cliOptions: { name?: string; yes?: boolean; json?: boolean; keep?: boolean; discard?: boolean }) => {
-        try {
-          if (!findConfigRoot()) {
-            console.error('No agentcore project found. Run `agentcore create` first.');
-            process.exit(1);
-          }
-
-          if (cliOptions.keep && cliOptions.discard) {
-            const error = '--keep and --discard are mutually exclusive';
-            console.log(JSON.stringify({ success: false, error }));
-            process.exit(1);
-          }
-          const orphanAction: OrphanAction | undefined = cliOptions.keep
-            ? 'keep'
-            : cliOptions.discard
-              ? 'discard'
-              : undefined;
-
-          // Any flag triggers non-interactive CLI mode
-          if (cliOptions.name || cliOptions.yes || cliOptions.json || orphanAction) {
-            if (!cliOptions.name) {
-              console.log(JSON.stringify({ success: false, error: '--name is required' }));
+      .option('--discard', 'For a preview-build orphan: delete it from AWS and remove it from agentcore.json')
+      .action(
+        async (cliOptions: { name?: string; yes?: boolean; json?: boolean; keep?: boolean; discard?: boolean }) => {
+          try {
+            if (!findConfigRoot()) {
+              console.error('No agentcore project found. Run `agentcore create` first.');
               process.exit(1);
             }
 
-            const result = await withCommandRunTelemetry<SubCommand<'remove', typeof this.kind>, Result>(
-              `remove.${this.kind}`,
-              {},
-              () => this.remove(cliOptions.name!, { orphanAction })
-            );
-            // The orphan no-flag refusal made no changes — surface it as a clean human error on
-            // stderr (with a non-zero exit) rather than a JSON blob, so a user who expected a
-            // deletion plainly sees that nothing happened and what to do. Scoped to that exact
-            // case (orphan + no --keep/--discard, non-JSON); every other path keeps the
-            // machine-readable JSON convention untouched.
-            if (!result.success && !orphanAction && !cliOptions.json && (await this.isOrphan(cliOptions.name))) {
-              console.error(`Error: ${result.error.message}`);
+            if (cliOptions.keep && cliOptions.discard) {
+              const error = '--keep and --discard are mutually exclusive';
+              console.log(JSON.stringify({ success: false, error }));
               process.exit(1);
             }
-            console.log(
-              JSON.stringify({
-                success: result.success,
-                resourceType: this.kind,
-                resourceName: cliOptions.name,
-                message: result.success ? `Removed ${this.label.toLowerCase()} '${cliOptions.name}'` : undefined,
-                note: result.success ? SOURCE_CODE_NOTE : undefined,
-                error: !result.success ? result.error.message : undefined,
-              })
-            );
-            process.exit(result.success ? 0 : 1);
-          } else {
-            // TUI fallback — dynamic imports to avoid pulling ink (async) into registry
-            requireTTY();
-            const [{ render }, { default: React }, { RemoveFlow }] = await Promise.all([
-              import('ink'),
-              import('react'),
-              import('../tui/screens/remove'),
-            ]);
-            const { clear, unmount } = render(
-              React.createElement(RemoveFlow, {
-                isInteractive: false,
-                force: cliOptions.yes,
-                initialResourceType: this.kind,
-                initialResourceName: cliOptions.name,
-                onExit: () => {
-                  clear();
-                  unmount();
-                  process.exit(0);
-                },
-              })
-            );
+            const orphanAction: OrphanAction | undefined = cliOptions.keep
+              ? 'keep'
+              : cliOptions.discard
+                ? 'discard'
+                : undefined;
+
+            // Any flag triggers non-interactive CLI mode
+            if (cliOptions.name || cliOptions.yes || cliOptions.json || orphanAction) {
+              if (!cliOptions.name) {
+                console.log(JSON.stringify({ success: false, error: '--name is required' }));
+                process.exit(1);
+              }
+
+              const result = await withCommandRunTelemetry<SubCommand<'remove', typeof this.kind>, Result>(
+                `remove.${this.kind}`,
+                {},
+                () => this.remove(cliOptions.name!, { orphanAction })
+              );
+              // The orphan no-flag refusal made no changes — surface it as a clean human error on
+              // stderr (with a non-zero exit) rather than a JSON blob, so a user who expected a
+              // deletion plainly sees that nothing happened and what to do. Scoped to that exact
+              // case (orphan + no --keep/--discard, non-JSON); every other path keeps the
+              // machine-readable JSON convention untouched.
+              if (!result.success && !orphanAction && !cliOptions.json && (await this.isOrphan(cliOptions.name))) {
+                console.error(`Error: ${result.error.message}`);
+                process.exit(1);
+              }
+              console.log(
+                JSON.stringify({
+                  success: result.success,
+                  resourceType: this.kind,
+                  resourceName: cliOptions.name,
+                  message: result.success ? `Removed ${this.label.toLowerCase()} '${cliOptions.name}'` : undefined,
+                  note: result.success ? SOURCE_CODE_NOTE : undefined,
+                  error: !result.success ? result.error.message : undefined,
+                })
+              );
+              process.exit(result.success ? 0 : 1);
+            } else {
+              // TUI fallback — dynamic imports to avoid pulling ink (async) into registry
+              requireTTY();
+              const [{ render }, { default: React }, { RemoveFlow }] = await Promise.all([
+                import('ink'),
+                import('react'),
+                import('../tui/screens/remove'),
+              ]);
+              const { clear, unmount } = render(
+                React.createElement(RemoveFlow, {
+                  isInteractive: false,
+                  force: cliOptions.yes,
+                  initialResourceType: this.kind,
+                  initialResourceName: cliOptions.name,
+                  onExit: () => {
+                    clear();
+                    unmount();
+                    process.exit(0);
+                  },
+                })
+              );
+            }
+          } catch (error) {
+            if (cliOptions.json) {
+              console.log(JSON.stringify({ success: false, error: getErrorMessage(error) }));
+            } else {
+              console.error(`Error: ${getErrorMessage(error)}`);
+            }
+            process.exit(1);
           }
-        } catch (error) {
-          if (cliOptions.json) {
-            console.log(JSON.stringify({ success: false, error: getErrorMessage(error) }));
-          } else {
-            console.error(`Error: ${getErrorMessage(error)}`);
-          }
-          process.exit(1);
         }
-      });
+      );
   }
 
   addScreen(): AddScreenComponent {
