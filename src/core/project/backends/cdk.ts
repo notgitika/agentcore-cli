@@ -100,6 +100,10 @@ export class CdkBackend implements ProjectBackend {
       );
     }
 
+    // TODO(#2093): credentials declared in agentcore.json are silently dropped.
+    // The synthesized app reads their provider ARNs out of .cli/deployed-state.json
+    // and tolerates the file's absence, and nothing here writes it. The fix is to
+    // let CloudFormation own the providers rather than creating them from the CLI.
     yield* this.build(project);
     const assemblyDirectory = this.assemblyDirectory(project);
     const artifact = await stackArtifactForTarget(this.json, assemblyDirectory, target.name, {
