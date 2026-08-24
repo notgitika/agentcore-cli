@@ -111,11 +111,19 @@ type HarnessOptions = {
   template?: boolean;
   failOperation?: CdkOperation["kind"];
   bootstrapError?: Error;
+  /** Rejection from the credential preflight that runs before anything else. */
+  preflightError?: Error;
+  /** Events the credential secret sync emits once the stack is deployed. */
+  syncEvents?: ProjectEvent[];
 };
 
 function harness(options: HarnessOptions = {}) {
   const commands: { command: string[]; cwd: string }[] = [];
   const runs: { operation: CdkOperation; options: CdkRunOptions }[] = [];
+  const preflights: Project[] = [];
+  const syncs: { project: Project; region: string; credentials: CdkCredentialProvider }[] = [];
+  /** Every side effect in deploy order, so ordering is asserted rather than assumed. */
+  const sequence: string[] = [];
   const credentialRegions: string[] = [];
   const accountCredentials: CdkCredentialProvider[] = [];
   const bootstrapCredentials: CdkCredentialProvider[] = [];
@@ -131,9 +139,20 @@ function harness(options: HarnessOptions = {}) {
   const backend = new CdkBackend({
     logger: createSilentLogger(),
     runner: async (command, { cwd }) => {
+      sequence.push("synth");
       commands.push({ command, cwd });
     },
     checkTool: async () => {},
+    assertCredentials: async (input) => {
+      sequence.push("preflight");
+      preflights.push(input);
+      if (options.preflightError) throw options.preflightError;
+    },
+    syncCredentials: async function* (input, { region, credentials: provider }) {
+      sequence.push("sync");
+      syncs.push({ project: input, region, credentials: provider });
+      yield* options.syncEvents ?? [];
+    },
     resolveCredentials: async (region) => {
       credentialRegions.push(region);
       return credentials;
@@ -150,6 +169,7 @@ function harness(options: HarnessOptions = {}) {
       return options.bootstrap ?? { kind: "current", version: 30 };
     },
     cdk: async (operation, runOptions) => {
+      sequence.push(operation.kind);
       runs.push({ operation, options: runOptions });
       if (operation.kind === options.failOperation) {
         throw new Error(`${operation.kind} failed`);
@@ -177,7 +197,10 @@ function harness(options: HarnessOptions = {}) {
     commands,
     credentialRegions,
     credentials,
+    preflights,
     runs,
+    sequence,
+    syncs,
     templateLoads: () => templateLoads,
     templateCleanups: () => templateCleanups,
   };
@@ -267,6 +290,69 @@ describe("CdkBackend.deploy", () => {
     expect(subject.accountRegions).toEqual([TARGET.region]);
     expect(subject.bootstrapRegions).toEqual([TARGET.region]);
     expect(subject.templateLoads()).toBe(0);
+  });
+
+  test("preflights credentials first and syncs their secrets last", async () => {
+    const input = await project();
+    await writeAssembly(input, [TARGET.name]);
+    const subject = harness({ bootstrap: { kind: "absent" } });
+
+    await collectDeploy(subject.backend.deploy(input, { target: TARGET }));
+
+    // The providers do not exist until CloudFormation makes them, so the secret
+    // sync has to follow the deploy; a credential with no secret to sync has to
+    // fail before the synth that would create its provider.
+    expect(subject.sequence).toEqual(["preflight", "synth", "bootstrap", "deploy", "sync"]);
+    expect(subject.preflights).toEqual([input]);
+    expect(subject.syncs).toEqual([
+      { project: input, region: TARGET.region, credentials: subject.credentials },
+    ]);
+  });
+
+  test("surfaces the secret sync's progress after the deploy message", async () => {
+    const input = await project();
+    await writeAssembly(input, [TARGET.name]);
+    const subject = harness({
+      syncEvents: [{ message: "Setting the secret for credential provider 'openai-key'" }],
+    });
+
+    const deployed = await collectDeploy(subject.backend.deploy(input, { target: TARGET }));
+
+    expect(deployed.events).toEqual([
+      { message: `Verifying AWS account ${TARGET.account}` },
+      { message: "Synthesizing CloudFormation templates" },
+      { message: "Deploying AgentCore-example-default-0" },
+      { message: "Setting the secret for credential provider 'openai-key'" },
+    ]);
+  });
+
+  test("refuses a credential it cannot deploy before synthesizing or bootstrapping", async () => {
+    const input = await project();
+    await writeAssembly(input, [TARGET.name]);
+    const subject = harness({
+      preflightError: new Error("Credential 'openai-key' has no secret"),
+    });
+
+    await expect(collectDeploy(subject.backend.deploy(input, { target: TARGET }))).rejects.toThrow(
+      "Credential 'openai-key' has no secret",
+    );
+    // Nothing was synthesized, bootstrapped or deployed, so no provider exists
+    // holding a placeholder no later run would replace.
+    expect(subject.commands).toEqual([]);
+    expect(subject.bootstrapRegions).toEqual([]);
+    expect(subject.runs).toEqual([]);
+    expect(subject.syncs).toEqual([]);
+  });
+
+  test("does not sync secrets when the deploy itself fails", async () => {
+    const input = await project();
+    await writeAssembly(input, [TARGET.name]);
+    const subject = harness({ failOperation: "deploy" });
+
+    await expect(collectDeploy(subject.backend.deploy(input, { target: TARGET }))).rejects.toThrow(
+      "deploy failed",
+    );
+    expect(subject.syncs).toEqual([]);
   });
 
   test("refuses a resource-less stack before the Toolkit can delete it", async () => {

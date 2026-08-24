@@ -124,14 +124,6 @@ async function main() {
   const connectorParametersByFile = resolveConnectorParametersByFile(specAny, projectRoot);
   const harnessConfigs = resolveHarnessConfigs(specAny, projectRoot);
 
-  // Read deployed state for credential ARNs (populated by pre-deploy identity setup)
-  let deployedState: Record<string, unknown> | undefined;
-  try {
-    deployedState = JSON.parse(fs.readFileSync(path.join(configRoot, '.cli', 'deployed-state.json'), 'utf8'));
-  } catch {
-    // Deployed state may not exist on first deploy
-  }
-
   const app = new App();
 
   for (const target of stackTargets) {
@@ -139,20 +131,6 @@ async function main() {
     // pseudo-parameters at deploy time instead of pinning them at synth time.
     const env = target ? toEnvironment(target) : undefined;
     const stackName = target ? toStackName(spec.name, target.name) : `AgentCore-${sanitize(spec.name)}`;
-
-    // Extract credentials from deployed state for this target
-    const targetState = (deployedState as Record<string, unknown>)?.targets as
-      | Record<string, Record<string, unknown>>
-      | undefined;
-    const targetResources = target
-      ? (targetState?.[target.name]?.resources as Record<string, unknown> | undefined)
-      : undefined;
-    const credentials = targetResources?.credentials as
-      | Record<string, { credentialProviderArn: string; clientSecretArn?: string }>
-      | undefined;
-
-    // Payment credential provider ARNs live in the same credentials map as identity credentials
-    const paymentCredentials = credentials;
 
     const paymentSpec = specAny.payments?.length
       ? specAny.payments.map(
@@ -173,19 +151,13 @@ async function main() {
             autoPayment: p.autoPayment,
             paymentToolAllowlist: p.paymentToolAllowlist,
             networkPreferences: p.networkPreferences,
-            connectors: p.connectors.map(c => {
-              const credentialProviderArn = paymentCredentials?.[c.credentialName]?.credentialProviderArn;
-              if (!credentialProviderArn) {
-                // Fail fast with an actionable message rather than passing an empty
-                // ARN that fails opaquely server-side at CreatePaymentConnector.
-                throw new Error(
-                  `Payment connector "${c.name}" on manager "${p.name}" references credential ` +
-                    `"${c.credentialName}", but no deployed credential provider was found for it. ` +
-                    `Run \`agentcore deploy\` so the credential provider is created first.`
-                );
-              }
-              return { name: c.name, provider: c.provider, credentialProviderArn };
-            }),
+            // The stack creates the credential providers, so a connector carries
+            // the credential's name and the stack resolves it to that provider's ARN.
+            connectors: p.connectors.map(c => ({
+              name: c.name,
+              provider: c.provider,
+              credentialName: c.credentialName,
+            })),
           })
         )
       : undefined;
@@ -193,7 +165,6 @@ async function main() {
     new AgentCoreStack(app, stackName, {
       spec,
       mcpSpec,
-      credentials,
       connectorParametersByFile,
       harnesses: harnessConfigs.length > 0 ? harnessConfigs : undefined,
       paymentSpec,

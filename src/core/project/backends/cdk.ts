@@ -13,6 +13,12 @@ import type { Logger } from "../../../logging";
 import type { DeployBackendInput, ProjectBackend } from "./types";
 import { assertStackHasResources, stackArtifactForTarget } from "./cdk/assembly";
 import {
+  assertCredentialsDeployable,
+  createCredentialSynchronizer,
+  type CredentialPreflight,
+  type CredentialSynchronizer,
+} from "./cdk/credentials";
+import {
   probeBootstrap,
   resolveAwsAccount,
   type AccountResolver,
@@ -37,6 +43,8 @@ export type CdkBackendConfig = {
   bootstrap?: BootstrapProbe;
   resolveAccount?: AccountResolver;
   loadBootstrapTemplate?: BootstrapTemplateLoader;
+  assertCredentials?: CredentialPreflight;
+  syncCredentials?: CredentialSynchronizer;
 };
 
 /** Builds and deploys projects through the scaffolded CDK app. */
@@ -50,6 +58,8 @@ export class CdkBackend implements ProjectBackend {
   private readonly bootstrap: BootstrapProbe;
   private readonly resolveAccount: AccountResolver;
   private readonly loadBootstrapTemplate: BootstrapTemplateLoader;
+  private readonly assertCredentials: CredentialPreflight;
+  private readonly syncCredentials: CredentialSynchronizer;
 
   constructor(config: CdkBackendConfig) {
     this.logger = config.logger;
@@ -62,6 +72,8 @@ export class CdkBackend implements ProjectBackend {
     this.bootstrap = config.bootstrap ?? probeBootstrap;
     this.resolveAccount = config.resolveAccount ?? resolveAwsAccount;
     this.loadBootstrapTemplate = config.loadBootstrapTemplate ?? loadBootstrapTemplate;
+    this.assertCredentials = config.assertCredentials ?? assertCredentialsDeployable;
+    this.syncCredentials = config.syncCredentials ?? createCredentialSynchronizer();
   }
 
   public async *build(project: Project): AsyncGenerator<ProjectEvent, void> {
@@ -100,10 +112,12 @@ export class CdkBackend implements ProjectBackend {
       );
     }
 
-    // TODO(#2093): credentials declared in agentcore.json are silently dropped.
-    // The synthesized app reads their provider ARNs out of .cli/deployed-state.json
-    // and tolerates the file's absence, and nothing here writes it. The fix is to
-    // let CloudFormation own the providers rather than creating them from the CLI.
+    // Before anything is synthesized or bootstrapped: the stack creates each
+    // credential provider with a placeholder secret that only the post-deploy
+    // sync below can replace, so a credential with no secret to sync has to fail
+    // here rather than after its provider is already live.
+    await this.assertCredentials(project);
+
     yield* this.build(project);
     const assemblyDirectory = this.assemblyDirectory(project);
     const artifact = await stackArtifactForTarget(this.json, assemblyDirectory, target.name, {
@@ -145,6 +159,14 @@ export class CdkBackend implements ProjectBackend {
 
     yield { message: `Deploying ${artifact.id}` };
     const outputs = await this.cdk({ kind: "deploy", stackArtifactId: artifact.id }, options);
+
+    // The credential providers exist only now that CloudFormation has made them,
+    // each holding the placeholder secret its template carried. Replacing those
+    // is what keeps real secret material out of the template. A failure here
+    // leaves a correctly deployed stack whose providers still hold placeholders;
+    // the next deploy retries the sync.
+    yield* this.syncCredentials(project, { region: target.region, credentials });
+
     return { outputs };
   }
 

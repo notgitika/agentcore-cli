@@ -1,6 +1,8 @@
 import {
+  AgentCoreApiKeyCredentialProvider,
   AgentCoreApplication,
   AgentCoreMcp,
+  AgentCoreOauth2CredentialProvider,
   AgentCorePaymentManager,
   AgentCorePaymentConnector,
   type AgentCoreProjectSpec,
@@ -22,7 +24,39 @@ export type HarnessConfig = HarnessDeploymentConfig;
 export interface PaymentConnectorSpec {
   name: string;
   provider: 'CoinbaseCDP' | 'StripePrivy';
-  credentialProviderArn: string;
+  /**
+   * Name of the credential this connector authorizes with. Resolved to the ARN of
+   * the provider this stack creates, so the connector depends on it rather than
+   * on a provider that had to exist before synth.
+   */
+  credentialName: string;
+}
+
+/** A reference to a secret the customer already keeps in AWS Secrets Manager. */
+interface CredentialSecretRef {
+  secretId: string;
+  jsonKey: string;
+}
+
+/**
+ * The credential fields this stack reads off the project spec. The published
+ * @aws/agentcore-cdk spec type can lag the CLI's own schema, so these are read
+ * from a local shape the same way bin/cdk.ts reads not-yet-published fields.
+ */
+interface CredentialDeclaration {
+  authorizerType:
+    | 'ApiKeyCredentialProvider'
+    | 'OAuthCredentialProvider'
+    | 'PaymentCredentialProvider';
+  name: string;
+  /** API key credentials: external secret for the key itself. */
+  secretRef?: CredentialSecretRef;
+  /** OAuth credentials: external secret for the client secret. */
+  clientSecretRef?: CredentialSecretRef;
+  vendor?: string;
+  clientId?: string;
+  discoveryUrl?: string;
+  providerConfig?: Record<string, unknown>;
 }
 
 export interface PaymentSpec {
@@ -45,10 +79,6 @@ export interface AgentCoreStackProps extends StackProps {
    * The MCP specification containing gateways and servers.
    */
   mcpSpec?: AgentCoreMcpSpec;
-  /**
-   * Credential provider ARNs from deployed state, keyed by credential name.
-   */
-  credentials?: Record<string, { credentialProviderArn: string; clientSecretArn?: string }>;
   /**
    * Harness role configurations.
    */
@@ -97,7 +127,12 @@ export class AgentCoreStack extends Stack {
   constructor(scope: Construct, id: string, props: AgentCoreStackProps) {
     super(scope, id, props);
 
-    const { spec, mcpSpec, credentials, harnesses, connectorParametersByFile, paymentSpec } = props;
+    const { spec, mcpSpec, harnesses, connectorParametersByFile, paymentSpec } = props;
+
+    // Create the credential providers the spec declares, before anything that
+    // consumes them. CloudFormation owns their lifecycle; the ARNs below are
+    // synth-time tokens, so no provider has to exist before this stack deploys.
+    const credentials = this.createCredentialProviders(spec);
 
     // Create AgentCoreApplication with all agents and harness roles
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -108,7 +143,7 @@ export class AgentCoreStack extends Stack {
     if (connectorParametersByFile && Object.keys(connectorParametersByFile).length > 0) {
       appProps.connectorParametersByFile = connectorParametersByFile;
     }
-    if (credentials) {
+    if (Object.keys(credentials).length > 0) {
       appProps.credentials = credentials;
     }
     this.application = new AgentCoreApplication(this, 'Application', appProps as any);
@@ -203,12 +238,25 @@ export class AgentCoreStack extends Stack {
         // Create connectors for this manager
         for (const connector of payment.connectors) {
           const connId = toCdkId(connector.name);
+          const credential = credentials[connector.credentialName];
+          if (!credential) {
+            // The spec cross-validates that this name is a declared credential,
+            // so reaching here means the credential exists but no provider was
+            // created for it — today only a PaymentCredentialProvider, which
+            // CloudFormation cannot create.
+            throw new Error(
+              `Payment connector "${connector.name}" on manager "${payment.name}" references ` +
+                `credential "${connector.credentialName}", which this stack cannot create a ` +
+                `credential provider for. CloudFormation has no payment credential provider ` +
+                `resource; remove the connector to deploy the rest of the project.`
+            );
+          }
           const conn = new AgentCorePaymentConnector(this, `Payment${mgrId}${connId}`, {
             projectName: spec.name,
             paymentManager: manager,
             connectorName: connector.name,
             connectorType: connector.provider,
-            credentialProviderArn: connector.credentialProviderArn,
+            credentialProviderArn: credential.credentialProviderArn,
           });
 
           // Wire first connector's ID as env var (eligible agents only)
@@ -245,5 +293,63 @@ export class AgentCoreStack extends Stack {
       description: 'Name of the CloudFormation Stack',
       value: this.stackName,
     });
+  }
+
+  /**
+   * Creates a credential provider for every credential the spec declares, and
+   * returns their ARNs keyed by credential name for the constructs that consume
+   * them.
+   *
+   * Real secret material never reaches the template. A credential carrying an
+   * external Secrets Manager reference deploys pointing at that secret; one whose
+   * secret lives in `.env.local` is created with the L3's placeholder, which
+   * `agentcore project deploy` replaces over the Identity API once the stack is
+   * up. Payment credentials get no provider — CloudFormation has no resource for
+   * them — so they are absent from the map and any connector naming one fails.
+   */
+  private createCredentialProviders(
+    spec: AgentCoreProjectSpec
+  ): Record<string, { credentialProviderArn: string }> {
+    const declared = (spec.credentials ?? []) as CredentialDeclaration[];
+    const created: Record<string, { credentialProviderArn: string }> = {};
+
+    for (const credential of declared) {
+      const id = `Credential${toCdkId(credential.name)}`;
+      let credentialProviderArn: string;
+
+      switch (credential.authorizerType) {
+        case 'ApiKeyCredentialProvider':
+          credentialProviderArn = new AgentCoreApiKeyCredentialProvider(this, id, {
+            projectName: spec.name,
+            name: credential.name,
+            ...(credential.secretRef && { secretRef: credential.secretRef }),
+            projectTags: spec.tags,
+          }).credentialProviderArn;
+          break;
+        case 'OAuthCredentialProvider':
+          credentialProviderArn = new AgentCoreOauth2CredentialProvider(this, id, {
+            projectName: spec.name,
+            name: credential.name,
+            vendor: credential.vendor ?? 'CustomOauth2',
+            ...(credential.clientId !== undefined && { clientId: credential.clientId }),
+            ...(credential.discoveryUrl !== undefined && { discoveryUrl: credential.discoveryUrl }),
+            ...(credential.providerConfig && { providerConfig: credential.providerConfig }),
+            // The spec names the OAuth external reference clientSecretRef; the
+            // construct takes one secretRef whichever credential kind it is on.
+            ...(credential.clientSecretRef && { secretRef: credential.clientSecretRef }),
+            projectTags: spec.tags,
+          }).credentialProviderArn;
+          break;
+        case 'PaymentCredentialProvider':
+          // Deliberately left out of the map rather than thrown on here: a
+          // payment credential with no connector referencing it is inert, and
+          // `agentcore project deploy` rejects the project before synth anyway.
+          continue;
+      }
+
+      created[credential.name] = { credentialProviderArn };
+    }
+
+    return created;
   }
 }
