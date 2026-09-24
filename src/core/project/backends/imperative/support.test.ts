@@ -63,6 +63,22 @@ describe("assertImperativelyDeployable", () => {
     expect((error as Error).message).toMatch(/managedBy.*"CDK"/);
   });
 
+  test("tool runtimes are refused by name with the CDK escape hatch", () => {
+    const p = project({
+      memories: [{ name: "m1" }],
+      toolRuntimes: [{ name: "search" }],
+    });
+    let error: unknown;
+    try {
+      assertImperativelyDeployable(p, new Set(["memory"]));
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(NotImplementedError);
+    expect((error as Error).message).toMatch(/toolRuntimes/);
+    expect((error as Error).message).toMatch(/managedBy.*"CDK"/);
+  });
+
   test("everything supported passes", () => {
     const p = project({ memories: [{ name: "m1" }] });
     expect(() => assertImperativelyDeployable(p, new Set(["memory"]))).not.toThrow();

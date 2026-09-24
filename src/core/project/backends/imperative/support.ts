@@ -29,6 +29,15 @@ export function assertImperativelyDeployable(
     );
   }
 
+  // Tool runtimes are not in the declared inventory at all, so without this they
+  // would pass the gate unseen.
+  if (project.spec.toolRuntimes?.length) {
+    throw new NotImplementedError(
+      `Project '${project.name}' cannot be deployed imperatively: imperative deploy does not ` +
+        `support toolRuntimes yet. ${CDK_ESCAPE_HATCH}`,
+    );
+  }
+
   const unsupported = [...new Set(declaredResources(project.spec).map(({ kind }) => kind))].filter(
     (kind) => !supported.has(kind),
   );

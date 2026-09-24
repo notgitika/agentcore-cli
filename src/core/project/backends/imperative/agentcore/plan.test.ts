@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Project } from "../../../../../handlers/project/types";
+import { ProjectStateError } from "../../../../../errors";
 import { ProjectSpecSchema } from "../../../../../projectSchemas/project";
 import { createSilentLogger } from "../../../../../testing";
 import type { AwsClients } from "../../../../types";
@@ -143,5 +144,29 @@ describe("plan", () => {
     const base = input({ memories: [{ name: "m" }] });
     delete base.handlers;
     expect(() => plan(base)).not.toThrow();
+  });
+
+  test("refuses two declared names that map to one physical name", () => {
+    const targets = input({
+      agentCoreGateways: [{ name: "gw", targets: [{ name: "a_b" }, { name: "a-b" }] }],
+    });
+    expect(() => plan(targets)).toThrow(ProjectStateError);
+    expect(() => plan(targets)).toThrow(/gateway-target 'gw\/a_b' and 'gw\/a-b'.*Shop-dev-a-b/);
+    expect(() => plan(input({ memories: [{ name: "x-y" }, { name: "x_y" }] }))).toThrow(
+      /memory 'x-y' and 'x_y'/,
+    );
+  });
+
+  test("the same physical name under different parents is not a collision", () => {
+    expect(() =>
+      plan(
+        input({
+          agentCoreGateways: [
+            { name: "gw1", targets: [{ name: "a_b" }] },
+            { name: "gw2", targets: [{ name: "a-b" }] },
+          ],
+        }),
+      ),
+    ).not.toThrow();
   });
 });

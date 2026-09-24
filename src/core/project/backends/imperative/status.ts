@@ -12,20 +12,24 @@ const IN_PROGRESS = new Set([
 const FAILED = new Set([
   "FAILED",
   "CREATE_FAILED",
-  "UPDATE_FAILED",
   "DELETE_FAILED",
-  "UPDATE_UNSUCCESSFUL",
   "SYNCHRONIZE_UNSUCCESSFUL",
   "ERROR",
   "AUTHENTICATION_FAILED",
   "AUTHENTICATION_EXPIRED",
   "AWS_MARKETPLACE_SUBSCRIPTION_REQUIRED",
 ]);
+/**
+ * A failed update leaves the resource in place but not at the spec. Reporting it
+ * as outdated makes the next deploy run `do` again instead of refusing forever.
+ */
+const UPDATE_FAILED = new Set(["UPDATE_FAILED", "UPDATE_UNSUCCESSFUL"]);
 
 /**
  * Maps an AgentCore resource status to the plan engine's vocabulary. Every kind
  * uses one of two converged words and a shared set of failure words, so one
- * table serves all of them. An unknown status is treated as still in progress:
+ * table serves all of them. A failed update maps to OUTDATED so a re-deploy
+ * repairs it. An unknown status is treated as still in progress:
  * the step timeout bounds how long that can last, and the detail says why.
  */
 export function fromServiceStatus(
@@ -34,10 +38,9 @@ export function fromServiceStatus(
 ): StatusReport {
   if (status === undefined) return { status: Status.Waiting, detail: "status not reported yet" };
   if (CONVERGED.has(status)) return { status: Status.Successful };
-  if (FAILED.has(status)) {
-    const detail = options.statusReason ? `${status}: ${options.statusReason}` : status;
-    return { status: Status.Failed, detail };
-  }
+  const detail = options.statusReason ? `${status}: ${options.statusReason}` : status;
+  if (UPDATE_FAILED.has(status)) return { status: Status.Outdated, detail };
+  if (FAILED.has(status)) return { status: Status.Failed, detail };
   if (IN_PROGRESS.has(status) || status.endsWith("_PENDING_AUTH")) {
     return { status: Status.Waiting, detail: status };
   }

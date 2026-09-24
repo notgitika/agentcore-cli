@@ -9,7 +9,7 @@ import {
   stepOf,
   type DeclaredResource,
 } from "../inventory";
-import type { ResourceKind } from "../naming";
+import { assertDistinctPhysicalNames, type ResourceKind } from "../naming";
 import { Plan, type Step } from "../plan/plan";
 import type { ImperativeState } from "../state";
 import { notImplemented, type KindHandlers } from "./notImplemented";
@@ -80,6 +80,7 @@ export function plan(input: PlanInput): Plans {
   const spec = project.spec;
 
   const declared = declaredResources(spec);
+  assertDistinctPhysicalNames(scope, declared);
   const declaredKeys = new Set(declared.map((r) => `${r.kind}:${stateKey(r)}`));
   const removed = recordedResources(recorded).filter(
     (r) => !declaredKeys.has(`${r.kind}:${stateKey(r)}`),

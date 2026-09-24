@@ -15,9 +15,9 @@ describe("fromServiceStatus", () => {
     ["CREATE_PENDING_AUTH", Status.Waiting],
     ["FAILED", Status.Failed],
     ["CREATE_FAILED", Status.Failed],
-    ["UPDATE_FAILED", Status.Failed],
+    ["UPDATE_FAILED", Status.Outdated],
     ["DELETE_FAILED", Status.Failed],
-    ["UPDATE_UNSUCCESSFUL", Status.Failed],
+    ["UPDATE_UNSUCCESSFUL", Status.Outdated],
     ["SYNCHRONIZE_UNSUCCESSFUL", Status.Failed],
     ["ERROR", Status.Failed],
     ["AUTHENTICATION_FAILED", Status.Failed],
@@ -37,6 +37,17 @@ describe("fromServiceStatus", () => {
       detail: "CREATE_FAILED: role not assumable",
     });
     expect(fromServiceStatus("FAILED").detail).toBe("FAILED");
+  });
+
+  test("a failed update is outdated, so the next deploy retries it, and says why", () => {
+    expect(fromServiceStatus("UPDATE_FAILED", { statusReason: "bad role" })).toEqual({
+      status: Status.Outdated,
+      detail: "UPDATE_FAILED: bad role",
+    });
+    expect(fromServiceStatus("UPDATE_UNSUCCESSFUL")).toEqual({
+      status: Status.Outdated,
+      detail: "UPDATE_UNSUCCESSFUL",
+    });
   });
 
   test("no status yet is waiting, not failed", () => {

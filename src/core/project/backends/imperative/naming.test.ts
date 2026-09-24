@@ -43,6 +43,11 @@ describe("physicalName", () => {
     expect(a.startsWith("AVeryLongProjectNameHere_productionEurope")).toBe(true);
   });
 
+  test("refuses a limit too short to hold the digest suffix", () => {
+    const long = { projectName: "AVeryLongProjectNameHere", targetName: "productionEuropeWest1" };
+    expect(() => physicalName(long, "runtime", "checkout", 5)).toThrow(/maxLength 5 is too short/);
+  });
+
   test("leaves a name alone when it fits the limit", () => {
     expect(physicalName(scope, "runtime", "checkout", 48)).toBe("Shop_dev_checkout");
   });

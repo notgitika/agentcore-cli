@@ -1,3 +1,4 @@
+import { ProjectStateError } from "../../../../errors";
 import type { DeployableResource } from "../../../../handlers/project/types";
 
 /**
@@ -47,7 +48,38 @@ export function physicalName(
     .join(separator);
   if (maxLength === undefined || full.length <= maxLength) return full;
   const suffix = `${separator}${digest(full)}`;
+  if (maxLength <= suffix.length) {
+    throw new Error(
+      `physicalName: maxLength ${maxLength} is too short to hold the ${suffix.length}-character digest suffix`,
+    );
+  }
   return `${full.slice(0, maxLength - suffix.length)}${suffix}`;
+}
+
+/**
+ * Refuses declared resources of one kind (and one parent) whose physical names
+ * coincide, e.g. gateway targets `a_b` and `a-b`: they would silently converge
+ * on one AWS resource.
+ */
+export function assertDistinctPhysicalNames(
+  scope: NamingScope,
+  resources: readonly { kind: ResourceKind; name: string; parent?: string }[],
+): void {
+  const seen = new Map<string, string>();
+  for (const { kind, name, parent } of resources) {
+    const physical = physicalName(scope, kind, name);
+    const label = parent === undefined ? name : `${parent}/${name}`;
+    const key = `${kind}\0${parent ?? ""}\0${physical}`;
+    const earlier = seen.get(key);
+    if (earlier !== undefined) {
+      throw new ProjectStateError(
+        `Project '${scope.projectName}' declares ${kind} '${earlier}' and '${label}', which both ` +
+          `deploy as '${physical}' because '-' and '_' are interchangeable in AWS names. ` +
+          `Rename one of them.`,
+      );
+    }
+    seen.set(key, label);
+  }
 }
 
 export function ownershipTags(scope: NamingScope): Record<string, string> {
