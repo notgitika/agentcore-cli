@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { createSilentLogger } from "../../../../../testing";
 import type { ProgressEvent } from "../../../../../tui/progress";
 import {
+  CANCELLED,
   Plan,
+  PlanAbortedError,
   PlanFailedError,
   PlanValidationError,
   Status,
@@ -251,15 +253,63 @@ describe("Plan.execute: one step", () => {
     expect(clock).toBe(100);
   });
 
-  test("an aborted signal stops the plan before any do runs", async () => {
+  test("an aborted signal stops the plan before any step starts", async () => {
     const controller = new AbortController();
     controller.abort(new Error("Ctrl+C"));
     const step = scripted("runtime:a", [Status.NotStarted, Status.Successful]);
     const result = await run(new Plan("apply", [step]), { signal: controller.signal });
-    expect(step.doCalls).toBe(0);
+    expect(step.statusCalls + step.doCalls).toBe(0);
+    expect(result.events).toEqual([]);
+    expect(result.error).toBeInstanceOf(PlanAbortedError);
+    expect((result.error as Error).cause).toEqual(new Error("Ctrl+C"));
+    expect(outcome(result, "runtime:a")).toEqual({
+      name: "runtime:a",
+      outcome: "skipped",
+      blockedBy: CANCELLED,
+    });
+  });
+
+  test("a status value outside the vocabulary fails the step at once, naming the value", async () => {
+    const step: Scripted = scripted("runtime:a", [Status.Waiting]);
+    const bogus: Step = { ...step, status: async () => ({ status: "BOGUS" as Status }) };
+    const result = await run(new Plan("apply", [bogus]), { stepTimeoutMs: 60_000 });
+    const failed = outcome(result, "runtime:a");
+    expect(failed).toMatchObject({ outcome: "failed" });
+    expect((failed as { error: Error }).error.message).toMatch(/unrecognized status 'BOGUS'/);
+  });
+
+  test("the step timeout bounds a do() that never resolves, and aborts its signal", async () => {
+    let seen: AbortSignal | undefined;
+    const hung: Step = {
+      name: "runtime:a",
+      status: async () => ({ status: Status.NotStarted }),
+      do: (ctx) => {
+        seen = ctx.signal;
+        return new Promise(() => {});
+      },
+    };
+    const started = Date.now();
+    const result = await run(new Plan("apply", [hung]), { stepTimeoutMs: 20 });
+    expect(Date.now() - started).toBeLessThan(1000);
     expect(outcome(result, "runtime:a")).toMatchObject({
       outcome: "failed",
-      error: new Error("Ctrl+C"),
+      error: expect.any(StepTimeoutError),
+    });
+    expect(seen?.aborted).toBe(true);
+  });
+
+  test("the step timeout bounds a status() that never resolves", async () => {
+    const hung: Step = {
+      name: "runtime:a",
+      status: () => new Promise(() => {}),
+      do: async () => {},
+    };
+    const started = Date.now();
+    const result = await run(new Plan("apply", [hung]), { stepTimeoutMs: 20 });
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(outcome(result, "runtime:a")).toMatchObject({
+      outcome: "failed",
+      error: expect.any(StepTimeoutError),
     });
   });
 });
@@ -335,6 +385,111 @@ describe("Plan.execute: graph", () => {
         throw disk;
       },
     });
-    expect(error).toBe(disk);
+    expect(error).toBeInstanceOf(PlanFailedError);
+    expect((error as Error).cause).toBe(disk);
+  });
+
+  test("a throwing onStepSucceeded keeps other failures, skips every unstarted step, and carries the hook error", async () => {
+    const disk = new Error("EACCES deployed-state.json");
+    const child = scripted("child", [Status.Successful]);
+    const hooked = scripted("hooked", [Status.Successful], { next: [child] });
+    // Still running when the hook fails: it must be awaited and reported.
+    const slow: Step = {
+      name: "slow",
+      do: async () => {},
+      status: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return { status: Status.Failed, detail: "CREATE_FAILED" };
+      },
+    };
+    const queued1 = scripted("queued1", [Status.Successful]);
+    const queued2 = scripted("queued2", [Status.Successful]);
+    const result = await run(new Plan("apply", [slow, hooked, queued1, queued2]), {
+      concurrency: 2,
+      onStepSucceeded: async (step) => {
+        if (step.name === "hooked") throw disk;
+      },
+    });
+    expect(result.error).toBeInstanceOf(PlanFailedError);
+    const error = result.error as PlanFailedError;
+    expect(error.cause).toBe(disk);
+    expect(error.message).toMatch(/slow \(slow failed: CREATE_FAILED\)/);
+    expect(error.message).toMatch(/EACCES deployed-state.json/);
+    expect(outcome(result, "slow")).toMatchObject({ outcome: "failed" });
+    expect(outcome(result, "hooked")).toMatchObject({ outcome: "succeeded" });
+    for (const name of ["child", "queued1", "queued2"]) {
+      expect(outcome(result, name)).toEqual({ name, outcome: "skipped", blockedBy: "hooked" });
+    }
+    expect(error.result.outcomes).toHaveLength(5);
+    expect(queued1.statusCalls + queued2.statusCalls + child.statusCalls).toBe(0);
+  });
+});
+
+describe("Plan.execute: options and cancellation", () => {
+  test.each([0, -1, 1.5, Number.NaN])("rejects concurrency %p", async (concurrency) => {
+    const step = scripted("a", [Status.Successful]);
+    const { error } = await run(new Plan("apply", [step]), { concurrency });
+    expect(error).toBeInstanceOf(PlanValidationError);
+    expect(step.statusCalls).toBe(0);
+  });
+
+  test("an abort mid-poll starts no queued step and reads as a cancellation", async () => {
+    const controller = new AbortController();
+    const first: Step = {
+      name: "s0",
+      do: async () => {},
+      status: async () => {
+        controller.abort(new Error("Ctrl+C"));
+        return { status: Status.Waiting };
+      },
+    };
+    const queued = [scripted("s1", [Status.Successful]), scripted("s2", [Status.Successful])];
+    const result = await run(new Plan("apply", [first, ...queued]), {
+      concurrency: 1,
+      signal: controller.signal,
+      sleep: (_ms, signal) => (signal.aborted ? Promise.reject(signal.reason) : Promise.resolve()),
+    });
+    expect(result.error).toBeInstanceOf(PlanAbortedError);
+    const message = (result.error as Error).message;
+    expect(message).toMatch(/cancelled/);
+    expect(message).not.toMatch(/failed/);
+    expect(result.events.filter((e) => e.type === "task-start").map((e) => e.id)).toEqual(["s0"]);
+    expect(queued[0]!.statusCalls + queued[1]!.statusCalls).toBe(0);
+    expect(outcome(result, "s1")).toEqual({ name: "s1", outcome: "skipped", blockedBy: CANCELLED });
+    expect(outcome(result, "s2")).toEqual({ name: "s2", outcome: "skipped", blockedBy: CANCELLED });
+  });
+
+  test("closing the generator early stops and awaits in-flight steps", async () => {
+    let statusCalls = 0;
+    let seen: AbortSignal | undefined;
+    const forever: Step = {
+      name: "runtime:a",
+      do: async () => {},
+      status: async (ctx) => {
+        seen = ctx.signal;
+        statusCalls += 1;
+        return { status: Status.Waiting };
+      },
+    };
+    const hung: Step = {
+      name: "memory:m",
+      status: async () => ({ status: Status.NotStarted }),
+      do: () => new Promise(() => {}),
+    };
+    const generator = new Plan("apply", [forever, hung]).execute({
+      logger: createSilentLogger(),
+      pollDelayMs: () => 1,
+    });
+    await generator.next();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const closed = await Promise.race([
+      generator.return({ outcomes: [] }).then(() => "closed"),
+      new Promise((resolve) => setTimeout(() => resolve("hung"), 1000)),
+    ]);
+    expect(closed).toBe("closed");
+    expect(seen?.aborted).toBe(true);
+    const after = statusCalls;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(statusCalls).toBe(after);
   });
 });

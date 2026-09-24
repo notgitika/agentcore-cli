@@ -58,7 +58,13 @@ export type Step = {
 export type StepOutcome =
   | { name: string; outcome: "succeeded"; polls: number }
   | { name: string; outcome: "failed"; error: Error }
+  /** `blockedBy` names the step that stopped this one, or is CANCELLED. */
   | { name: string; outcome: "skipped"; blockedBy: string };
+
+/** `blockedBy` of a step that never started because the plan was cancelled. */
+export const CANCELLED = "(cancelled)";
+
+const KNOWN_STATUSES: ReadonlySet<string> = new Set(Object.values(Status));
 
 export type PlanResult = { outcomes: StepOutcome[] };
 
@@ -77,7 +83,10 @@ export type ExecuteOptions = {
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   /** Injectable clock for timeout tests. */
   now?: () => number;
-  /** Awaited after each step succeeds and before its dependents start; persist here. */
+  /**
+   * Awaited after each step succeeds and before its dependents start; persist
+   * here. A throw is fatal: no further step starts, and the plan fails with it.
+   */
   onStepSucceeded?: (step: Step) => Promise<void>;
 };
 
@@ -164,19 +173,53 @@ export class StepTimeoutError extends AgentCoreCLIError {
   }
 }
 
-/** One or more steps failed; `result` lists every outcome, including skipped dependents. */
+/** An `onStepSucceeded` hook threw after `stepName` converged. */
+export type HookFailure = { stepName: string; error: Error };
+
+/**
+ * One or more steps failed, or persisting a converged step failed; `result`
+ * lists every outcome, including skipped dependents, and `hookFailure` says
+ * which step's hook threw.
+ */
 export class PlanFailedError extends AgentCoreCLIError {
   constructor(
     readonly planName: string,
     readonly result: PlanResult,
+    readonly hookFailure?: HookFailure,
   ) {
     const failed = result.outcomes.filter((o) => o.outcome === "failed");
     const skipped = result.outcomes.filter((o) => o.outcome === "skipped");
-    const summary = failed.map((o) => `${o.name} (${o.error.message})`).join("; ");
+    const counts: string[] = [];
+    if (failed.length > 0 || !hookFailure) {
+      counts.push(`${failed.length} step${failed.length === 1 ? "" : "s"} failed`);
+    }
+    if (hookFailure) counts.push(`recording ${hookFailure.stepName} failed`);
+    if (skipped.length > 0) counts.push(`${skipped.length} skipped`);
+    const details = failed.map((o) => `${o.name} (${o.error.message})`);
+    if (hookFailure) details.push(`${hookFailure.stepName} (${hookFailure.error.message})`);
+    super(`${planName}: ${counts.join(", ")}: ${details.join("; ")}`, {
+      source: ERROR_SOURCE.SERVICE,
+      cause: hookFailure?.error ?? failed[0]?.error,
+      meta: { planName },
+    });
+  }
+}
+
+/** The plan was cancelled; steps that had not started are skipped with CANCELLED. */
+export class PlanAbortedError extends AgentCoreCLIError {
+  constructor(
+    readonly planName: string,
+    readonly result: PlanResult,
+    reason: Error,
+  ) {
+    const finished = result.outcomes.filter((o) => o.outcome === "succeeded").length;
+    const notStarted = result.outcomes.filter(
+      (o) => o.outcome === "skipped" && o.blockedBy === CANCELLED,
+    ).length;
     super(
-      `${planName}: ${failed.length} step${failed.length === 1 ? "" : "s"} failed` +
-        `${skipped.length > 0 ? `, ${skipped.length} skipped` : ""}: ${summary}`,
-      { source: ERROR_SOURCE.SERVICE, cause: failed[0]?.error, meta: { planName } },
+      `${planName} was cancelled (${reason.message}): ${finished} step${finished === 1 ? "" : "s"} ` +
+        `finished, ${notStarted} not started. Deploy again to resume.`,
+      { source: ERROR_SOURCE.USER, exitCode: 130, cause: reason, meta: { planName } },
     );
   }
 }
@@ -233,20 +276,53 @@ export class Plan {
   /**
    * Runs the plan, yielding progress events as steps start, report, finish, or
    * fail, and resolving with every step's outcome. Throws PlanFailedError when
-   * any step failed or was skipped; the outcomes on it say which and why.
+   * any step failed or was skipped, PlanAbortedError when `signal` aborted; the
+   * outcomes on either say which steps and why. Closing the generator early
+   * aborts the running steps and waits for them to settle.
    */
   async *execute(options: ExecuteOptions): AsyncGenerator<ProgressEvent, PlanResult> {
+    const concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
+    if (!Number.isInteger(concurrency) || concurrency < 1) {
+      throw new PlanValidationError(
+        `${this.name}: concurrency must be a positive integer, got ${concurrency}`,
+      );
+    }
     const validated = this.validate();
+
+    // Aborted by the caller's signal, or by this generator closing early.
+    const controller = new AbortController();
+    const forward = () => controller.abort(options.signal?.reason);
+    if (options.signal?.aborted) forward();
+    else options.signal?.addEventListener("abort", forward, { once: true });
+
     const events = new AsyncChannel<ProgressEvent>();
     const result: PlanResult = { outcomes: [] };
-    const running = this.schedule(validated, options, events, result).finally(() => events.close());
-    // Consumed by the await below; this keeps the window between a rejection and
+    const running = this.schedule(
+      validated,
+      { ...options, concurrency },
+      controller.signal,
+      events,
+      result,
+    ).finally(() => events.close());
+    // Consumed by the awaits below; this keeps the window between a rejection and
     // the channel draining from surfacing as an unhandled rejection.
     running.catch(() => {});
-    for await (const event of events) yield event;
-    await running;
-    if (result.outcomes.some((outcome) => outcome.outcome !== "succeeded")) {
-      throw new PlanFailedError(this.name, result);
+    let hookFailure: HookFailure | undefined;
+    try {
+      for await (const event of events) yield event;
+      hookFailure = await running;
+    } finally {
+      if (!controller.signal.aborted) {
+        controller.abort(new Error(`${this.name} was closed before it finished.`));
+      }
+      await running.catch(() => {});
+      options.signal?.removeEventListener("abort", forward);
+    }
+    if (options.signal?.aborted) {
+      throw new PlanAbortedError(this.name, result, abortReason(options.signal));
+    }
+    if (hookFailure || result.outcomes.some((outcome) => outcome.outcome !== "succeeded")) {
+      throw new PlanFailedError(this.name, result, hookFailure);
     }
     return result;
   }
@@ -255,22 +331,27 @@ export class Plan {
    * The prior art's parallel BFS: roots start at once; a step with several
    * parents starts when its in-degree reaches zero (join). A failure never
    * decrements its children, so they can never become ready; they are recorded
-   * as skipped instead. A persistence-hook failure is fatal to the plan but
-   * still lets in-flight steps finish, so nothing is left half-observed.
+   * as skipped instead. A persistence-hook failure or an abort stops new steps
+   * from starting but still lets in-flight steps settle, so nothing is left
+   * half-observed; every step that never started is then recorded as skipped.
    */
   private async schedule(
     plan: ValidatedPlan,
-    options: ExecuteOptions,
+    options: ExecuteOptions & { concurrency: number },
+    signal: AbortSignal,
     events: AsyncChannel<ProgressEvent>,
     result: PlanResult,
-  ): Promise<void> {
-    const concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
+  ): Promise<HookFailure | undefined> {
     const remaining = new Map([...plan.parents].map(([name, parents]) => [name, parents.size]));
     const ready = [...plan.roots];
     const running = new Map<string, Promise<void>>();
-    const skipped = new Set<string>();
-    let fatal: unknown;
+    const decided = new Set<string>();
+    let hookFailure: HookFailure | undefined;
 
+    const record = (outcome: StepOutcome) => {
+      decided.add(outcome.name);
+      result.outcomes.push(outcome);
+    };
     const release = (name: string) => {
       for (const child of plan.children.get(name)!) {
         const left = remaining.get(child)! - 1;
@@ -280,49 +361,58 @@ export class Plan {
     };
     const skipDependents = (name: string, blockedBy: string) => {
       for (const child of plan.children.get(name)!) {
-        if (skipped.has(child)) continue;
-        skipped.add(child);
-        result.outcomes.push({ name: child, outcome: "skipped", blockedBy });
+        if (decided.has(child)) continue;
+        record({ name: child, outcome: "skipped", blockedBy });
         skipDependents(child, blockedBy);
       }
     };
+    const stopped = () => hookFailure !== undefined || signal.aborted;
 
     while (ready.length > 0 || running.size > 0) {
-      if (fatal !== undefined) ready.length = 0;
-      while (ready.length > 0 && running.size < concurrency) {
+      while (ready.length > 0 && running.size < options.concurrency && !stopped()) {
         const name = ready.shift()!;
         const step = plan.steps.get(name)!;
-        const settled = this.runStep(step, options, events)
+        const settled = this.runStep(step, options, signal, events)
           .then(
             async (polls) => {
-              result.outcomes.push({ name, outcome: "succeeded", polls });
-              await options.onStepSucceeded?.(step);
+              record({ name, outcome: "succeeded", polls });
+              try {
+                await options.onStepSucceeded?.(step);
+              } catch (error) {
+                hookFailure ??= { stepName: name, error: toError(error) };
+                return;
+              }
               release(name);
             },
             (error: unknown) => {
-              result.outcomes.push({ name, outcome: "failed", error: toError(error) });
+              record({ name, outcome: "failed", error: toError(error) });
               skipDependents(name, name);
             },
           )
-          .catch((error: unknown) => {
-            fatal ??= error;
-          })
           .finally(() => running.delete(name));
         running.set(name, settled);
       }
-      if (running.size > 0) await Promise.race(running.values());
+      if (running.size === 0) break;
+      await Promise.race(running.values());
     }
-    if (fatal !== undefined) throw fatal;
+
+    const blockedBy = hookFailure?.stepName ?? CANCELLED;
+    for (const name of plan.steps.keys()) {
+      if (!decided.has(name)) record({ name, outcome: "skipped", blockedBy });
+    }
+    return hookFailure;
   }
 
   /**
    * One step's observe → act → poll loop. Returns the number of polls it took.
    * Reports task-start first and task-done or task-failed last, so the progress
-   * UI shows the step for exactly as long as it runs.
+   * UI shows the step for exactly as long as it runs. Every `status` and `do`
+   * call is bounded by the step's remaining time budget and by the abort signal.
    */
   private async runStep(
     step: Step,
     options: ExecuteOptions,
+    signal: AbortSignal,
     events: AsyncChannel<ProgressEvent>,
   ): Promise<number> {
     const logger = options.logger.child({ step: step.name });
@@ -333,9 +423,9 @@ export class Plan {
     const maxDoAttempts = options.maxDoAttempts ?? DEFAULT_MAX_DO_ATTEMPTS;
 
     const controller = new AbortController();
-    const onAbort = () => controller.abort(options.signal?.reason);
-    if (options.signal?.aborted) onAbort();
-    else options.signal?.addEventListener("abort", onAbort, { once: true });
+    const onAbort = () => controller.abort(signal.reason);
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
 
     const ctx: StepContext = {
       signal: controller.signal,
@@ -345,12 +435,39 @@ export class Plan {
 
     events.push({ type: "task-start", id: step.name, title: step.name });
     const started = now();
+
+    /** Races one call against the step's remaining budget and its signal. */
+    const bounded = async <T>(call: (ctx: StepContext) => Promise<T>): Promise<T> => {
+      const budget = timeoutMs - (now() - started);
+      if (budget <= 0) throw new StepTimeoutError(step.name, timeoutMs);
+      if (ctx.signal.aborted) throw abortReason(ctx.signal);
+      const work = call(ctx);
+      // A call that loses the race may still reject later; that is not unhandled.
+      work.catch(() => {});
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let onStop: (() => void) | undefined;
+      const stopped = new Promise<never>((_, reject) => {
+        onStop = () => reject(abortReason(ctx.signal));
+        ctx.signal.addEventListener("abort", onStop, { once: true });
+        timer = setTimeout(
+          () => controller.abort(new StepTimeoutError(step.name, timeoutMs)),
+          budget,
+        );
+      });
+      try {
+        return await Promise.race([work, stopped]);
+      } finally {
+        clearTimeout(timer);
+        ctx.signal.removeEventListener("abort", onStop!);
+      }
+    };
+
     let polls = 0;
     let doAttempts = 0;
     try {
       for (;;) {
         if (ctx.signal.aborted) throw abortReason(ctx.signal);
-        const report = await step.status(ctx);
+        const report = await bounded(step.status);
         polls += 1;
         logger.child({ status: report.status, detail: report.detail ?? "" }).debug("polled step");
 
@@ -359,12 +476,18 @@ export class Plan {
           return polls;
         }
         if (report.status === Status.Failed) throw new StepFailedError(step.name, report.detail);
+        if (!KNOWN_STATUSES.has(report.status)) {
+          throw new AgentCoreCLIError(
+            `${step.name} reported an unrecognized status '${String(report.status)}'`,
+            { source: ERROR_SOURCE.INTERNAL, meta: { stepName: step.name } },
+          );
+        }
         if (report.detail) ctx.report(report.detail);
 
         if (report.status === Status.NotStarted || report.status === Status.Outdated) {
           if (doAttempts >= maxDoAttempts) throw new StepNotStartedError(step.name, report.status);
           doAttempts += 1;
-          await step.do(ctx);
+          await bounded(step.do);
           // Poll again at once: `do` records whatever id `status` needs to find it.
           continue;
         }
@@ -378,7 +501,7 @@ export class Plan {
       events.push({ type: "task-failed", id: step.name, message: failure.message });
       throw failure;
     } finally {
-      options.signal?.removeEventListener("abort", onAbort);
+      signal.removeEventListener("abort", onAbort);
     }
   }
 }

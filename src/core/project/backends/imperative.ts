@@ -188,6 +188,8 @@ export class ImperativeBackend implements ProjectBackend {
     }
 
     yield { type: "step", message: `Deploying ${count(plans.declared.length)}` };
+    // No AbortSignal is threaded to the engine yet: DeployBackendInput carries
+    // none, so Ctrl+C is not a graceful cancel here (follow-up).
     yield* plans.apply.execute({
       ...this.execute,
       logger: this.logger,
