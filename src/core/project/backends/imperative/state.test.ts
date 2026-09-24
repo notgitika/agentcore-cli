@@ -95,4 +95,34 @@ describe("imperative state", () => {
       }),
     ).toEqual({ memory: { good: { arn: "a", updatedAt: "t" } } });
   });
+
+  test("a record or forget keeps raw entries that do not parse", async () => {
+    const { root, json, statePath } = await fixture();
+    const legacy = { arn: "arn:legacy" };
+    await json.write(statePath, {
+      targets: {
+        dev: {
+          resources: {
+            imperative: {
+              memory: { legacy, doomed: { arn: "arn:d", updatedAt: "t" } },
+              gateway: { odd: 42 },
+            },
+          },
+        },
+      },
+    });
+    await recordImperativeResource(json, root, "dev", "memory", "orders", { arn: "arn:m" }, now);
+    await forgetImperativeResource(json, root, "dev", "memory", "doomed");
+    const state = await readDeployedState(json, root);
+    const resources = state.targets["dev"]?.resources as Record<string, unknown> | undefined;
+    const raw = resources?.["imperative"];
+    expect(raw).toEqual({
+      memory: { legacy, orders: { arn: "arn:m", updatedAt: "2026-09-24T00:00:00.000Z" } },
+      gateway: { odd: 42 },
+    });
+    // Reads still filter them out.
+    expect(await readImperativeState(json, root, "dev")).toEqual({
+      memory: { orders: { arn: "arn:m", updatedAt: "2026-09-24T00:00:00.000Z" } },
+    });
+  });
 });

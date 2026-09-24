@@ -22,7 +22,10 @@ export type ImperativeState = Partial<
   Record<ResourceKind, Record<string, ImperativeResourceRecord>>
 >;
 
-/** Parses the ledger out of a target's state, dropping entries that do not parse. */
+/**
+ * Parses the ledger out of a target's state, dropping entries that do not
+ * parse. For reads only: writes go through the raw map so those entries survive.
+ */
 export function imperativeStateOf(state: TargetState | undefined): ImperativeState {
   const raw = state?.resources?.imperative ?? {};
   const result: ImperativeState = {};
@@ -52,6 +55,27 @@ export function hasCdkBinding(state: TargetState | undefined): boolean {
   return stackReferenceOf(state) !== undefined;
 }
 
+/**
+ * The ledger exactly as stored, entries that do not parse included. Writes
+ * start from this, never from the parsed view, so a record written by a newer
+ * or older CLI survives an unrelated update.
+ */
+async function readRawImperative(
+  json: ReadWriteJson,
+  rootPath: string,
+  targetName: string,
+): Promise<Record<string, unknown>> {
+  const state = await readDeployedState(json, rootPath);
+  const raw: unknown = state.targets[targetName]?.resources?.imperative;
+  return typeof raw === "object" && raw !== null ? { ...(raw as Record<string, unknown>) } : {};
+}
+
+function rawEntriesOf(byKey: unknown): Record<string, unknown> {
+  return typeof byKey === "object" && byKey !== null
+    ? { ...(byKey as Record<string, unknown>) }
+    : {};
+}
+
 export async function recordImperativeResource(
   json: ReadWriteJson,
   rootPath: string,
@@ -61,19 +85,18 @@ export async function recordImperativeResource(
   outputs: { arn?: string; id?: string },
   now: () => Date,
 ): Promise<void> {
-  const current = await readImperativeState(json, rootPath, targetName);
+  const imperative = await readRawImperative(json, rootPath, targetName);
   const record: ImperativeResourceRecord = {
     ...(outputs.arn !== undefined && { arn: outputs.arn }),
     ...(outputs.id !== undefined && { id: outputs.id }),
     updatedAt: now().toISOString(),
   };
-  const imperative: ImperativeState = {
-    ...current,
-    [kind]: { ...current[kind], [key]: record },
-  };
+  imperative[kind] = { ...rawEntriesOf(imperative[kind]), [key]: record };
   // updateTargetState merges `resources` one level deep, so the whole ledger is
   // rewritten but credentials and unknown siblings survive.
-  await updateTargetState(json, rootPath, targetName, { resources: { imperative } });
+  await updateTargetState(json, rootPath, targetName, {
+    resources: { imperative },
+  });
 }
 
 export async function forgetImperativeResource(
@@ -83,12 +106,13 @@ export async function forgetImperativeResource(
   kind: ResourceKind,
   key: string,
 ): Promise<void> {
-  const current = await readImperativeState(json, rootPath, targetName);
-  const byKey = { ...current[kind] };
+  const imperative = await readRawImperative(json, rootPath, targetName);
+  const byKey = rawEntriesOf(imperative[kind]);
   if (!(key in byKey)) return;
   delete byKey[key];
-  const imperative: ImperativeState = { ...current };
   if (Object.keys(byKey).length === 0) delete imperative[kind];
   else imperative[kind] = byKey;
-  await updateTargetState(json, rootPath, targetName, { resources: { imperative } });
+  await updateTargetState(json, rootPath, targetName, {
+    resources: { imperative },
+  });
 }

@@ -89,6 +89,12 @@ export class ImperativeBackend implements ProjectBackend {
   private readonly supportedKinds: ReadonlySet<ResourceKind>;
   private readonly execute: ImperativeBackendConfig["execute"];
   private readonly now: () => Date;
+  /**
+   * Tail of the ledger-write queue. The engine runs several onStepSucceeded
+   * hooks at once, and each rewrites deployed-state.json from a fresh read, so
+   * unserialized writes would drop each other's records.
+   */
+  private ledger: Promise<void> = Promise.resolve();
 
   constructor(config: ImperativeBackendConfig) {
     this.logger = config.logger;
@@ -193,7 +199,8 @@ export class ImperativeBackend implements ProjectBackend {
     yield* plans.apply.execute({
       ...this.execute,
       logger: this.logger,
-      onStepSucceeded: (step) => this.recordStep(project, target, plans, step),
+      onStepSucceeded: (step) =>
+        this.serialized(() => this.recordStep(project, target, plans, step)),
     });
 
     if (plans.removed.length > 0) {
@@ -204,7 +211,8 @@ export class ImperativeBackend implements ProjectBackend {
       yield* plans.remove.execute({
         ...this.execute,
         logger: this.logger,
-        onStepSucceeded: (step) => this.forgetStep(project, target, step),
+        onStepSucceeded: (step) =>
+          this.serialized(() => this.forgetStep(project, target, plans, step)),
       });
     }
 
@@ -256,7 +264,8 @@ export class ImperativeBackend implements ProjectBackend {
     yield* plans.remove.execute({
       ...this.execute,
       logger: this.logger,
-      onStepSucceeded: (step) => this.forgetStep(project, target, step),
+      onStepSucceeded: (step) =>
+        this.serialized(() => this.forgetStep(project, target, plans, step)),
     });
 
     // After the resources, since one of them may still have been using a provider.
@@ -269,6 +278,13 @@ export class ImperativeBackend implements ProjectBackend {
     });
     await removeTargetState(this.json, project.rootPath, target.name);
     return { outputs: {}, tornDown: true };
+  }
+
+  /** Runs one ledger mutation after every earlier one has settled. */
+  private serialized(fn: () => Promise<void>): Promise<void> {
+    const next = this.ledger.then(fn, fn);
+    this.ledger = next.catch(() => {});
+    return next;
   }
 
   private async recordStep(
@@ -293,8 +309,11 @@ export class ImperativeBackend implements ProjectBackend {
   private async forgetStep(
     project: Project,
     target: AwsDeploymentTarget,
+    plans: Plans,
     step: Step,
   ): Promise<void> {
+    // The resource is gone, so its identifiers must not reach DeployResult.outputs.
+    plans.stack.forget(step.name);
     const { kind, name, parent } = parseStepName(step.name);
     await forgetImperativeResource(
       this.json,
