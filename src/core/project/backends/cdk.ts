@@ -55,10 +55,9 @@ import {
   bootstrapStackReader,
   createCloudFormationStackReader,
   probeBootstrap,
-  resolveAwsAccount,
-  type AccountResolver,
   type BootstrapProbe,
 } from "./cdk/environment";
+import { resolveAwsAccount, type AccountResolver } from "./shared/account";
 import {
   createCdkCredentialResolver,
   createCdkRunner,

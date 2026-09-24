@@ -28,10 +28,6 @@ export type BootstrapProbe = (
   region: string,
   credentials: CdkCredentialProvider,
 ) => Promise<BootstrapState>;
-export type AccountResolver = (
-  region: string,
-  credentials: CdkCredentialProvider,
-) => Promise<string>;
 export type StackReader = (
   stackName: string,
   region: string,
@@ -121,21 +117,3 @@ export async function probeBootstrap(
     throw error;
   }
 }
-
-/** Omitting `credentials` resolves through the default AWS SDK provider chain. */
-export const resolveAwsAccount = async (
-  region: string,
-  credentials?: CdkCredentialProvider,
-): Promise<string> => {
-  const { GetCallerIdentityCommand, STSClient } = await import("@aws-sdk/client-sts");
-  const client = new STSClient({ credentials, region });
-  try {
-    const { Account } = await client.send(new GetCallerIdentityCommand({}));
-    if (!Account) {
-      throw new MalformedServiceResponseError("STS GetCallerIdentity returned no AWS account ID");
-    }
-    return Account;
-  } finally {
-    client.destroy();
-  }
-};

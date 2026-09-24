@@ -75,7 +75,7 @@ import {
 } from "../../errors/errors";
 import z from "zod";
 import { CdkBackend, type TransactionSearchEnabler } from "./backends/cdk";
-import { resolveAwsAccount } from "./backends/cdk/environment";
+import { resolveAwsAccount } from "./backends/shared/account";
 import type { ProjectBackend } from "./backends/types";
 import {
   AgentCoreRegionSchema,
