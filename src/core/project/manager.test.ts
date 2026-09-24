@@ -844,6 +844,19 @@ describe("FsProjectManager.deploy", () => {
     `Created default deployment target: account ${STS_ACCOUNT}, ` +
     `region us-east-2 (${join("agentcore", "aws-targets.json")})`;
 
+  test("resolves the backend before synthesizing a default target", async () => {
+    const root = await inTempDirectory();
+    const subject = deployManager();
+    const base = await projectWithTargets(root);
+    const imperative = { ...base, spec: { ...base.spec, managedBy: "Imperative" as const } };
+
+    await expect(deploy(subject.manager, imperative, "default")).rejects.toThrow(
+      /imperative deploy is not enabled/,
+    );
+    expect(subject.accountCalls).toEqual([]);
+    expect(await Bun.file(targetsFile(root)).exists()).toBe(false);
+  });
+
   test.each([
     ["a missing file", undefined],
     ["an empty list", []],

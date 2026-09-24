@@ -65,8 +65,9 @@ function appendTail(task: Task, line: string, tailLines: number): Task {
  * Folds one progress event into a task list. Linear events: a `step` completes
  * the running unidentified task and starts a new one, an `output` line joins
  * the last unidentified task's tail, and a `warning` is retained as a standalone
- * advisory above the running tasks. Identified events (`task-*`) address one
- * task by id and leave every other task alone, so several can run at once.
+ * advisory above the running tasks. Identified events (`task-*`) address the
+ * latest task with their id and leave every other task alone, so several can
+ * run at once and a reused id never reopens a settled task.
  */
 export function applyProgressEvent(
   tasks: readonly Task[],
@@ -100,17 +101,17 @@ export function applyProgressEvent(
     case "task-start":
       return [...tasks, { id: event.id, title: event.title, state: "running", tail: [] }];
     case "task-output": {
-      const index = tasks.findIndex((task) => task.id === event.id);
+      const index = lastIndexWhere(tasks, (task) => task.id === event.id);
       if (index === -1) return [...tasks];
       return replaceAt(tasks, index, (task) => appendTail(task, event.line, tailLines));
     }
     case "task-done": {
-      const index = tasks.findIndex((task) => task.id === event.id);
+      const index = lastIndexWhere(tasks, (task) => task.id === event.id);
       if (index === -1) return [...tasks];
       return replaceAt(tasks, index, (task) => ({ ...task, state: "done", tail: [] }));
     }
     case "task-failed": {
-      const index = tasks.findIndex((task) => task.id === event.id);
+      const index = lastIndexWhere(tasks, (task) => task.id === event.id);
       if (index === -1) return [...tasks];
       return replaceAt(tasks, index, (task) => ({
         ...(event.message ? appendTail(task, event.message, tailLines) : task),

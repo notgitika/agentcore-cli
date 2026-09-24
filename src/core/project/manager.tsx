@@ -976,6 +976,8 @@ export class FsProjectManager implements ProjectManager {
     project: Project,
     input: DeployProjectInput,
   ): AsyncGenerator<ProjectEvent, DeployResult> {
+    // First, so a project whose backend is unavailable writes nothing to disk.
+    const backend = this.backendFor(project);
     const targetsPath = join(project.rootPath, "agentcore", "aws-targets.json");
     const fileExists = existsSync(targetsPath);
     const targets = await this.listTargets(project);
@@ -1015,7 +1017,7 @@ export class FsProjectManager implements ProjectManager {
       );
     }
 
-    return yield* this.backendFor(project).deploy(project, {
+    return yield* backend.deploy(project, {
       target,
       confirmTeardown: input.confirmTeardown,
       transactionSearch: input.transactionSearch,

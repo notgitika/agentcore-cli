@@ -293,6 +293,29 @@ describe("applyProgressEvent / settleProgress", () => {
     ]);
   });
 
+  test("a reused id addresses the latest task, never a settled one", () => {
+    let tasks = applyProgressEvent([], { type: "task-start", id: "t", title: "apply" });
+    tasks = applyProgressEvent(tasks, { type: "task-done", id: "t" });
+    tasks = applyProgressEvent(tasks, { type: "task-start", id: "t", title: "retry" });
+    tasks = applyProgressEvent(tasks, { type: "task-output", id: "t", line: "CREATING" });
+    expect(tasks.map((task) => [task.title, task.state, task.tail])).toEqual([
+      ["apply", "done", []],
+      ["retry", "running", ["CREATING"]],
+    ]);
+    const failed = applyProgressEvent(tasks, { type: "task-failed", id: "t", message: "boom" });
+    expect(failed.map((task) => [task.title, task.state])).toEqual([
+      ["apply", "done"],
+      ["retry", "failed"],
+    ]);
+    const done = applyProgressEvent(tasks, { type: "task-done", id: "t" });
+    expect(done.map((task) => [task.title, task.state])).toEqual([
+      ["apply", "done"],
+      ["retry", "done"],
+    ]);
+    // The first task is settled and must not be touched by the later events.
+    expect(failed[0]).toBe(tasks[0]!);
+  });
+
   test("events for an unknown task id are ignored", () => {
     expect(applyProgressEvent([], { type: "task-done", id: "nope" })).toEqual([]);
     expect(applyProgressEvent([], { type: "task-output", id: "nope", line: "x" })).toEqual([]);
