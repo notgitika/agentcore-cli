@@ -1,5 +1,7 @@
 import { AgentCoreCLIError, ERROR_SOURCE } from "../../../../../errors";
+import { AsyncChannel } from "../../../../../io";
 import type { Logger } from "../../../../../logging";
+import type { ProgressEvent } from "../../../../../tui/progress";
 
 /**
  * The generic plan engine, after AlricheyWPPlayground's plan/plan.go: a plan is
@@ -85,6 +87,37 @@ export type ValidatedPlan = {
   children: Map<string, Set<string>>;
   roots: string[];
 };
+
+const DEFAULT_CONCURRENCY = 4;
+const DEFAULT_MAX_DO_ATTEMPTS = 1;
+const DEFAULT_STEP_TIMEOUT_MS = 15 * 60 * 1000;
+
+function defaultPollDelayMs(poll: number): number {
+  return Math.min(1000 * 2 ** Math.max(poll - 1, 0), 10_000);
+}
+
+function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(abortReason(signal));
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortReason(signal));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function abortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new Error("The deploy was cancelled.");
+}
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
 
 /** The plan's graph is malformed: a bug in the plan factory, never a user or service problem. */
 export class PlanValidationError extends AgentCoreCLIError {
@@ -195,5 +228,157 @@ export class Plan {
 
     const roots = [...steps.keys()].filter((name) => parents.get(name)!.size === 0);
     return { steps, parents, children, roots };
+  }
+
+  /**
+   * Runs the plan, yielding progress events as steps start, report, finish, or
+   * fail, and resolving with every step's outcome. Throws PlanFailedError when
+   * any step failed or was skipped; the outcomes on it say which and why.
+   */
+  async *execute(options: ExecuteOptions): AsyncGenerator<ProgressEvent, PlanResult> {
+    const validated = this.validate();
+    const events = new AsyncChannel<ProgressEvent>();
+    const result: PlanResult = { outcomes: [] };
+    const running = this.schedule(validated, options, events, result).finally(() => events.close());
+    // Consumed by the await below; this keeps the window between a rejection and
+    // the channel draining from surfacing as an unhandled rejection.
+    running.catch(() => {});
+    for await (const event of events) yield event;
+    await running;
+    if (result.outcomes.some((outcome) => outcome.outcome !== "succeeded")) {
+      throw new PlanFailedError(this.name, result);
+    }
+    return result;
+  }
+
+  /**
+   * The prior art's parallel BFS: roots start at once; a step with several
+   * parents starts when its in-degree reaches zero (join). A failure never
+   * decrements its children, so they can never become ready; they are recorded
+   * as skipped instead. A persistence-hook failure is fatal to the plan but
+   * still lets in-flight steps finish, so nothing is left half-observed.
+   */
+  private async schedule(
+    plan: ValidatedPlan,
+    options: ExecuteOptions,
+    events: AsyncChannel<ProgressEvent>,
+    result: PlanResult,
+  ): Promise<void> {
+    const concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
+    const remaining = new Map([...plan.parents].map(([name, parents]) => [name, parents.size]));
+    const ready = [...plan.roots];
+    const running = new Map<string, Promise<void>>();
+    const skipped = new Set<string>();
+    let fatal: unknown;
+
+    const release = (name: string) => {
+      for (const child of plan.children.get(name)!) {
+        const left = remaining.get(child)! - 1;
+        remaining.set(child, left);
+        if (left === 0) ready.push(child);
+      }
+    };
+    const skipDependents = (name: string, blockedBy: string) => {
+      for (const child of plan.children.get(name)!) {
+        if (skipped.has(child)) continue;
+        skipped.add(child);
+        result.outcomes.push({ name: child, outcome: "skipped", blockedBy });
+        skipDependents(child, blockedBy);
+      }
+    };
+
+    while (ready.length > 0 || running.size > 0) {
+      if (fatal !== undefined) ready.length = 0;
+      while (ready.length > 0 && running.size < concurrency) {
+        const name = ready.shift()!;
+        const step = plan.steps.get(name)!;
+        const settled = this.runStep(step, options, events)
+          .then(
+            async (polls) => {
+              result.outcomes.push({ name, outcome: "succeeded", polls });
+              await options.onStepSucceeded?.(step);
+              release(name);
+            },
+            (error: unknown) => {
+              result.outcomes.push({ name, outcome: "failed", error: toError(error) });
+              skipDependents(name, name);
+            },
+          )
+          .catch((error: unknown) => {
+            fatal ??= error;
+          })
+          .finally(() => running.delete(name));
+        running.set(name, settled);
+      }
+      if (running.size > 0) await Promise.race(running.values());
+    }
+    if (fatal !== undefined) throw fatal;
+  }
+
+  /**
+   * One step's observe → act → poll loop. Returns the number of polls it took.
+   * Reports task-start first and task-done or task-failed last, so the progress
+   * UI shows the step for exactly as long as it runs.
+   */
+  private async runStep(
+    step: Step,
+    options: ExecuteOptions,
+    events: AsyncChannel<ProgressEvent>,
+  ): Promise<number> {
+    const logger = options.logger.child({ step: step.name });
+    const now = options.now ?? Date.now;
+    const sleep = options.sleep ?? defaultSleep;
+    const pollDelayMs = options.pollDelayMs ?? defaultPollDelayMs;
+    const timeoutMs = options.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS;
+    const maxDoAttempts = options.maxDoAttempts ?? DEFAULT_MAX_DO_ATTEMPTS;
+
+    const controller = new AbortController();
+    const onAbort = () => controller.abort(options.signal?.reason);
+    if (options.signal?.aborted) onAbort();
+    else options.signal?.addEventListener("abort", onAbort, { once: true });
+
+    const ctx: StepContext = {
+      signal: controller.signal,
+      logger,
+      report: (line) => events.push({ type: "task-output", id: step.name, line }),
+    };
+
+    events.push({ type: "task-start", id: step.name, title: step.name });
+    const started = now();
+    let polls = 0;
+    let doAttempts = 0;
+    try {
+      for (;;) {
+        if (ctx.signal.aborted) throw abortReason(ctx.signal);
+        const report = await step.status(ctx);
+        polls += 1;
+        logger.child({ status: report.status, detail: report.detail ?? "" }).debug("polled step");
+
+        if (report.status === Status.Successful) {
+          events.push({ type: "task-done", id: step.name });
+          return polls;
+        }
+        if (report.status === Status.Failed) throw new StepFailedError(step.name, report.detail);
+        if (report.detail) ctx.report(report.detail);
+
+        if (report.status === Status.NotStarted || report.status === Status.Outdated) {
+          if (doAttempts >= maxDoAttempts) throw new StepNotStartedError(step.name, report.status);
+          doAttempts += 1;
+          await step.do(ctx);
+          // Poll again at once: `do` records whatever id `status` needs to find it.
+          continue;
+        }
+
+        const elapsed = now() - started;
+        if (elapsed >= timeoutMs) throw new StepTimeoutError(step.name, timeoutMs);
+        await sleep(Math.min(pollDelayMs(polls), timeoutMs - elapsed), ctx.signal);
+      }
+    } catch (error) {
+      const failure = toError(error);
+      events.push({ type: "task-failed", id: step.name, message: failure.message });
+      throw failure;
+    } finally {
+      options.signal?.removeEventListener("abort", onAbort);
+    }
   }
 }
