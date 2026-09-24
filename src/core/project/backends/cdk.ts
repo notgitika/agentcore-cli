@@ -39,7 +39,7 @@ import {
   type CredentialProviderRef,
   type CredentialProvisioner,
   type CredentialRemover,
-} from "./cdk/credentials";
+} from "./shared/credentials";
 import {
   countDeployableResources,
   stackArtifactForTarget,
