@@ -135,13 +135,13 @@ describe("poll", () => {
     const report = await endpointHandlers.poll(stack, resource, spec)(ctx);
     expect(report).toEqual({ status: Status.Outdated, detail: "description differs" });
   });
-  test("UPDATE_FAILED carries the failure reason", async () => {
+  test("UPDATE_FAILED is Outdated so the next deploy retries, and carries the reason", async () => {
     const { stack } = harness({
       GetAgentRuntimeEndpointCommand: () =>
         liveEndpoint({ status: "UPDATE_FAILED", failureReason: "no such version" }),
     });
     expect(await endpointHandlers.poll(stack, resource, spec)(ctx)).toEqual({
-      status: Status.Failed,
+      status: Status.Outdated,
       detail: "UPDATE_FAILED: no such version",
     });
   });
