@@ -50,7 +50,7 @@ import {
   removeTargetState,
   stackReferenceOf,
   updateTargetState,
-} from "./cdk/deployedState";
+} from "./shared/deployedState";
 import {
   bootstrapStackReader,
   createCloudFormationStackReader,

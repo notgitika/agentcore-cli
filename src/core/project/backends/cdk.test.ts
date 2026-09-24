@@ -16,7 +16,7 @@ import type {
   CredentialRemovalInput,
   CredentialRemover,
 } from "./cdk/credentials";
-import { DEPLOYED_STATE_RELATIVE_PATH, updateTargetState } from "./cdk/deployedState";
+import { DEPLOYED_STATE_RELATIVE_PATH, updateTargetState } from "./shared/deployedState";
 import type { DeployBackendInput } from "./types";
 import type { ResolvedProjectResource } from "../../../handlers/project/types";
 import type { BootstrapState } from "./cdk/environment";
