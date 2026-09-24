@@ -15,9 +15,10 @@ import type {
   CredentialProvisioner,
   CredentialRemovalInput,
   CredentialRemover,
-} from "./cdk/credentials";
-import { DEPLOYED_STATE_RELATIVE_PATH, updateTargetState } from "./cdk/deployedState";
+} from "./shared/credentials";
+import { DEPLOYED_STATE_RELATIVE_PATH, updateTargetState } from "./shared/deployedState";
 import type { DeployBackendInput } from "./types";
+import type { AwsCredentials } from "../../types";
 import type { ResolvedProjectResource } from "../../../handlers/project/types";
 import type { BootstrapState } from "./cdk/environment";
 import type { CdkCredentialProvider, CdkOperation, CdkOutputs, CdkRunOptions } from "./cdk/toolkit";
@@ -176,7 +177,7 @@ function harness(options: HarnessOptions = {}) {
   const commands: { command: string[]; cwd: string }[] = [];
   const runs: { operation: CdkOperation; options: CdkRunOptions }[] = [];
   const credentialRegions: string[] = [];
-  const accountCredentials: CdkCredentialProvider[] = [];
+  const accountCredentials: (AwsCredentials | undefined)[] = [];
   const bootstrapCredentials: CdkCredentialProvider[] = [];
   const accountRegions: string[] = [];
   const bootstrapRegions: string[] = [];

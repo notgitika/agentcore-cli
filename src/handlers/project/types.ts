@@ -456,7 +456,7 @@ export interface ProjectManager {
   /** Scaffold a new AgentCore project from the given template. */
   create(input: CreateProjectInput): AsyncGenerator<ProjectEvent, Project>;
 
-  /** Compile the project's CDK app and synthesize its CloudFormation templates. */
+  /** Build the project's deployable artifacts with its selected backend. */
   build(project: Project): AsyncGenerator<ProjectEvent, void>;
 
   /** Deploy the project to one of its configured AWS targets. */

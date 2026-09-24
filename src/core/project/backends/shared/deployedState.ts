@@ -5,13 +5,15 @@ import { z } from "zod";
 import { atomicWrite, type ReadWriteJson } from "../../../../io";
 
 /**
- * Project-relative path of the state file the synthesized CDK app reads.
+ * Project-relative path of the per-target deploy binding every backend reads
+ * and writes.
  *
  * Under `agentcore/.cli/` to match the released CLI's location, so a project
- * created by an older CLI keeps reading the same path after upgrading. It holds
- * a target's stack binding and its imperatively created credential ARNs; the
- * scaffolded `.gitignore` keeps this one file committed while ignoring the rest
- * of `.cli/`.
+ * created by an older CLI keeps reading the same path after upgrading. The CDK
+ * backend records a target's stack ARN and the credential provider ARNs the
+ * synthesized app reads back; other backends record their own resource
+ * bindings under the same target. The scaffolded `.gitignore` keeps this one
+ * file committed while ignoring the rest of `.cli/`.
  */
 export const DEPLOYED_STATE_RELATIVE_PATH = join("agentcore", ".cli", "deployed-state.json");
 

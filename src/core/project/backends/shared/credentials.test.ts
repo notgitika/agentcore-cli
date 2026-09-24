@@ -10,7 +10,7 @@ import {
 } from "@aws-sdk/client-bedrock-agentcore-control";
 import type { Project, ProjectEvent } from "../../../../handlers/project/types";
 import { ProjectSpecSchema } from "../../../../projectSchemas/project";
-import type { CoreOptions } from "../../../types";
+import type { AwsCredentials, CoreOptions } from "../../../types";
 import { EnvLocalFile } from "../../envLocal";
 import {
   createCredentialProvisioner,
@@ -23,10 +23,9 @@ import {
   type DeployedCredential,
   type DeployedCredentials,
 } from "./credentials";
-import type { CdkCredentialProvider } from "./toolkit";
 
 const REGION = "us-east-1";
-const CREDENTIALS: CdkCredentialProvider = async () => ({
+const CREDENTIALS: AwsCredentials = async () => ({
   accessKeyId: "access-key",
   secretAccessKey: "secret-key",
 });
@@ -965,5 +964,19 @@ describe("createCredentialRemover", () => {
       ),
     );
     expect(subject.contents()).toEqual({ [OPENAI_PROVIDER]: existing });
+  });
+});
+
+describe("credential type", () => {
+  test("accepts resolved credentials as well as a provider", async () => {
+    // Resolved credentials are an object, not a function. CoreOptions accepts
+    // both, and so must the provisioner, so a backend that resolves once can
+    // hand the result straight through.
+    const input: CredentialProvisionInput = {
+      region: "us-east-1",
+      targetName: "default",
+      credentials: { accessKeyId: "AKIA", secretAccessKey: "secret" },
+    };
+    expect(input.credentials).toEqual({ accessKeyId: "AKIA", secretAccessKey: "secret" });
   });
 });

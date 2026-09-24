@@ -74,8 +74,9 @@ import {
   ResourceNotFoundError,
 } from "../../errors/errors";
 import z from "zod";
-import { CdkBackend, type TransactionSearchEnabler } from "./backends/cdk";
-import { resolveAwsAccount } from "./backends/cdk/environment";
+import { CdkBackend } from "./backends/cdk";
+import type { TransactionSearchEnabler } from "./backends/shared/types";
+import { resolveAwsAccount } from "./backends/shared/account";
 import type { ProjectBackend } from "./backends/types";
 import {
   AgentCoreRegionSchema,

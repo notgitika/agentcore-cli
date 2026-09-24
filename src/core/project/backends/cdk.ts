@@ -30,7 +30,7 @@ import type {
   ResolveProjectResourcesBackendInput,
 } from "./types";
 import { createCloudFormationClient } from "../../factories";
-import type { AwsCredentials, CreateCloudFormationClient } from "../../types";
+import type { CreateCloudFormationClient } from "../../types";
 import {
   createCredentialProvisioner,
   createCredentialRemover,
@@ -39,7 +39,7 @@ import {
   type CredentialProviderRef,
   type CredentialProvisioner,
   type CredentialRemover,
-} from "./cdk/credentials";
+} from "./shared/credentials";
 import {
   countDeployableResources,
   stackArtifactForTarget,
@@ -50,15 +50,15 @@ import {
   removeTargetState,
   stackReferenceOf,
   updateTargetState,
-} from "./cdk/deployedState";
+} from "./shared/deployedState";
 import {
   bootstrapStackReader,
   createCloudFormationStackReader,
   probeBootstrap,
-  resolveAwsAccount,
-  type AccountResolver,
   type BootstrapProbe,
 } from "./cdk/environment";
+import { resolveAwsAccount, type AccountResolver } from "./shared/account";
+import type { TransactionSearchEnabler } from "./shared/types";
 import {
   createCdkCredentialResolver,
   createCdkRunner,
@@ -114,11 +114,6 @@ function findDeployedResourceId(
       : `${stack.StackName}-Harness-${exportResourceName}-Id`;
   return stack.Outputs?.find((output) => output.ExportName === exportName)?.OutputValue;
 }
-
-export type TransactionSearchEnabler = (
-  target: AwsDeploymentTarget,
-  credentials: AwsCredentials,
-) => Promise<void>;
 
 export type CdkBackendConfig = {
   logger: Logger;

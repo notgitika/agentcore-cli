@@ -19,9 +19,8 @@ import {
   credentialEnvironmentVariableNames,
   credentialEnvVarName,
 } from "../../../../projectSchemas/credential";
-import type { CoreOptions } from "../../../types";
+import type { AwsCredentials, CoreOptions } from "../../../types";
 import { ENV_LOCAL_RELATIVE_PATH, EnvLocalFile } from "../../envLocal";
-import type { CdkCredentialProvider } from "./toolkit";
 
 /** A provisioned provider, in the shape the synthesized CDK app reads back. */
 export type DeployedCredential = {
@@ -85,7 +84,7 @@ type ProviderDeletes = Pick<
 export type CredentialProvisionInput = {
   region: string;
   /** Credential provider shared with the rest of the deployment preflight. */
-  credentials: CdkCredentialProvider;
+  credentials: AwsCredentials;
   targetName: string;
 };
 
