@@ -213,6 +213,28 @@ resources converge, as the credential provisioner does today. A project that
 declares nothing and has recorded resources is a teardown, confirmed through the
 existing `confirmTeardown` flow.
 
+#### Switching `managedBy`
+
+`managedBy` is a spec-level field; the CDK binding (`stackArn`) and the imperative
+records live per target. Both backends check the _other_ backend's records for the
+target they are about to deploy, before any AWS mutation, and refuse rather than
+adopt or delete resources they did not create:
+
+| Project state for the target                   | Flip to `Imperative`                                                              | Flip to `CDK`                                                        |
+| ---------------------------------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Flag `imperative-deploy` off                   | Backend selection fails: run `agentcore config imperative-deploy true` or revert. | n/a                                                                  |
+| Never deployed (no target entry)               | Deploys fresh. The scaffolded `agentcore/cdk/` directory is ignored.              | Deploys fresh.                                                       |
+| Deployed by CDK (`stackArn` recorded)          | `ProjectStateError`: target is managed by stack `<arn>`; migrate first.           | Normal CDK deploy.                                                   |
+| Deployed imperatively (`resources.imperative`) | Normal imperative deploy.                                                         | `ProjectStateError`: target has imperative resources; migrate first. |
+
+Migration is explicit in both directions: revert `managedBy`, deploy an empty
+project (the existing teardown flow removes the stack or the imperative
+resources), then set the new value and deploy again. Adoption is out of scope:
+CDK resources carry CloudFormation-generated names and no ownership tags, and
+most kinds cannot be renamed in place, so adopting would be a recreate anyway.
+Because the check is per target, a never-deployed `prod` can go imperative while a
+CDK-deployed `dev` on the same project is refused until migrated.
+
 ### 4.6 The deploy sequence (`ImperativeBackend.deploy`)
 
 1. Verify the active credentials belong to the target account.
