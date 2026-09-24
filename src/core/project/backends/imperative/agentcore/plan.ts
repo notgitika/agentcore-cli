@@ -12,15 +12,18 @@ import {
 import { assertDistinctPhysicalNames, type ResourceKind } from "../naming";
 import { Plan, type Step } from "../plan/plan";
 import type { ImperativeState } from "../state";
+import { endpointHandlers } from "./endpoint";
+import { memoryHandlers } from "./memory";
 import { notImplemented, type KindHandlers } from "./notImplemented";
+import { runtimeHandlers } from "./runtime";
 import { AgentCoreStack, type StackScope } from "./stack";
 
 /** The kind registry. Later phases replace entries with real modules. */
 export const HANDLERS: Record<ResourceKind, KindHandlers> = {
-  runtime: notImplemented("runtime"),
-  "runtime-endpoint": notImplemented("runtime-endpoint"),
+  runtime: runtimeHandlers,
+  "runtime-endpoint": endpointHandlers,
   harness: notImplemented("harness"),
-  memory: notImplemented("memory"),
+  memory: memoryHandlers,
   "knowledge-base": notImplemented("knowledge-base"),
   evaluator: notImplemented("evaluator"),
   "online-eval": notImplemented("online-eval"),

@@ -10,6 +10,7 @@ import {
   createDataClient,
   createIamClient,
   createLogsClient,
+  createS3Client,
   createXrayClient,
 } from "./core/factories";
 import { createRootHandler } from "./handlers";
@@ -72,6 +73,7 @@ process.exit(
         createIamClient,
         createLogsClient,
         createXrayClient,
+        createS3Client,
         createApplicationSignalsClient,
         openRuntimeShell: createRuntimeShellOpener(),
         logger: rootLogger.child({ module: "core" }),

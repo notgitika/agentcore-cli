@@ -215,7 +215,7 @@ export class FsProjectManager implements ProjectManager {
 
     const { tree: projectTree, envEntries } = await createProjectTree(
       { templateRenderer: this.templateRenderer, assetSource: this.assetSource },
-      { projectName: input.name },
+      { projectName: input.name, managedBy: input.managedBy },
       { runtime: scaffoldRuntimeInput, importBedrockAgent: input.importBedrockAgent },
     );
 
@@ -249,8 +249,10 @@ export class FsProjectManager implements ProjectManager {
     // A failed step leaves the scaffolded files in place; the error carries the
     // failing command, its directory, and its output.
     if (!input.skipInstall) {
-      yield { type: "step", message: "Installing CDK dependencies with npm" };
-      yield* this.run(NPM_INSTALL, join(destination, "agentcore", "cdk"), npmProgressLine);
+      if (input.managedBy !== "Imperative") {
+        yield { type: "step", message: "Installing CDK dependencies with npm" };
+        yield* this.run(NPM_INSTALL, join(destination, "agentcore", "cdk"), npmProgressLine);
+      }
 
       if (scaffoldRuntimeInput) {
         const appDir = join(destination, "app", scaffoldRuntimeInput.runtimeName);
@@ -1180,7 +1182,8 @@ export class FsProjectManager implements ProjectManager {
 
   private async checkCreateDependencies(input: CreateProjectInput): Promise<void> {
     if (!input.skipInstall) {
-      await this.checkTool("npm", NODE_INSTALL_HINT);
+      // Only the CDK app needs npm; an Imperative project has none.
+      if (input.managedBy !== "Imperative") await this.checkTool("npm", NODE_INSTALL_HINT);
       if (input.scaffoldRuntimeInput?.language === "Python") {
         await this.checkTool("uv", UV_INSTALL_HINT);
       }

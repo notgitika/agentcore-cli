@@ -39,6 +39,7 @@ function stubClients(dataset: Record<string, unknown>): AwsClients {
     logs: () => client,
     xray: () => client,
     applicationSignals: () => client,
+    s3: () => client,
   };
 }
 

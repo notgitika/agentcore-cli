@@ -14,17 +14,23 @@ import {
   testIO,
 } from "../../testing";
 import { InputValidationError, SourceResolutionError } from "../../errors";
+import { DEFAULT_GLOBAL_CONFIG, type GlobalConfig } from "../../globalConfig";
 import { credentialEnvVarName } from "../../projectSchemas/credential";
 
 async function run(
   args: string[],
-  opts?: { core?: TestCoreClient; stdin?: string; platform?: NodeJS.Platform },
+  opts?: {
+    core?: TestCoreClient;
+    stdin?: string;
+    platform?: NodeJS.Platform;
+    globalConfig?: GlobalConfig;
+  },
 ) {
   const io = testIO({ stdin: opts?.stdin });
   const core = opts?.core ?? new TestCoreClient();
   const root = createRootHandler(core, {
     io: io.io,
-    globalConfigAccessor: new TestGlobalConfigAccessor(),
+    globalConfigAccessor: new TestGlobalConfigAccessor({ initialConfigData: opts?.globalConfig }),
     logger: createSilentLogger(),
     platform: opts?.platform,
   });
@@ -123,6 +129,82 @@ describe("project create", () => {
       },
       { command: ["git", "init"], cwd: projectRoot },
     ]);
+  });
+
+  test("--managed-by Imperative is refused while imperative deploy is off", async () => {
+    const { path: directory, cleanup } = await inTempDirectory();
+    cleanups.push(cleanup);
+    const refused = run(
+      ["create", "--name", "Orders", "--template", "empty", "--managed-by", "Imperative"],
+      { globalConfig: { ...DEFAULT_GLOBAL_CONFIG, "imperative-deploy": false } },
+    );
+    await expect(refused).rejects.toThrow(InputValidationError);
+    await expect(refused).rejects.toThrow(/agentcore config imperative-deploy true/);
+    expect(await readdir(directory)).toEqual([]);
+  });
+
+  test("an Imperative project has managedBy Imperative, no agentcore/cdk directory, and runs no npm command", async () => {
+    const { path: directory, cleanup } = await inTempDirectory();
+    cleanups.push(cleanup);
+    const { core } = await run(
+      ["create", "--name", "Orders", "--template", "empty", "--managed-by", "Imperative"],
+      { globalConfig: { ...DEFAULT_GLOBAL_CONFIG, "imperative-deploy": true } },
+    );
+
+    const projectRoot = join(directory, "Orders");
+    const spec = await Bun.file(join(projectRoot, "agentcore", "agentcore.json")).json();
+    expect(spec.managedBy).toBe("Imperative");
+    expect(existsSync(join(projectRoot, "agentcore", "cdk"))).toBe(false);
+    expect(existsSync(join(projectRoot, "agentcore", "aws-targets.json"))).toBe(true);
+    expect(core.projectCommands).toEqual([{ command: ["git", "init"], cwd: projectRoot }]);
+  });
+
+  test("an Imperative runtime project still installs the runtime's Python dependencies", async () => {
+    const { path: directory, cleanup } = await inTempDirectory();
+    cleanups.push(cleanup);
+    const { core } = await run(
+      [
+        "create",
+        "--name",
+        "Orders",
+        "--template",
+        "agent-python-strands",
+        "--managed-by",
+        "Imperative",
+        "--skip-git",
+      ],
+      { globalConfig: { ...DEFAULT_GLOBAL_CONFIG, "imperative-deploy": true } },
+    );
+    const projectRoot = join(directory, "Orders");
+    expect(existsSync(join(projectRoot, "agentcore", "cdk"))).toBe(false);
+    const commands = core.projectCommands.map((c) => c.command[0]);
+    expect(commands).not.toContain("npm");
+    expect(commands).toContain("uv");
+  });
+
+  test("a CDK project is unchanged: managedBy defaults to CDK and the CDK app is installed", async () => {
+    const { path: directory, cleanup } = await inTempDirectory();
+    cleanups.push(cleanup);
+    const { core } = await run(["create", "--name", "Orders", "--template", "empty"]);
+
+    const projectRoot = join(directory, "Orders");
+    const spec = await Bun.file(join(projectRoot, "agentcore", "agentcore.json")).json();
+    expect(spec.managedBy).toBe("CDK");
+    expect(existsSync(join(projectRoot, "agentcore", "cdk"))).toBe(true);
+    expect(core.projectCommands).toEqual([
+      {
+        command: ["npm", "install", "--loglevel=http"],
+        cwd: join(projectRoot, "agentcore", "cdk"),
+      },
+      { command: ["git", "init"], cwd: projectRoot },
+    ]);
+  });
+
+  test("--managed-by rejects an unknown backend", async () => {
+    cleanups.push((await inTempDirectory()).cleanup);
+    await expect(
+      run(["create", "--name", "Orders", "--template", "empty", "--managed-by", "Terraform"]),
+    ).rejects.toThrow();
   });
 
   test("the empty template scaffolds a project with no runtime and no harness", async () => {

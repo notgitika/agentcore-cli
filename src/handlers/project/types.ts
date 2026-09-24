@@ -5,7 +5,7 @@ import type { PaymentConnectorSchema, PaymentManagerSchema } from "../../project
 import type { ConfigBundleSchema } from "../../projectSchemas/config-bundle";
 import { MemorySchema } from "../../projectSchemas/memory";
 import type { EvaluatorSchema, EvaluationLevel } from "../../projectSchemas/evaluator";
-import type { ProjectSpecSchema } from "../../projectSchemas/project";
+import type { ManagedBy, ProjectSpecSchema } from "../../projectSchemas/project";
 import z from "zod";
 import type { ImportBedrockAgentInput, RuntimeResourceConfig } from "./add/runtime/types";
 import type { OnlineEvalConfigSchema } from "../../projectSchemas/online-eval-config";
@@ -24,6 +24,8 @@ type CreateProjectInputBase = {
   skipInstall?: boolean;
   /** Skip initializing a git repository. */
   skipGit?: boolean;
+  /** Which backend deploys the project; scaffolds the CDK app only for "CDK". Default "CDK". */
+  managedBy?: ManagedBy;
 };
 
 /** Set of arguments needed to scaffold a managed code-based evaluator. */

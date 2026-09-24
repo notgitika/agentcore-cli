@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import z from "zod";
-import { createHandler, flag, PlatformKey, type Middleware } from "../../../router";
+import {
+  createHandler,
+  flag,
+  GlobalConfigAccessorKey,
+  PlatformKey,
+  type Middleware,
+} from "../../../router";
 import { assertProjectPathFits } from "./pathLimit";
 import { SourceResolver, type AppIO } from "../../../io";
 import { runWithProgress } from "../../../tui/progress";
@@ -17,7 +23,7 @@ import {
   type ProjectManager,
   type ScaffoldHarnessInput,
 } from "../types";
-import { ProjectNameSchema } from "../../../projectSchemas/project";
+import { ManagedBySchema, ProjectNameSchema } from "../../../projectSchemas/project";
 import { DEFAULT_TARGET_NAME } from "../../../projectSchemas/aws-targets";
 import {
   HarnessModelProviderSchema,
@@ -78,10 +84,25 @@ export const createCreateProjectHandler = (config: CreateProjectHandlerConfig) =
         z.boolean().default(false),
       ),
       flag("skip-git", "skip initializing a git repository", z.boolean().default(false)),
+      flag(
+        "managed-by",
+        "how the project is deployed: CDK (CloudFormation via the AgentCore CDK app) or Imperative (direct AWS API calls; requires 'agentcore config imperative-deploy true')",
+        ManagedBySchema,
+      ),
     ],
     handle: async (ctx, flags) => {
       const name = flags["name"];
-      if (!flags["skip-install"]) {
+      const managedBy = flags["managed-by"];
+      if (managedBy === "Imperative") {
+        const globalConfig = await ctx.require(GlobalConfigAccessorKey).get();
+        if (!globalConfig["imperative-deploy"]) {
+          throw new InputValidationError(
+            "--managed-by Imperative requires imperative deploy to be enabled. Run 'agentcore config imperative-deploy true' first.",
+          );
+        }
+      }
+      // The Windows path limit only bites the CDK app's node_modules.
+      if (!flags["skip-install"] && managedBy === "CDK") {
         assertProjectPathFits(name, ctx.require(PlatformKey), {
           alternative: "pass --skip-install and install the CDK dependencies yourself",
         });
@@ -111,6 +132,7 @@ export const createCreateProjectHandler = (config: CreateProjectHandlerConfig) =
         name,
         skipInstall: flags["skip-install"],
         skipGit: flags["skip-git"],
+        managedBy,
       };
 
       let createInput: CreateProjectInput;

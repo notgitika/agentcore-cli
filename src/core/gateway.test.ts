@@ -219,6 +219,9 @@ function recordingGatewayClient(responses: unknown[]): {
     applicationSignals: () => {
       throw new Error("unexpected Application Signals client");
     },
+    s3: () => {
+      throw new Error("unexpected S3 client");
+    },
   };
   return {
     client: new GatewayClient(clients, globalThis.fetch, createSilentLogger()),

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { NotImplementedError, ProjectStateError } from "../../../errors";
 import type { DeployResult, Project, ProjectEvent } from "../../../handlers/project/types";
@@ -10,8 +10,11 @@ import { createSilentLogger, inTempDirectory, TestIdentityClient } from "../../.
 import type { AwsClients } from "../../types";
 import { ImperativeBackend, type ImperativeBackendConfig } from "./imperative";
 import type { KindHandlers } from "./imperative/agentcore/notImplemented";
+import type { CodeArtifact } from "./imperative/artifacts";
+import type { CodeZipPackager } from "./imperative/packaging/python";
 import { Status } from "./imperative/plan/plan";
 import { readImperativeState } from "./imperative/state";
+import { fakeClient, sdkError, type FakeClient } from "./imperative/testing";
 import { DEPLOYED_STATE_RELATIVE_PATH, readDeployedState } from "./shared/deployedState";
 
 const target: AwsDeploymentTarget = { name: "dev", account: "111122223333", region: "us-east-1" };
@@ -313,12 +316,218 @@ describe("ImperativeBackend.deploy", () => {
   });
 });
 
+const codeZipRuntime = (name: string) => ({
+  name,
+  build: "CodeZip",
+  entrypoint: "main.py",
+  codeLocation: `app/${name}`,
+  runtimeVersion: "PYTHON_3_13",
+});
+
+type CodeZipHarness = Harness & {
+  packaged: string[];
+  s3: FakeClient;
+  seen: Map<string, CodeArtifact | undefined>;
+};
+
+/**
+ * A harness whose packager writes a real zip (uploadArtifact reads it from disk),
+ * whose S3 client is a fake, and whose runtime handler records the artifact the
+ * stack handed it. `order` interleaves packaging, provisioning, upload and create.
+ */
+function codeZipHarness(
+  order: string[],
+  options: {
+    packager?: CodeZipPackager;
+    s3?: Parameters<typeof fakeClient>[0];
+  } = {},
+): CodeZipHarness {
+  const packaged: string[] = [];
+  const seen = new Map<string, CodeArtifact | undefined>();
+  const packager: CodeZipPackager =
+    options.packager ??
+    (async ({ codeDir, buildDir, report }) => {
+      order.push("package");
+      packaged.push(codeDir);
+      report?.("Resolved 1 package");
+      await mkdir(buildDir, { recursive: true });
+      const zipPath = join(buildDir, "code.zip");
+      await writeFile(zipPath, "zip");
+      return { zipPath, sizeBytes: 3, sha256: "deadbeef" };
+    });
+  const s3 = fakeClient(
+    options.s3 ?? {
+      HeadBucketCommand: () => ({}),
+      HeadObjectCommand: () => {
+        throw sdkError("NotFound", 404);
+      },
+      PutObjectCommand: () => {
+        order.push("upload");
+        return {};
+      },
+    },
+  );
+  const created = new Set<string>();
+  const runtime: KindHandlers = {
+    create: (stack, resource) => async () => {
+      order.push("create");
+      seen.set(resource.name, stack.artifacts.get(resource.name));
+      created.add(resource.name);
+      stack.record(`runtime:${resource.name}`, { arn: `arn:rt:${resource.name}`, id: "rt-1" });
+    },
+    poll: (_stack, resource) => async () =>
+      created.has(resource.name) ? { status: Status.Successful } : { status: Status.NotStarted },
+    remove: (stack, resource) => async () => {
+      order.push(`remove ${resource.name}`);
+      stack.forget(`runtime:${resource.name}`);
+    },
+    pollGone: (stack, resource) => async () =>
+      stack.outputsOf(`runtime:${resource.name}`)
+        ? { status: Status.NotStarted }
+        : { status: Status.Successful },
+  };
+  const base = harness({
+    clients: { s3: () => s3 } as unknown as AwsClients,
+    packager,
+    handlers: { runtime },
+    supportedKinds: new Set(["runtime"]),
+    // eslint-disable-next-line require-yield
+    provisionCredentials: async function* () {
+      order.push("provision");
+      return {};
+    },
+  });
+  return { ...base, packaged, s3, seen };
+}
+
+async function drainBuild(generator: AsyncGenerator<ProjectEvent, void>): Promise<ProjectEvent[]> {
+  const events: ProjectEvent[] = [];
+  for await (const event of generator) events.push(event);
+  return events;
+}
+
 describe("ImperativeBackend.build", () => {
-  test("is not implemented in phase 1", async () => {
-    const { backend } = harness();
-    const p = await project({ memories: [{ name: "m" }] });
-    const generator = backend.build(p);
-    await expect(generator.next()).rejects.toThrow(NotImplementedError);
+  test("build packages every CodeZip runtime and uploads nothing", async () => {
+    const order: string[] = [];
+    const { backend, packaged, s3 } = codeZipHarness(order);
+    const p = await project({ runtimes: [codeZipRuntime("agent"), codeZipRuntime("helper")] });
+    const events = await drainBuild(backend.build(p));
+
+    expect(packaged).toEqual([join(p.rootPath, "app/agent"), join(p.rootPath, "app/helper")]);
+    for (const name of ["agent", "helper"]) {
+      expect(events).toContainEqual({
+        type: "task-start",
+        id: `package:${name}`,
+        title: `Packaging runtime '${name}'`,
+      });
+      expect(events).toContainEqual({
+        type: "task-output",
+        id: `package:${name}`,
+        line: "Resolved 1 package",
+      });
+      expect(events).toContainEqual({ type: "task-done", id: `package:${name}` });
+    }
+    expect(s3.sent).toEqual([]);
+  });
+
+  test("build refuses an undeployable spec before packaging", async () => {
+    const order: string[] = [];
+    const { backend, packaged } = codeZipHarness(order);
+    const p = await project({
+      runtimes: [{ ...codeZipRuntime("agent"), runtimeVersion: "NODE_22" }],
+    });
+    await expect(drainBuild(backend.build(p))).rejects.toThrow(NotImplementedError);
+    expect(packaged).toEqual([]);
+  });
+});
+
+describe("ImperativeBackend.deploy with CodeZip runtimes", () => {
+  test("deploy packages before provisioning credentials and uploads before the plan runs", async () => {
+    const order: string[] = [];
+    const { backend, s3, seen } = codeZipHarness(order);
+    const p = await project({ runtimes: [codeZipRuntime("agent")] });
+    await drain(backend.deploy(p, deployInput()));
+
+    expect(order).toEqual(["package", "provision", "upload", "create"]);
+    const put = s3.sent.find((c) => c.name === "PutObjectCommand")!.input;
+    expect(put["Key"]).toBe("Shop/dev/agent/deadbeef.zip");
+    expect(put["Bucket"]).toBe("agentcore-cli-111122223333-us-east-1");
+    expect(seen.get("agent")).toEqual({
+      bucket: "agentcore-cli-111122223333-us-east-1",
+      key: "Shop/dev/agent/deadbeef.zip",
+      sha256: "deadbeef",
+      sizeBytes: 3,
+    });
+  });
+
+  test("deploy skips the upload when the object already exists", async () => {
+    const order: string[] = [];
+    const { backend, s3, seen } = codeZipHarness(order, {
+      s3: { HeadBucketCommand: () => ({}), HeadObjectCommand: () => ({}) },
+    });
+    const p = await project({ runtimes: [codeZipRuntime("agent")] });
+    const { events } = await drain(backend.deploy(p, deployInput()));
+
+    expect(s3.sent.map((c) => c.name)).toEqual(["HeadBucketCommand", "HeadObjectCommand"]);
+    expect(events).toContainEqual({
+      type: "output",
+      line: "agent: already present Shop/dev/agent/deadbeef.zip",
+    });
+    expect(seen.get("agent")?.key).toBe("Shop/dev/agent/deadbeef.zip");
+  });
+
+  test("a packaging failure stops the deploy before credentials are provisioned", async () => {
+    const order: string[] = [];
+    const { backend, s3 } = codeZipHarness(order, {
+      packager: async () => {
+        throw new Error("uv failed");
+      },
+    });
+    const p = await project({ runtimes: [codeZipRuntime("agent")] });
+    const events: ProjectEvent[] = [];
+    const generator = backend.deploy(p, deployInput());
+    await expect(
+      (async () => {
+        for await (const event of generator) events.push(event);
+      })(),
+    ).rejects.toThrow("uv failed");
+    expect(events).toContainEqual({
+      type: "task-failed",
+      id: "package:agent",
+      message: "uv failed",
+    });
+    expect(order).not.toContain("provision");
+    expect(s3.sent).toEqual([]);
+  });
+
+  test("a teardown deploy does not package or touch S3", async () => {
+    const order: string[] = [];
+    let confirmed = false;
+    const { backend, json, s3, packaged } = codeZipHarness(order);
+    const p = await project({});
+    await json.write(join(p.rootPath, DEPLOYED_STATE_RELATIVE_PATH), {
+      targets: {
+        dev: {
+          resources: {
+            imperative: { runtime: { agent: { arn: "arn:rt:agent", id: "rt-1", updatedAt: "t" } } },
+          },
+        },
+      },
+    });
+    const { result } = await drain(
+      backend.deploy(p, {
+        target,
+        confirmTeardown: async () => {
+          confirmed = true;
+          return true;
+        },
+      }),
+    );
+    expect(result).toEqual({ outputs: {}, tornDown: true });
+    expect(confirmed).toBe(true);
+    expect(order).toEqual(["provision", "remove agent"]);
+    expect(packaged).toEqual([]);
+    expect(s3.sent).toEqual([]);
   });
 });
 
