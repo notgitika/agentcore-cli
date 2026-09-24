@@ -30,9 +30,16 @@ afterEach(() => rm(root, { recursive: true, force: true }));
 /** A uv stand-in: writes a fake site-packages tree into --target and records the platform. */
 function fakeUv(options: { failOn?: string[]; withOtel?: boolean; output?: string } = {}) {
   const platforms: string[] = [];
+  const exports: string[] = [];
   const run: ProcessRunner = async (command, { cwd, onOutput }) => {
-    expect(command.slice(0, 3)).toEqual(["uv", "pip", "install"]);
     expect(cwd).toBe(codeDir);
+    if (command[1] === "export") {
+      const out = command[command.indexOf("--output-file") + 1]!;
+      exports.push(out);
+      await writeFile(out, "# exported\nstrands-agents==1.0.0\n");
+      return;
+    }
+    expect(command.slice(0, 3)).toEqual(["uv", "pip", "install"]);
     const target = command[command.indexOf("--target") + 1]!;
     const platform = command[command.indexOf("--python-platform") + 1]!;
     platforms.push(platform);
@@ -57,7 +64,7 @@ function fakeUv(options: { failOn?: string[]; withOtel?: boolean; output?: strin
       );
     }
   };
-  return { run, platforms };
+  return { run, platforms, exports };
 }
 
 const entriesOf = async (zipPath: string) =>
@@ -203,6 +210,41 @@ describe("packagePythonCodeZip", () => {
     ).rejects.toThrow(/uv/);
     expect(uv.platforms).toEqual([]);
     expect(existsSync(join(buildDir, "code.zip"))).toBe(false);
+  });
+
+  test("installs the pinned set exported from uv.lock when the project has one", async () => {
+    await writeFile(join(codeDir, "uv.lock"), "version = 1\n");
+    const uv = fakeUv();
+    let installed: string[] = [];
+    const run: ProcessRunner = async (command, options) => {
+      if (command[1] === "pip") installed = command;
+      await uv.run(command, options);
+    };
+    const result = await packagePythonCodeZip({
+      codeDir,
+      runtimeVersion: "PYTHON_3_14",
+      buildDir,
+      run,
+      checkTool: async () => {},
+    });
+    const exported = join(buildDir, "requirements.txt");
+    expect(uv.exports).toEqual([exported]);
+    expect(installed[installed.indexOf("-r") + 1]).toBe(exported);
+    const entries = await entriesOf(result.zipPath);
+    expect(entries).toContain("uv.lock");
+    expect(entries).not.toContain("requirements.txt");
+  });
+
+  test("resolves from pyproject.toml when there is no uv.lock", async () => {
+    const uv = fakeUv();
+    await packagePythonCodeZip({
+      codeDir,
+      runtimeVersion: "PYTHON_3_14",
+      buildDir,
+      run: uv.run,
+      checkTool: async () => {},
+    });
+    expect(uv.exports).toEqual([]);
   });
 
   test("refuses a code directory without pyproject.toml", async () => {

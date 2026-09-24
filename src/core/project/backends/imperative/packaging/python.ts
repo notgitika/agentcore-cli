@@ -88,9 +88,18 @@ if __name__ == '__main__':
 `;
 }
 
-async function installDependencies(
+const uvOutput = (report: (line: string) => void) => (chunk: string) => {
+  for (const line of chunk.split(/\r?\n/)) if (line) report(line);
+};
+
+/**
+ * What `uv pip install -r` reads. A project with a `uv.lock` installs the
+ * pinned set exported from it, so two deploys of unchanged code build the same
+ * zip even after upstream releases; without a lockfile the resolver runs fresh
+ * against pyproject.toml, as the L3 packager always does.
+ */
+async function requirementsFile(
   input: PackageInput,
-  staging: string,
   report: (line: string) => void,
 ): Promise<string> {
   const pyproject = join(input.codeDir, "pyproject.toml");
@@ -99,6 +108,24 @@ async function installDependencies(
       `${input.codeDir} has no pyproject.toml; CodeZip runtimes declare their dependencies there.`,
     );
   }
+  if (!existsSync(join(input.codeDir, "uv.lock"))) return pyproject;
+  // Outside staging/, so the export never ends up in the zip.
+  const exported = join(input.buildDir, "requirements.txt");
+  await mkdir(input.buildDir, { recursive: true });
+  report("Exporting pinned dependencies from uv.lock");
+  await input.run(
+    ["uv", "export", "--no-hashes", "--no-dev", "--no-emit-project", "--output-file", exported],
+    { cwd: input.codeDir, signal: input.signal, onOutput: uvOutput(report) },
+  );
+  return exported;
+}
+
+async function installDependencies(
+  input: PackageInput,
+  staging: string,
+  report: (line: string) => void,
+): Promise<string> {
+  const requirements = await requirementsFile(input, report);
   const pythonVersion = pythonVersionOf(input.runtimeVersion);
   let lastError: ProcessFailedError | undefined;
   for (const platform of PLATFORM_CANDIDATES) {
@@ -112,7 +139,7 @@ async function installDependencies(
           "pip",
           "install",
           "-r",
-          pyproject,
+          requirements,
           "--target",
           staging,
           "--python-version",
@@ -125,9 +152,7 @@ async function installDependencies(
         {
           cwd: input.codeDir,
           signal: input.signal,
-          onOutput: (chunk) => {
-            for (const line of chunk.split(/\r?\n/)) if (line) report(line);
-          },
+          onOutput: uvOutput(report),
         },
       );
       return platform;
