@@ -398,3 +398,21 @@ describe("project custom validation", () => {
     }
   });
 });
+
+describe("managedBy", () => {
+  test("defaults to CDK", () => {
+    expect(ProjectSpecSchema.parse({ name: "example", version: 2 }).managedBy).toBe("CDK");
+  });
+
+  test("accepts Imperative", () => {
+    expect(
+      ProjectSpecSchema.parse({ name: "example", version: 2, managedBy: "Imperative" }).managedBy,
+    ).toBe("Imperative");
+  });
+
+  test("rejects other backends", () => {
+    expect(() =>
+      ProjectSpecSchema.parse({ name: "example", version: 2, managedBy: "Terraform" }),
+    ).toThrow();
+  });
+});
