@@ -11,7 +11,7 @@ import type { AwsDeploymentTarget } from "../../../projectSchemas/aws-targets";
 export type DeployBackendInput = {
   /** Fully resolved account and region selected from aws-targets.json. */
   target: AwsDeploymentTarget;
-  /** Requests approval after synthesis identifies a teardown. */
+  /** Requests approval once the backend determines this deploy is a teardown. */
   confirmTeardown: TeardownConfirmationHandler;
   /** Whether to enable CloudWatch Transaction Search on deploy (global config). */
   transactionSearch?: boolean;
