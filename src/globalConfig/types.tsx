@@ -13,6 +13,7 @@ export type DeepPartial<T> = { [P in keyof T]?: DeepPartial<T[P]> };
  */
 export const globalConfigFileSchema = z.object({
   "imperative-mutation-commands": z.boolean().optional(),
+  "imperative-deploy": z.boolean().optional(),
   telemetry: z
     .object({
       enabled: z.boolean().optional(),

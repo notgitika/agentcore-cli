@@ -8,6 +8,8 @@ import { Spinner } from "../spinner/Spinner.js";
 export type TaskState = "running" | "done" | "failed" | "warning";
 
 export interface Task {
+  /** Set for tasks addressed by id (concurrent plan steps); linear steps have none. */
+  id?: string;
   title: string;
   state: TaskState;
   /** Recent output lines attributed to this task. Only shown while it runs (or after it fails). */

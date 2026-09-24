@@ -7,6 +7,7 @@ import { FsReadWriteJson } from "../../../../io";
 import { createSilentLogger } from "../../../../testing";
 import {
   DEPLOYED_STATE_RELATIVE_PATH,
+  hasImperativeResources,
   readDeployedState,
   removeTargetState,
   stackReferenceOf,
@@ -188,5 +189,18 @@ describe("removeTargetState", () => {
     expect(await readRaw(root)).toEqual({
       targets: { prod: { stackArn: "arn:stack:prod" } },
     });
+  });
+});
+
+describe("hasImperativeResources", () => {
+  test("hasImperativeResources is false for a CDK-only target and true once a kind has an entry", () => {
+    expect(hasImperativeResources(undefined)).toBe(false);
+    expect(hasImperativeResources({ stackArn: "arn:aws:cloudformation:..." })).toBe(false);
+    expect(hasImperativeResources({ resources: { imperative: { runtime: {} } } })).toBe(false);
+    expect(
+      hasImperativeResources({
+        resources: { imperative: { runtime: { a: { arn: "arn", updatedAt: "t" } } } },
+      }),
+    ).toBe(true);
   });
 });

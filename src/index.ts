@@ -75,6 +75,7 @@ process.exit(
         createApplicationSignalsClient,
         openRuntimeShell: createRuntimeShellOpener(),
         logger: rootLogger.child({ module: "core" }),
+        imperativeDeploy: globalConfig["imperative-deploy"],
       });
 
       // Pass it to the root handler, along with the process's standard streams as

@@ -29,7 +29,9 @@ import type {
 } from "./types";
 import type { Logger } from "../logging";
 import type { ProjectManager } from "../handlers/project/types";
-import { FsProjectManager } from "./project";
+import { FsProjectManager, ImperativeBackend } from "./project";
+import { createDefaultCredentialResolver } from "./project/backends/imperative/credentials";
+import type { TransactionSearchEnabler } from "./project/backends/shared/types";
 import { BedrockAgentImporter, type CoreBedrockAgentImporter } from "./project/bedrockAgentImport";
 
 export type {
@@ -59,6 +61,8 @@ type CoreClientConfig = {
   now?: () => number;
   bedrockAgentImporter?: CoreBedrockAgentImporter;
   openRuntimeShell?: OpenRuntimeShell;
+  /** Registers the imperative deploy backend (global config `imperative-deploy`). */
+  imperativeDeploy?: boolean;
 };
 
 // CoreClient is the single entry point to the Bedrock AgentCore APIs. It owns the
@@ -130,15 +134,27 @@ export class CoreClient implements AwsClients {
 
     this.observability = new ObservabilityClient(this);
 
+    const enableTransactionSearch: TransactionSearchEnabler = (target, credentials) =>
+      this.observability.enableTransactionSearch(
+        { region: target.region, credentials },
+        target.account,
+      );
     this.projectManager = new FsProjectManager({
       logger: this.logger.child({ module: "projectManager" }),
       createCloudFormationClient: config.createCloudFormationClient,
       identity: this.identity,
-      enableTransactionSearch: (target, credentials) =>
-        this.observability.enableTransactionSearch(
-          { region: target.region, credentials },
-          target.account,
-        ),
+      enableTransactionSearch,
+      ...(config.imperativeDeploy && {
+        backends: {
+          Imperative: new ImperativeBackend({
+            logger: this.logger.child({ module: "imperativeBackend" }),
+            clients: this,
+            identity: this.identity,
+            resolveCredentials: createDefaultCredentialResolver(),
+            enableTransactionSearch,
+          }),
+        },
+      }),
     });
     this.bedrockAgentImporter = config.bedrockAgentImporter ?? new BedrockAgentImporter();
   }

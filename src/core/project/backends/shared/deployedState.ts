@@ -45,6 +45,8 @@ const ResourceStateSchema = z
     // here. New deploys record the stack ARN instead. Keep this
     // field so projects can be correctly inspected after upgrading.
     stackName: z.string().optional(),
+    /** Resources the imperative backend created, keyed by kind then name. */
+    imperative: z.record(z.string(), z.unknown()).optional(),
   })
   .passthrough();
 
@@ -74,6 +76,18 @@ export type TargetState = z.infer<typeof TargetStateSchema>;
  */
 export function stackReferenceOf(state: TargetState | undefined): string | undefined {
   return state?.stackArn ?? state?.resources?.stackName;
+}
+
+/**
+ * True when the imperative backend recorded anything for this target. The CDK
+ * backend refuses to deploy over it: the stack would create a second copy of
+ * every resource and orphan the imperative ones (design §4.5 "Switching managedBy").
+ */
+export function hasImperativeResources(state: TargetState | undefined): boolean {
+  const imperative = state?.resources?.imperative ?? {};
+  return Object.values(imperative).some(
+    (byName) => typeof byName === "object" && byName !== null && Object.keys(byName).length > 0,
+  );
 }
 
 function statePathFor(projectRoot: string): string {

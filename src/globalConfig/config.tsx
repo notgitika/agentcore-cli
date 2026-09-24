@@ -5,6 +5,7 @@ import type { DeepPartial, GlobalConfig } from "./types";
  */
 export const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
   "imperative-mutation-commands": false,
+  "imperative-deploy": false,
   telemetry: {
     enabled: true,
     audit: false,
@@ -24,6 +25,7 @@ export function applyOverrides(
   return {
     "imperative-mutation-commands":
       overrides["imperative-mutation-commands"] ?? defaults["imperative-mutation-commands"],
+    "imperative-deploy": overrides["imperative-deploy"] ?? defaults["imperative-deploy"],
     telemetry: {
       enabled: overrides.telemetry?.enabled ?? defaults.telemetry.enabled,
       audit: overrides.telemetry?.audit ?? defaults.telemetry.audit,

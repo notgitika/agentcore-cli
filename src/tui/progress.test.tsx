@@ -70,6 +70,25 @@ describe("runWithProgress plain path (no TTY)", () => {
 
     expect(io.stderr()).toBe("Step one");
   });
+
+  test("prints task starts and failures as plain lines", async () => {
+    const io = testIO();
+    const result = await runWithProgress(
+      scripted(
+        [
+          { type: "task-start", id: "a", title: "memory:m" },
+          { type: "task-output", id: "a", line: "CREATING" },
+          { type: "task-done", id: "a" },
+          { type: "task-start", id: "b", title: "runtime:r" },
+          { type: "task-failed", id: "b", message: "CREATE_FAILED" },
+        ],
+        { result: 1 },
+      ),
+      { io: io.io },
+    );
+    expect(result).toBe(1);
+    expect(io.stderr()).toBe("memory:m\nruntime:r\nFailed: runtime:r: CREATE_FAILED");
+  });
 });
 
 describe("runWithProgress interactive path", () => {
@@ -238,6 +257,78 @@ describe("applyProgressEvent / settleProgress", () => {
     ]);
     expect(settleProgress(tasks, "done")).toEqual([{ title: "deploy", state: "done", tail: [] }]);
     expect(settleProgress([], "done")).toEqual([]);
+  });
+
+  test("identified tasks run alongside the linear step", () => {
+    let tasks = applyProgressEvent([], { type: "step", message: "Deploying 2 resources" });
+    tasks = applyProgressEvent(tasks, { type: "task-start", id: "memory:m", title: "memory:m" });
+    tasks = applyProgressEvent(tasks, { type: "task-start", id: "runtime:a", title: "runtime:a" });
+    tasks = applyProgressEvent(tasks, { type: "task-output", id: "runtime:a", line: "CREATING" });
+    tasks = applyProgressEvent(tasks, { type: "output", line: "for the step" });
+    tasks = applyProgressEvent(tasks, { type: "task-done", id: "memory:m" });
+    expect(tasks).toEqual([
+      { title: "Deploying 2 resources", state: "running", tail: ["for the step"] },
+      { id: "memory:m", title: "memory:m", state: "done", tail: [] },
+      { id: "runtime:a", title: "runtime:a", state: "running", tail: ["CREATING"] },
+    ]);
+  });
+
+  test("a failed task keeps its tail and appends the failure message", () => {
+    let tasks = applyProgressEvent([], { type: "task-start", id: "t", title: "runtime:a" });
+    tasks = applyProgressEvent(tasks, { type: "task-output", id: "t", line: "CREATING" });
+    tasks = applyProgressEvent(tasks, { type: "task-failed", id: "t", message: "CREATE_FAILED" });
+    expect(tasks).toEqual([
+      { id: "t", title: "runtime:a", state: "failed", tail: ["CREATING", "CREATE_FAILED"] },
+    ]);
+  });
+
+  test("a later step settles the linear task but not identified tasks", () => {
+    let tasks = applyProgressEvent([], { type: "step", message: "one" });
+    tasks = applyProgressEvent(tasks, { type: "task-start", id: "t", title: "t" });
+    tasks = applyProgressEvent(tasks, { type: "step", message: "two" });
+    expect(tasks.map((task) => [task.title, task.state])).toEqual([
+      ["one", "done"],
+      ["t", "running"],
+      ["two", "running"],
+    ]);
+  });
+
+  test("a reused id addresses the latest task, never a settled one", () => {
+    let tasks = applyProgressEvent([], { type: "task-start", id: "t", title: "apply" });
+    tasks = applyProgressEvent(tasks, { type: "task-done", id: "t" });
+    tasks = applyProgressEvent(tasks, { type: "task-start", id: "t", title: "retry" });
+    tasks = applyProgressEvent(tasks, { type: "task-output", id: "t", line: "CREATING" });
+    expect(tasks.map((task) => [task.title, task.state, task.tail])).toEqual([
+      ["apply", "done", []],
+      ["retry", "running", ["CREATING"]],
+    ]);
+    const failed = applyProgressEvent(tasks, { type: "task-failed", id: "t", message: "boom" });
+    expect(failed.map((task) => [task.title, task.state])).toEqual([
+      ["apply", "done"],
+      ["retry", "failed"],
+    ]);
+    const done = applyProgressEvent(tasks, { type: "task-done", id: "t" });
+    expect(done.map((task) => [task.title, task.state])).toEqual([
+      ["apply", "done"],
+      ["retry", "done"],
+    ]);
+    // The first task is settled and must not be touched by the later events.
+    expect(failed[0]).toBe(tasks[0]!);
+  });
+
+  test("events for an unknown task id are ignored", () => {
+    expect(applyProgressEvent([], { type: "task-done", id: "nope" })).toEqual([]);
+    expect(applyProgressEvent([], { type: "task-output", id: "nope", line: "x" })).toEqual([]);
+  });
+
+  test("settling marks every running task", () => {
+    let tasks = applyProgressEvent([], { type: "task-start", id: "a", title: "a" });
+    tasks = applyProgressEvent(tasks, { type: "task-start", id: "b", title: "b" });
+    tasks = applyProgressEvent(tasks, { type: "task-output", id: "b", line: "boom" });
+    expect(settleProgress(tasks, "failed").map((task) => [task.state, task.tail])).toEqual([
+      ["failed", []],
+      ["failed", ["boom"]],
+    ]);
   });
 });
 

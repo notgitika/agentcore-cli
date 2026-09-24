@@ -11,7 +11,7 @@ import {
 } from "../../errors/errors";
 import type { AwsDeploymentTarget } from "../../projectSchemas/aws-targets";
 import { credentialEnvVarName } from "../../projectSchemas/credential";
-import { ProjectSpecSchema } from "../../projectSchemas/project";
+import { ProjectSpecSchema, type ManagedBy } from "../../projectSchemas/project";
 import { ENV_LOCAL_RELATIVE_PATH } from "./envLocal";
 import { FsProjectManager } from "./manager";
 import { resolveRuntimeTemplateShortcut } from "../../handlers/project/shortcuts";
@@ -55,7 +55,7 @@ afterEach(async () => {
 });
 
 // A manager whose runner records commands instead of spawning them.
-function manager(): {
+function manager(overrides: { backends?: Partial<Record<ManagedBy, ProjectBackend>> } = {}): {
   manager: FsProjectManager;
   commands: { command: string[]; cwd: string }[];
   checkedTools: string[];
@@ -74,6 +74,7 @@ function manager(): {
       checkTool: async (tool) => {
         checkedTools.push(tool);
       },
+      ...overrides,
     }),
     commands,
     checkedTools,
@@ -612,6 +613,46 @@ describe("FsProjectManager.build", () => {
     expect(commands).toEqual([]);
   });
 
+  test("tells the user how to enable imperative deploy when the flag is off", async () => {
+    const directory = await inTempDirectory();
+    const { manager: subject } = manager();
+    const project = await scaffolded(subject, directory);
+    const imperative = { ...project, spec: { ...project.spec, managedBy: "Imperative" as const } };
+    await expect(drain(subject.build(imperative))).rejects.toThrow(
+      /declares managedBy "Imperative", but imperative deploy is not enabled.*agentcore config imperative-deploy true.*managedBy to "CDK"/s,
+    );
+  });
+
+  test("routes an Imperative project to the injected backend while CDK stays available", async () => {
+    const directory = await inTempDirectory();
+    const calls: string[] = [];
+    const fake: ProjectBackend = {
+      // eslint-disable-next-line require-yield -- a fake that only records the call
+      build: async function* () {
+        calls.push("build");
+      },
+      // eslint-disable-next-line require-yield -- a fake that only records the call
+      deploy: async function* () {
+        calls.push("deploy");
+        return { outputs: {} };
+      },
+      resolveDeployedResources: async () => [],
+      resolveProjectResources: async () => [],
+    };
+    const { manager: subject, commands } = manager({ backends: { Imperative: fake } });
+    const project = await scaffolded(subject, directory);
+    const imperative = { ...project, spec: { ...project.spec, managedBy: "Imperative" as const } };
+    commands.length = 0;
+    await drain(subject.build(imperative));
+    expect(calls).toEqual(["build"]);
+    expect(commands).toEqual([]);
+    // The CDK project still builds through the default backend (it runs the synth runner).
+    await drain(subject.build(project));
+    expect(commands.map(({ command }) => command.slice(0, 5))).toEqual([
+      ["npm", "run", "cdk", "--", "synth"],
+    ]);
+  });
+
   test("propagates a synthesis failure", async () => {
     const directory = await inTempDirectory();
     const { manager: subject } = manager();
@@ -802,6 +843,19 @@ describe("FsProjectManager.deploy", () => {
   const CREATED_MESSAGE =
     `Created default deployment target: account ${STS_ACCOUNT}, ` +
     `region us-east-2 (${join("agentcore", "aws-targets.json")})`;
+
+  test("resolves the backend before synthesizing a default target", async () => {
+    const root = await inTempDirectory();
+    const subject = deployManager();
+    const base = await projectWithTargets(root);
+    const imperative = { ...base, spec: { ...base.spec, managedBy: "Imperative" as const } };
+
+    await expect(deploy(subject.manager, imperative, "default")).rejects.toThrow(
+      /imperative deploy is not enabled/,
+    );
+    expect(subject.accountCalls).toEqual([]);
+    expect(await Bun.file(targetsFile(root)).exists()).toBe(false);
+  });
 
   test.each([
     ["a missing file", undefined],
