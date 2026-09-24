@@ -169,6 +169,7 @@ export class ImperativeBackend implements ProjectBackend {
         targetName: target.name,
         account: target.account,
         region: target.region,
+        rootPath: project.rootPath,
       },
       clients: this.clients,
       credentials,

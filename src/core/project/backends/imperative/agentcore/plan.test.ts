@@ -29,7 +29,13 @@ const noop: KindHandlers = {
 function input(spec: Record<string, unknown>, recorded: ImperativeState = {}): PlanInput {
   return {
     project: project(spec),
-    scope: { projectName: "Shop", targetName: "dev", account: "111122223333", region: "us-east-1" },
+    scope: {
+      projectName: "Shop",
+      targetName: "dev",
+      account: "111122223333",
+      region: "us-east-1",
+      rootPath: "/project",
+    },
     clients: {} as AwsClients,
     credentials: { accessKeyId: "a", secretAccessKey: "b" },
     logger: createSilentLogger(),

@@ -10,6 +10,7 @@ const scope = {
   targetName: "dev",
   account: "111122223333",
   region: "us-east-1",
+  rootPath: "/project",
 };
 
 describe("AgentCoreStack", () => {

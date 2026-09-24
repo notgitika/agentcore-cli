@@ -1,10 +1,16 @@
 import type { Logger } from "../../../../../logging";
+import type { CodeArtifact } from "../artifacts";
 import type { AwsClients, AwsCredentials, ClientConfig } from "../../../../types";
 import { recordedResources, stateKey, stepOf } from "../inventory";
 import { ownershipTags, physicalName, type NamingScope, type ResourceKind } from "../naming";
 import type { ImperativeState } from "../state";
 
-export type StackScope = NamingScope & { account: string; region: string };
+export type StackScope = NamingScope & {
+  account: string;
+  region: string;
+  /** Absolute project root; kinds resolve codeLocation-relative files (additionalPolicies) against it. */
+  rootPath: string;
+};
 
 export type ResourceOutputs = { arn?: string; id?: string };
 
@@ -16,6 +22,8 @@ export type ResourceOutputs = { arn?: string; id?: string };
  */
 export class AgentCoreStack {
   private readonly data = new Map<string, ResourceOutputs>();
+  /** Uploaded CodeZip per runtime name, staged by the backend before the plan runs. */
+  readonly artifacts = new Map<string, CodeArtifact>();
 
   constructor(
     readonly scope: StackScope,
