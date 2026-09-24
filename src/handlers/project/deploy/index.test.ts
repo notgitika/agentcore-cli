@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { UserCancellationError } from "../../../errors/errors";
 import { createRootHandler } from "../../index";
@@ -141,6 +141,41 @@ async function emptyProjectSpec(projectRoot: string): Promise<void> {
     JSON.stringify({ name: "orders", version: 2 }),
   );
 }
+
+async function setManagedBy(projectRoot: string, managedBy: "CDK" | "Imperative") {
+  const path = join(projectRoot, "agentcore", "agentcore.json");
+  const spec = JSON.parse(await readFile(path, "utf8"));
+  await writeFile(path, JSON.stringify({ ...spec, managedBy }, null, 2));
+}
+
+describe("project deploy handler with managedBy Imperative", () => {
+  test("an Imperative project without the flag explains how to enable it", async () => {
+    const projectRoot = await inProjectWithTargets();
+    await setManagedBy(projectRoot, "Imperative");
+    const { run } = testDeployCommand({ outputs: {} });
+    await expect(run(["--target", "staging"])).rejects.toThrow(
+      /imperative deploy is not enabled.*agentcore config imperative-deploy true/s,
+    );
+  });
+
+  test("an Imperative project with the backend registered deploys through it", async () => {
+    const projectRoot = await inProjectWithTargets();
+    await setManagedBy(projectRoot, "Imperative");
+    const fake = fakeBackend({ outputs: { "memory:m.arn": "arn:m" } });
+    const core = new TestCoreClient({ backends: { Imperative: fake.backend } });
+    const io = testIO();
+    const root = createRootHandler(core, {
+      io: io.io,
+      globalConfigAccessor: new TestGlobalConfigAccessor(),
+      logger: createSilentLogger(),
+    });
+    await root.route(["node", "agentcore", "project", "deploy", "--target", "staging"]);
+    expect(fake.calls.length).toBe(1);
+    expect(fake.calls[0]!.project.spec.managedBy).toBe("Imperative");
+    // Outputs render only with --json; the progress stream reports the deploy.
+    expect(io.stderr()).toContain("Deployed project 'orders' to target 'staging'");
+  });
+});
 
 describe("project deploy handler", () => {
   test("defaults to the default target and keeps progress off stdout", async () => {

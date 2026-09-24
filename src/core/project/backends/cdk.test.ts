@@ -574,6 +574,32 @@ describe("CdkBackend.deploy", () => {
     expect(state.targets.default?.stackArn).toBeUndefined();
   });
 
+  test("refuses to deploy over a target the imperative backend populated", async () => {
+    const input = await project();
+    await writeAssembly(input, [TARGET.name]);
+    await json.write(join(input.rootPath, DEPLOYED_STATE_RELATIVE_PATH), {
+      targets: {
+        [TARGET.name]: {
+          resources: { imperative: { memory: { m: { arn: "arn:m", updatedAt: "t" } } } },
+        },
+      },
+    });
+    let provisioned = false;
+    // eslint-disable-next-line require-yield -- a spy that should never run (deploy fails first)
+    const provisionCredentials: CredentialProvisioner = async function* () {
+      provisioned = true;
+      return {};
+    };
+    const subject = harness({ provisionCredentials });
+
+    await expect(collectDeploy(subject.backend.deploy(input, deployInput()))).rejects.toThrow(
+      /deployed by the imperative backend.*managedBy back to "Imperative"/s,
+    );
+    // Nothing synthesized, nothing provisioned.
+    expect(subject.commands).toEqual([]);
+    expect(provisioned).toBe(false);
+  });
+
   test("checks local CDK prerequisites before provisioning credentials", async () => {
     const input = await project(false); // no agentcore/cdk/node_modules
     let provisioned = false;

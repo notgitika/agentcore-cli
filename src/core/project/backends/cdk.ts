@@ -47,6 +47,7 @@ import {
 } from "./cdk/assembly";
 import {
   readDeployedState,
+  hasImperativeResources,
   removeTargetState,
   stackReferenceOf,
   updateTargetState,
@@ -269,9 +270,18 @@ export class CdkBackend implements ProjectBackend {
     // Read before provisioning rewrites the credentials map: it is the only record
     // of what this target provisioned, so it is the only way to find a provider whose
     // credential has since left the spec.
-    const recorded =
-      (await readDeployedState(this.json, project.rootPath)).targets[target.name]?.resources
-        ?.credentials ?? {};
+    const targetState = (await readDeployedState(this.json, project.rootPath)).targets[target.name];
+    // The imperative backend names and tags its resources its own way; a stack
+    // would create a second copy of each and orphan the originals (design §4.5).
+    if (hasImperativeResources(targetState)) {
+      throw new ProjectStateError(
+        `Target '${target.name}' of project '${project.name}' has resources deployed by the ` +
+          `imperative backend. The CDK backend does not adopt or delete them. To migrate, set ` +
+          `managedBy back to "Imperative", remove the resources from agentcore.json and deploy ` +
+          `once (this deletes them), then set managedBy to "CDK" and deploy again.`,
+      );
+    }
+    const recorded = targetState?.resources?.credentials ?? {};
     const orphaned = orphanedCredentials(recorded, project.spec.credentials);
 
     // Credential providers aren't stack resources; the synthesized app reads their

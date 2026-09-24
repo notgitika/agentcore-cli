@@ -23,3 +23,33 @@ describe("backends/shared boundary", () => {
     });
   }
 });
+
+function walk(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return walk(path);
+    return entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts") ? [path] : [];
+  });
+}
+
+// The imperative backend must never pull the CDK Toolkit into its import graph:
+// that is the whole point of having it (design §1).
+describe("backends/imperative boundary", () => {
+  const sources = [
+    ...walk(join(import.meta.dir, "..", "imperative")),
+    join(import.meta.dir, "..", "imperative.ts"),
+  ];
+
+  test("has the modules this test protects", () => {
+    expect(sources.length).toBeGreaterThan(5);
+  });
+
+  for (const file of sources) {
+    test(`${file.slice(file.indexOf("backends"))} does not import CDK code`, () => {
+      const text = readFileSync(file, "utf8");
+      expect(text).not.toMatch(/from "[./]*\/cdk[/"]/);
+      expect(text).not.toMatch(/@aws-cdk\//);
+      expect(text).not.toMatch(/aws-cdk-lib/);
+    });
+  }
+});

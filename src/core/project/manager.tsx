@@ -166,7 +166,9 @@ export class FsProjectManager implements ProjectManager {
     this.runner = config.runner ?? runProcess;
     this.checkTool = config.checkTool ?? requireTool;
     this.json = config.json ?? new FsReadWriteJson({ logger: config.logger });
-    this.backends = config.backends ?? {
+    // The CDK backend is always registered; callers add or replace entries (the
+    // CoreClient adds Imperative behind its flag, tests inject fakes).
+    this.backends = {
       CDK: new CdkBackend({
         logger: config.logger,
         createCloudFormationClient: config.createCloudFormationClient,
@@ -176,6 +178,7 @@ export class FsProjectManager implements ProjectManager {
         checkTool: config.checkTool,
         json: config.json,
       }),
+      ...config.backends,
     };
     this.templateRenderer = config.templateRenderer ?? new HandlebarsTemplateRenderer();
     this.resolveAccount = config.resolveAccount ?? resolveAwsAccount;
@@ -1160,12 +1163,17 @@ export class FsProjectManager implements ProjectManager {
 
   private backendFor(project: Project): ProjectBackend {
     const backend = this.backends[project.spec.managedBy];
-    if (!backend) {
+    if (backend) return backend;
+    if (project.spec.managedBy === "Imperative") {
       throw new ProjectStateError(
-        `project '${project.name}' declares an unsupported backend: ${project.spec.managedBy}`,
+        `Project '${project.name}' declares managedBy "Imperative", but imperative deploy is not ` +
+          `enabled. Run 'agentcore config imperative-deploy true' to enable it, or set managedBy ` +
+          `to "CDK" in agentcore/agentcore.json.`,
       );
     }
-    return backend;
+    throw new ProjectStateError(
+      `project '${project.name}' declares an unsupported backend: ${project.spec.managedBy}`,
+    );
   }
 
   private async checkCreateDependencies(input: CreateProjectInput): Promise<void> {
