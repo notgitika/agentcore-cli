@@ -4,6 +4,7 @@ import type { IAMClient } from "@aws-sdk/client-iam";
 import type { CloudWatchLogsClient } from "@aws-sdk/client-cloudwatch-logs";
 import type { CloudFormationClient } from "@aws-sdk/client-cloudformation";
 import type { XRayClient } from "@aws-sdk/client-xray";
+import type { S3Client } from "@aws-sdk/client-s3";
 import type { ApplicationSignalsClient } from "@aws-sdk/client-application-signals";
 import type { AwsCredentialIdentity, AwsCredentialIdentityProvider } from "@smithy/types";
 
@@ -52,6 +53,7 @@ export type CreateDataClient = (config: ClientConfig) => BedrockAgentCoreClient;
 export type CreateIamClient = (config: ClientConfig) => IAMClient;
 export type CreateLogsClient = (config: ClientConfig) => CloudWatchLogsClient;
 export type CreateXrayClient = (config: ClientConfig) => XRayClient;
+export type CreateS3Client = (config: ClientConfig) => S3Client;
 export type CreateApplicationSignalsClient = (config: ClientConfig) => ApplicationSignalsClient;
 export type CreateCloudFormationClient = (config: CredentialedClientConfig) => CloudFormationClient;
 export type CoreFetch = (
@@ -75,4 +77,7 @@ export interface AwsClients {
   // agent spans land in `aws/spans` for evaluations to read.
   xray(config: ClientConfig): XRayClient;
   applicationSignals(config: ClientConfig): ApplicationSignalsClient;
+  // s3 holds the CodeZip artifacts the imperative backend uploads before it
+  // creates or updates a runtime. Nothing else in the CLI talks to S3.
+  s3(config: ClientConfig): S3Client;
 }

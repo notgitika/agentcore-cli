@@ -4,6 +4,7 @@ import { IAMClient } from "@aws-sdk/client-iam";
 import { CloudWatchLogsClient } from "@aws-sdk/client-cloudwatch-logs";
 import { CloudFormationClient } from "@aws-sdk/client-cloudformation";
 import { XRayClient } from "@aws-sdk/client-xray";
+import { S3Client } from "@aws-sdk/client-s3";
 import { ApplicationSignalsClient } from "@aws-sdk/client-application-signals";
 import type {
   CreateApplicationSignalsClient,
@@ -12,6 +13,7 @@ import type {
   CreateDataClient,
   CreateIamClient,
   CreateLogsClient,
+  CreateS3Client,
   CreateXrayClient,
 } from "./types";
 
@@ -32,6 +34,8 @@ export const createLogsClient: CreateLogsClient = (config) =>
   new CloudWatchLogsClient({ ...config });
 
 export const createXrayClient: CreateXrayClient = (config) => new XRayClient({ ...config });
+
+export const createS3Client: CreateS3Client = (config) => new S3Client({ ...config });
 
 export const createApplicationSignalsClient: CreateApplicationSignalsClient = (config) =>
   new ApplicationSignalsClient({ ...config });

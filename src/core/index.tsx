@@ -3,8 +3,10 @@ import { BedrockAgentCoreClient } from "@aws-sdk/client-bedrock-agentcore";
 import { IAMClient } from "@aws-sdk/client-iam";
 import { CloudWatchLogsClient } from "@aws-sdk/client-cloudwatch-logs";
 import { XRayClient } from "@aws-sdk/client-xray";
+import { S3Client } from "@aws-sdk/client-s3";
 import { ApplicationSignalsClient } from "@aws-sdk/client-application-signals";
 import { EvalClient } from "./eval";
+import { createS3Client } from "./factories";
 import { GatewayClient } from "./gateway";
 import { HarnessClient } from "./harness";
 import { IdentityClient } from "./identity";
@@ -25,6 +27,7 @@ import type {
   CreateDataClient,
   CreateIamClient,
   CreateLogsClient,
+  CreateS3Client,
   CreateXrayClient,
 } from "./types";
 import type { Logger } from "../logging";
@@ -44,6 +47,7 @@ export type {
   CreateDataClient,
   CreateIamClient,
   CreateLogsClient,
+  CreateS3Client,
   CreateXrayClient,
 } from "./types";
 
@@ -54,6 +58,8 @@ type CoreClientConfig = {
   createIamClient: CreateIamClient;
   createLogsClient: CreateLogsClient;
   createXrayClient: CreateXrayClient;
+  /** Defaults to the production factory; only the imperative backend uses S3. */
+  createS3Client?: CreateS3Client;
   createApplicationSignalsClient: CreateApplicationSignalsClient;
   logger: Logger;
   fetch?: CoreFetch;
@@ -76,6 +82,7 @@ export class CoreClient implements AwsClients {
   private logsClients = new ClientCache<CloudWatchLogsClient>();
   private xrayClients = new ClientCache<XRayClient>();
   private applicationSignalsClients = new ClientCache<ApplicationSignalsClient>();
+  private s3Clients = new ClientCache<S3Client>();
 
   private readonly createControlClient: CreateControlClient;
   private readonly createDataClient: CreateDataClient;
@@ -83,6 +90,7 @@ export class CoreClient implements AwsClients {
   private readonly createLogsClient: CreateLogsClient;
   private readonly createXrayClient: CreateXrayClient;
   private readonly createApplicationSignalsClient: CreateApplicationSignalsClient;
+  private readonly createS3Client: CreateS3Client;
   private logger: Logger;
 
   // Feature-scoped sub-clients. Access as e.g. `coreClient.harness.getHarness(...)`.
@@ -107,6 +115,7 @@ export class CoreClient implements AwsClients {
     this.createLogsClient = config.createLogsClient;
     this.createXrayClient = config.createXrayClient;
     this.createApplicationSignalsClient = config.createApplicationSignalsClient;
+    this.createS3Client = config.createS3Client ?? createS3Client;
     this.logger = config.logger;
     const fetch = config.fetch ?? globalThis.fetch;
     const cloudWatch = new CloudWatchClient(this);
@@ -193,6 +202,12 @@ export class CoreClient implements AwsClients {
   // creating and caching it on first use (used to enable Transaction Search).
   applicationSignals(config: ClientConfig): ApplicationSignalsClient {
     return this.applicationSignalsClients.get(config, this.createApplicationSignalsClient);
+  }
+
+  // s3 returns the S3 client for `config`, creating and caching it on first use
+  // (used to upload the imperative backend's CodeZip artifacts).
+  s3(config: ClientConfig): S3Client {
+    return this.s3Clients.get(config, this.createS3Client);
   }
 }
 
