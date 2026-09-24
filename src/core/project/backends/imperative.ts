@@ -14,8 +14,8 @@ import type { AwsClients } from "../../types";
 import { plan as buildPlan, type PlanBuilder, type Plans } from "./imperative/agentcore/plan";
 import type { KindHandlers } from "./imperative/agentcore/notImplemented";
 import { createDefaultCredentialResolver } from "./imperative/credentials";
-import { stateKey } from "./imperative/inventory";
-import { parseStepName, type ResourceKind } from "./imperative/naming";
+import { declaredResources, stateKey } from "./imperative/inventory";
+import { assertDistinctPhysicalNames, parseStepName, type ResourceKind } from "./imperative/naming";
 import type { ExecuteOptions, Step } from "./imperative/plan/plan";
 import {
   forgetImperativeResource,
@@ -131,6 +131,12 @@ export class ImperativeBackend implements ProjectBackend {
     // Everything that can be decided from the spec and the state file fails here,
     // before credentials are provisioned or anything is created.
     assertImperativelyDeployable(project, this.supportedKinds);
+    // Two declared names that rewrite to one AWS name would converge on one
+    // resource; refuse here rather than after credential providers exist.
+    assertDistinctPhysicalNames(
+      { projectName: project.name, targetName: target.name },
+      declaredResources(project.spec),
+    );
     const targetState = (await readDeployedState(this.json, project.rootPath)).targets[target.name];
     if (hasCdkBinding(targetState)) {
       throw new ProjectStateError(

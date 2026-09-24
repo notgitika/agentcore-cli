@@ -110,6 +110,37 @@ describe("ImperativeBackend ledger", () => {
     expect(Object.keys(ledger.memory ?? {})).toEqual(["m1"]);
   });
 
+  test("colliding physical names are refused before credentials are provisioned", async () => {
+    const path = await root();
+    const json = new FsReadWriteJson({ logger: createSilentLogger() });
+    let provisioned = 0;
+    const subject = new ImperativeBackend({
+      logger: createSilentLogger(),
+      clients: {} as AwsClients,
+      identity: new TestIdentityClient(),
+      json,
+      resolveCredentials: async () => async () => ({ accessKeyId: "a", secretAccessKey: "b" }),
+      resolveAccount: async () => target.account,
+      enableTransactionSearch: async () => {},
+      // eslint-disable-next-line require-yield
+      provisionCredentials: async function* () {
+        provisioned++;
+        return {};
+      },
+      // eslint-disable-next-line require-yield
+      removeCredentials: async function* () {},
+      handlers: { memory: memories() },
+      supportedKinds: new Set(["memory"]),
+      execute: { sleep: async () => {} },
+    });
+    // The schema forbids '-' in memory names; the check still has to hold for
+    // kinds whose names allow both separators, so bypass validation here.
+    await expect(
+      drain(subject.deploy(await project(path, ["a_b", "a-b"]), deployInput)),
+    ).rejects.toThrow(/'a_b' and 'a-b', which both deploy as 'Shop_dev_a_b'/);
+    expect(provisioned).toBe(0);
+  });
+
   test("outputs after a removal exclude the removed resource", async () => {
     const path = await root();
     const json = new FsReadWriteJson({ logger: createSilentLogger() });
