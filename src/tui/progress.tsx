@@ -8,11 +8,19 @@ import type { AppIO } from "../io";
  * an `output` line belongs to the most recent step, and a `warning` remains
  * visible without blocking the operation. The final step completes when the
  * generator returns, and fails when it throws.
+ *
+ * `task-*` events address an identified task that runs alongside the linear
+ * steps; a `task-start` adds it, `task-output` feeds its tail,
+ * `task-done`/`task-failed` settle it.
  */
 export type ProgressEvent =
   | { type: "step"; message: string }
   | { type: "output"; line: string }
-  | { type: "warning"; message: string };
+  | { type: "warning"; message: string }
+  | { type: "task-start"; id: string; title: string }
+  | { type: "task-output"; id: string; line: string }
+  | { type: "task-done"; id: string }
+  | { type: "task-failed"; id: string; message?: string };
 
 export type ProgressResult<T> = Promise<T> | AsyncGenerator<ProgressEvent, T>;
 
@@ -38,49 +46,89 @@ export type RunWithProgressOptions = {
 
 const DEFAULT_TAIL_LINES = 5;
 
+function lastIndexWhere(tasks: readonly Task[], predicate: (task: Task) => boolean): number {
+  for (let index = tasks.length - 1; index >= 0; index -= 1) {
+    if (predicate(tasks[index]!)) return index;
+  }
+  return -1;
+}
+
+function replaceAt(tasks: readonly Task[], index: number, update: (task: Task) => Task): Task[] {
+  return tasks.map((task, i) => (i === index ? update(task) : task));
+}
+
+function appendTail(task: Task, line: string, tailLines: number): Task {
+  return { ...task, tail: [...task.tail, line].slice(-tailLines) };
+}
+
 /**
- * Folds one progress event into a task list: a `step` completes the running
- * task and starts a new one, an `output` line joins the running task's tail,
- * and a `warning` is retained as a standalone advisory.
+ * Folds one progress event into a task list. Linear events: a `step` completes
+ * the running unidentified task and starts a new one, an `output` line joins
+ * the last unidentified task's tail, and a `warning` is retained as a standalone
+ * advisory above the running tasks. Identified events (`task-*`) address one
+ * task by id and leave every other task alone, so several can run at once.
  */
 export function applyProgressEvent(
   tasks: readonly Task[],
   event: ProgressEvent,
   tailLines = DEFAULT_TAIL_LINES,
 ): Task[] {
-  const current = tasks[tasks.length - 1];
-  if (event.type === "warning") {
-    const warning: Task = { title: event.message, state: "warning", tail: [] };
-    // Keep a running task last so later output and settlement still attach to it.
-    return current?.state === "running"
-      ? [...tasks.slice(0, -1), warning, current]
-      : [...tasks, warning];
+  switch (event.type) {
+    case "warning": {
+      const warning: Task = { title: event.message, state: "warning", tail: [] };
+      // Keep running tasks last so later output and settlement still attach to them.
+      const firstRunning = tasks.findIndex((task) => task.state === "running");
+      return firstRunning === -1
+        ? [...tasks, warning]
+        : [...tasks.slice(0, firstRunning), warning, ...tasks.slice(firstRunning)];
+    }
+    case "step": {
+      const current = lastIndexWhere(tasks, (task) => task.id === undefined);
+      const settled =
+        current !== -1 && tasks[current]!.state === "running"
+          ? replaceAt(tasks, current, (task) => ({ ...task, state: "done", tail: [] }))
+          : [...tasks];
+      return [...settled, { title: event.message, state: "running", tail: [] }];
+    }
+    case "output": {
+      // An output line before the first step has nowhere to render; the debug log
+      // still has it.
+      const current = lastIndexWhere(tasks, (task) => task.id === undefined);
+      if (current === -1) return [...tasks];
+      return replaceAt(tasks, current, (task) => appendTail(task, event.line, tailLines));
+    }
+    case "task-start":
+      return [...tasks, { id: event.id, title: event.title, state: "running", tail: [] }];
+    case "task-output": {
+      const index = tasks.findIndex((task) => task.id === event.id);
+      if (index === -1) return [...tasks];
+      return replaceAt(tasks, index, (task) => appendTail(task, event.line, tailLines));
+    }
+    case "task-done": {
+      const index = tasks.findIndex((task) => task.id === event.id);
+      if (index === -1) return [...tasks];
+      return replaceAt(tasks, index, (task) => ({ ...task, state: "done", tail: [] }));
+    }
+    case "task-failed": {
+      const index = tasks.findIndex((task) => task.id === event.id);
+      if (index === -1) return [...tasks];
+      return replaceAt(tasks, index, (task) => ({
+        ...(event.message ? appendTail(task, event.message, tailLines) : task),
+        state: "failed",
+      }));
+    }
   }
-  if (event.type === "step") {
-    const settled =
-      current?.state === "running"
-        ? [...tasks.slice(0, -1), { ...current, state: "done" as const, tail: [] }]
-        : [...tasks];
-    return [...settled, { title: event.message, state: "running", tail: [] }];
-  }
-  // An output line before the first step has nowhere to render; the debug log
-  // still has it.
-  if (!current) return [...tasks];
-  return [
-    ...tasks.slice(0, -1),
-    { ...current, tail: [...current.tail, event.line].slice(-tailLines) },
-  ];
 }
 
 /**
- * Marks the running task finished: `done` when the generator returned (its
- * tail collapses), `failed` when it threw (the tail stays, so the last output
- * is visible above the error).
+ * Marks every running task finished: `done` when the generator returned (tails
+ * collapse), `failed` when it threw (tails stay, so the last output is visible
+ * above the error).
  */
 export function settleProgress(tasks: readonly Task[], state: "done" | "failed"): Task[] {
-  const current = tasks[tasks.length - 1];
-  if (!current || current.state !== "running") return [...tasks];
-  return [...tasks.slice(0, -1), { ...current, state, tail: state === "done" ? [] : current.tail }];
+  return tasks.map((task) =>
+    task.state === "running" ? { ...task, state, tail: state === "done" ? [] : task.tail } : task,
+  );
 }
 
 /**
@@ -138,11 +186,19 @@ export async function runWithProgress<T>(
     return work(async () => {});
   }
   if (typeof work !== "function" && !interactive) {
+    const titles = new Map<string, string>();
     let next = await work.next();
     while (!next.done) {
-      if (next.value.type === "step") options.io.stderr.write(`${next.value.message}\n`);
-      if (next.value.type === "warning") {
-        options.io.stderr.write(`Warning: ${next.value.message}\n`);
+      const event = next.value;
+      if (event.type === "step") options.io.stderr.write(`${event.message}\n`);
+      if (event.type === "warning") options.io.stderr.write(`Warning: ${event.message}\n`);
+      if (event.type === "task-start") {
+        titles.set(event.id, event.title);
+        options.io.stderr.write(`${event.title}\n`);
+      }
+      if (event.type === "task-failed") {
+        const title = titles.get(event.id) ?? event.id;
+        options.io.stderr.write(`Failed: ${title}${event.message ? `: ${event.message}` : ""}\n`);
       }
       next = await work.next();
     }
