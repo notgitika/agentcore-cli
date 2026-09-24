@@ -5,13 +5,21 @@ import type { ResourceKind } from "../naming";
 import type { Doer, Statuser } from "../plan/plan";
 import type { AgentCoreStack } from "./stack";
 
+/** Test seams a kind's `create` may honor; production callers pass nothing. */
+export type KindHandlerOptions = { sleep?: (ms: number) => Promise<void> };
+
 /**
  * One kind's four operations, the `Create*`/`Poll*` pairs of the prior art.
  * `create` and `remove` start work; `poll` and `pollGone` observe it. Each
  * returns a closure the plan installs as a step's `do` or `status`.
  */
 export type KindHandlers = {
-  create(stack: AgentCoreStack, resource: DeclaredResource, spec: Project["spec"]): Doer;
+  create(
+    stack: AgentCoreStack,
+    resource: DeclaredResource,
+    spec: Project["spec"],
+    options?: KindHandlerOptions,
+  ): Doer;
   poll(stack: AgentCoreStack, resource: DeclaredResource, spec: Project["spec"]): Statuser;
   remove(stack: AgentCoreStack, resource: DeclaredResource): Doer;
   pollGone(stack: AgentCoreStack, resource: DeclaredResource): Statuser;
