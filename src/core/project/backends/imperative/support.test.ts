@@ -16,8 +16,74 @@ function project(overrides: Record<string, unknown>): Project {
 }
 
 describe("assertImperativelyDeployable", () => {
-  test("phase 1 supports no resource kinds", () => {
-    expect(SUPPORTED_KINDS.size).toBe(0);
+  test("supports runtime, runtime-endpoint and memory", () => {
+    expect([...SUPPORTED_KINDS].sort()).toEqual(["memory", "runtime", "runtime-endpoint"]);
+  });
+
+  const codeZipRuntime = {
+    name: "agent",
+    build: "CodeZip",
+    entrypoint: "main.py",
+    codeLocation: "app/agent",
+    runtimeVersion: "PYTHON_3_13",
+  };
+  const memory = { name: "m", eventExpiryDuration: 30, strategies: [] };
+
+  test.each([
+    [
+      "a Node runtime version",
+      { runtimes: [{ ...codeZipRuntime, runtimeVersion: "NODE_22" }] },
+      /NODE_22/,
+    ],
+    [
+      "an authorizer",
+      {
+        runtimes: [
+          { ...codeZipRuntime, authorizerType: "CUSTOM_JWT", authorizerConfiguration: {} },
+        ],
+      },
+      /authorizer/,
+    ],
+    [
+      "filesystem configurations",
+      { runtimes: [{ ...codeZipRuntime, filesystemConfigurations: [{}] }] },
+      /filesystemConfigurations/,
+    ],
+    ["connections", { runtimes: [{ ...codeZipRuntime, connections: [{}] }] }, /connections/],
+    [
+      "memory stream delivery",
+      {
+        memories: [
+          {
+            name: "m",
+            eventExpiryDuration: 3,
+            strategies: [],
+            streamDeliveryResources: { resources: [] },
+          },
+        ],
+      },
+      /streamDeliveryResources/,
+    ],
+  ] as const)("refuses %s before any AWS call", (_label, partial, pattern) => {
+    expect(() => assertImperativelyDeployable(project(partial), SUPPORTED_KINDS)).toThrow(pattern);
+    expect(() => assertImperativelyDeployable(project(partial), SUPPORTED_KINDS)).toThrow(
+      NotImplementedError,
+    );
+  });
+
+  test("a runtime with no connections or filesystems passes the feature guards", () => {
+    const p = project({
+      runtimes: [{ ...codeZipRuntime, connections: [], filesystemConfigurations: [] }],
+    });
+    expect(() => assertImperativelyDeployable(p, SUPPORTED_KINDS)).not.toThrow();
+  });
+
+  test("a CodeZip Python runtime with a memory and an endpoint passes", () => {
+    const p = project({
+      runtimes: [{ ...codeZipRuntime, endpoints: { prod: { version: 1 } } }],
+      memories: [memory],
+    });
+    expect(() => assertImperativelyDeployable(p, SUPPORTED_KINDS)).not.toThrow();
   });
 
   test("a project with only credentials is deployable", () => {

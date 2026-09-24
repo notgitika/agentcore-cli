@@ -1,4 +1,5 @@
-import { NotImplementedError, ProjectStateError } from "../../../errors";
+import { join } from "node:path";
+import { ProjectStateError } from "../../../errors";
 import type {
   DeployResult,
   DeployableResource,
@@ -8,14 +9,32 @@ import type {
   ResolvedProjectResource,
 } from "../../../handlers/project/types";
 import { FsReadWriteJson, type ReadWriteJson } from "../../../io";
+import { requireTool, runProcess, type ProcessRunner } from "../../../io/exec";
 import type { Logger } from "../../../logging";
 import type { AwsDeploymentTarget } from "../../../projectSchemas/aws-targets";
-import type { AwsClients } from "../../types";
+import type { AwsClients, AwsCredentials } from "../../types";
 import { plan as buildPlan, type PlanBuilder, type Plans } from "./imperative/agentcore/plan";
+import {
+  artifactBucketName,
+  artifactKey,
+  ensureArtifactBucket,
+  uploadArtifact,
+  type CodeArtifact,
+} from "./imperative/artifacts";
 import type { KindHandlers } from "./imperative/agentcore/notImplemented";
 import { createDefaultCredentialResolver } from "./imperative/credentials";
 import { declaredResources, stateKey } from "./imperative/inventory";
-import { assertDistinctPhysicalNames, parseStepName, type ResourceKind } from "./imperative/naming";
+import {
+  assertDistinctPhysicalNames,
+  ownershipTags,
+  parseStepName,
+  type ResourceKind,
+} from "./imperative/naming";
+import {
+  packagePythonCodeZip,
+  type CodeZipPackager,
+  type PackagedCode,
+} from "./imperative/packaging/python";
 import type { ExecuteOptions, Step } from "./imperative/plan/plan";
 import {
   forgetImperativeResource,
@@ -61,6 +80,9 @@ export type ImperativeBackendConfig = {
     "concurrency" | "stepTimeoutMs" | "pollDelayMs" | "sleep" | "maxDoAttempts"
   >;
   now?: () => Date;
+  packager?: CodeZipPackager;
+  runner?: ProcessRunner;
+  checkTool?: (tool: string, installHint: string) => Promise<void>;
 };
 
 /** Reports "1 resource" / "3 resources". */
@@ -95,6 +117,9 @@ export class ImperativeBackend implements ProjectBackend {
    * unserialized writes would drop each other's records.
    */
   private ledger: Promise<void> = Promise.resolve();
+  private readonly packager: CodeZipPackager;
+  private readonly runner: ProcessRunner;
+  private readonly checkTool: (tool: string, installHint: string) => Promise<void>;
 
   constructor(config: ImperativeBackendConfig) {
     this.logger = config.logger;
@@ -111,13 +136,89 @@ export class ImperativeBackend implements ProjectBackend {
     this.supportedKinds = config.supportedKinds ?? SUPPORTED_KINDS;
     this.execute = config.execute;
     this.now = config.now ?? (() => new Date());
+    this.packager = config.packager ?? packagePythonCodeZip;
+    this.runner = config.runner ?? runProcess;
+    this.checkTool = config.checkTool ?? requireTool;
   }
 
-  // eslint-disable-next-line require-yield
-  public async *build(_project: Project): AsyncGenerator<ProjectEvent, void> {
-    throw new NotImplementedError(
-      "imperative deploy does not package code yet; 'project build' arrives with CodeZip support",
-    );
+  public async *build(project: Project): AsyncGenerator<ProjectEvent, void> {
+    assertImperativelyDeployable(project, this.supportedKinds);
+    yield* this.packageRuntimes(project);
+  }
+
+  /** Packages every CodeZip runtime under agentcore/.cli/build/<runtime>/; yields one task per runtime. */
+  private async *packageRuntimes(
+    project: Project,
+  ): AsyncGenerator<ProjectEvent, Map<string, PackagedCode>> {
+    const packaged = new Map<string, PackagedCode>();
+    for (const runtime of project.spec.runtimes) {
+      if (runtime.build !== "CodeZip") continue;
+      const id = `package:${runtime.name}`;
+      yield { type: "task-start", id, title: `Packaging runtime '${runtime.name}'` };
+      const lines: string[] = [];
+      try {
+        const result = await this.packager({
+          codeDir: join(project.rootPath, runtime.codeLocation),
+          runtimeVersion: runtime.runtimeVersion ?? "",
+          buildDir: join(project.rootPath, "agentcore", ".cli", "build", runtime.name),
+          run: this.runner,
+          checkTool: this.checkTool,
+          report: (line) => lines.push(line),
+        });
+        // Lines are buffered because a generator cannot yield from inside the callback.
+        for (const line of lines) yield { type: "task-output", id, line };
+        yield {
+          type: "task-output",
+          id,
+          line: `${(result.sizeBytes / 1024 / 1024).toFixed(1)} MiB, sha256 ${result.sha256.slice(0, 12)}`,
+        };
+        yield { type: "task-done", id };
+        packaged.set(runtime.name, result);
+      } catch (error) {
+        for (const line of lines) yield { type: "task-output", id, line };
+        yield {
+          type: "task-failed",
+          id,
+          message: error instanceof Error ? error.message : String(error),
+        };
+        throw error;
+      }
+    }
+    return packaged;
+  }
+
+  /** Uploads each packaged zip to the account's artifact bucket and hands it to the stack. */
+  private async *stageArtifacts(
+    plans: Plans,
+    packaged: Map<string, PackagedCode>,
+    target: AwsDeploymentTarget,
+    credentials: AwsCredentials,
+  ): AsyncGenerator<ProjectEvent, void> {
+    if (packaged.size === 0) return;
+    const s3 = this.clients.s3({ region: target.region, credentials });
+    const bucket = artifactBucketName(target.account, target.region);
+    yield { type: "step", message: `Uploading code to s3://${bucket}` };
+    const { created } = await ensureArtifactBucket(s3, {
+      bucket,
+      region: target.region,
+      tags: ownershipTags(plans.stack.scope),
+    });
+    if (created) yield { type: "output", line: `Created bucket ${bucket} (public access blocked)` };
+    for (const [name, code] of packaged) {
+      const key = artifactKey(plans.stack.scope, name, code.sha256);
+      const { uploaded } = await uploadArtifact(s3, { bucket, key, zipPath: code.zipPath });
+      yield {
+        type: "output",
+        line: `${name}: ${uploaded ? "uploaded" : "already present"} ${key}`,
+      };
+      const artifact: CodeArtifact = {
+        bucket,
+        key,
+        sha256: code.sha256,
+        sizeBytes: code.sizeBytes,
+      };
+      plans.stack.artifacts.set(name, artifact);
+    }
   }
 
   public async *deploy(
@@ -150,6 +251,7 @@ export class ImperativeBackend implements ProjectBackend {
     const recordedCredentials = targetState?.resources?.credentials ?? {};
     const orphaned = orphanedCredentials(recordedCredentials, project.spec.credentials);
     const recorded = imperativeStateOf(targetState);
+    const packaged = yield* this.packageRuntimes(project);
 
     // Same contract as the CDK backend: providers are recorded every deploy, even
     // when empty, so dropping the last credential clears the stale entry.
@@ -189,6 +291,8 @@ export class ImperativeBackend implements ProjectBackend {
       }
       return yield* this.teardown({ project, input, plans, orphaned });
     }
+
+    yield* this.stageArtifacts(plans, packaged, target, credentials);
 
     if (input.transactionSearch !== false) {
       yield { type: "step", message: "Enabling CloudWatch Transaction Search" };
