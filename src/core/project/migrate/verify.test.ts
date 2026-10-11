@@ -39,7 +39,7 @@ const dynamic = (name: string, causingEntity: string) => ({
   CausingEntity: causingEntity,
 });
 
-async function verify(changeSet: FakeChangeSet) {
+async function verify(changeSet: FakeChangeSet, current?: CfnTemplate) {
   const cloudFormation = fakeCloudFormation(
     { S: { template: {} } },
     { changeSets: { S: changeSet } },
@@ -49,6 +49,7 @@ async function verify(changeSet: FakeChangeSet) {
       target: "default",
       stackName: "S",
       template: V1,
+      ...(current && { current }),
       client: cloudFormation.create({ region: "us-east-1" } as never),
       templates: async () => fakeTemplateStore(),
     },
@@ -154,6 +155,23 @@ describe("verifyStack", () => {
     });
   });
 
+  test("flags the removal of a harness role only the stack's current template names", async () => {
+    const current: CfnTemplate = {
+      Resources: {
+        OldHarness: {
+          Type: "AWS::BedrockAgentCore::Harness",
+          Properties: { ExecutionRoleArn: { "Fn::GetAtt": ["OldHarnessRole", "Arn"] } },
+        },
+        OldHarnessRole: { Type: "AWS::IAM::Role", Properties: {} },
+      },
+    };
+    const changes = { changes: [change("OldHarnessRole", "AWS::IAM::Role", "Remove")] };
+    expect((await verify(changes)).result.problems).toEqual([]);
+    expect((await verify(changes, current)).result.problems).toEqual([
+      "AWS::IAM::Role OldHarnessRole would be deleted.",
+    ]);
+  });
+
   test("a change set with nothing to do verifies", async () => {
     const { result } = await verify({ changes: [] });
     expect(result).toMatchObject({ changes: [], problems: [] });
@@ -164,9 +182,10 @@ describe("verifyStack", () => {
       status: "FAILED",
       reason: "Template format error",
     });
-    expect(result.problems).toEqual([
+    expect(result.error).toBe(
       "CloudFormation couldn't create the change set (FAILED): Template format error",
-    ]);
+    );
+    expect(result.problems).toEqual([]);
     expect(commands.at(-1)).toBe("DeleteChangeSetCommand");
   });
 });

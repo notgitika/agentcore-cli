@@ -104,7 +104,7 @@ export function bootstrapBucketStore(config: {
           ContentType: "application/json",
         }),
       );
-      return `https://${bucket}.s3.${config.region}.amazonaws.com/${key}`;
+      return templateUrl(bucket, config.region, key);
     },
     async remove(key) {
       try {
@@ -117,4 +117,14 @@ export function bootstrapBucketStore(config: {
       }
     },
   };
+}
+
+/**
+ * The URL CloudFormation reads an uploaded template from. Path-style, as the CDK
+ * uses for templates, so a bucket name with dots still matches the certificate;
+ * China regions use their own domain.
+ */
+export function templateUrl(bucket: string, region: string, key: string): string {
+  const domain = region.startsWith("cn-") ? "amazonaws.com.cn" : "amazonaws.com";
+  return `https://s3.${region}.${domain}/${bucket}/${key}`;
 }

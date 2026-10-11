@@ -1,14 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { readFile, symlink } from "node:fs/promises";
+import { readFile, symlink, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { ProjectStateError } from "../../../errors";
 import { createSilentLogger } from "../../../testing";
 import { FsAssetSource } from "../source";
-import { RECOVERY_RELATIVE_PATH } from "./apply";
+import { JOURNAL_RELATIVE_PATH, RECOVERY_RELATIVE_PATH } from "./apply";
 import { BACKUP_RELATIVE_PATH } from "./files";
 import { FsProjectMigrator } from "./index";
 import {
+  F1_DEPLOYED_STATE,
   FAKE_AWS_IDENTITY,
   fakeCloudFormation,
   fakeGit,
@@ -20,6 +21,7 @@ import {
   type V0ProjectFiles,
 } from "./migrate-test-support";
 import { REPORT_FILE } from "./report";
+import type { WorkspaceSynthesizer } from "./synth";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(() => Promise.all(cleanups.splice(0).map((cleanup) => cleanup())));
@@ -62,10 +64,27 @@ const specVersion = (root: string) =>
  * agentcore.json version at that moment, so tests can see what ran before the
  * files were written.
  */
-function fakes(root: string, options: FakeCloudFormationOptions = {}) {
-  const cloudFormation = fakeCloudFormation({ [STACK]: { template: V0 } }, options);
+function fakes(
+  root: string,
+  options: FakeCloudFormationOptions = {},
+  extras: {
+    targets?: string[];
+    /** Wraps the fake synthesizer, e.g. to fail or interrupt a run. */
+    synthesize?: (inner: WorkspaceSynthesizer) => WorkspaceSynthesizer;
+  } = {},
+) {
+  const targets = extras.targets ?? ["default"];
+  const cloudFormation = fakeCloudFormation(
+    Object.fromEntries(targets.map((target) => [stackOf(target), { template: V0 }])),
+    options,
+  );
   const events: string[] = [];
-  const synthesize = fakeSynth([{ target: "default", stackName: STACK, template: V1 }]);
+  const inner = fakeSynth(
+    targets.map((target) => ({ target, stackName: stackOf(target), template: V1 })),
+  );
+  const synthesize = Object.assign(extras.synthesize?.(inner) ?? inner, {
+    workspaces: inner.workspaces,
+  });
   const migrator = new FsProjectMigrator({
     logger: createSilentLogger(),
     runner: fakeGit({ status: "" }),
@@ -91,8 +110,32 @@ function fakes(root: string, options: FakeCloudFormationOptions = {}) {
   return { migrator, cloudFormation, events, synthesize };
 }
 
-async function prepared(root: string, options: FakeCloudFormationOptions = {}) {
-  const subject = fakes(root, options);
+const stackOf = (target: string) => `AgentCore-CompatA-${target}`;
+
+/** F1 deployed to `default` and to `prod`, the same way. */
+function twoTargets(): V0ProjectFiles {
+  const recorded = F1_DEPLOYED_STATE.targets.default.resources;
+  return {
+    targets: ["default", "prod"].map((name) => ({
+      name,
+      account: "998846730471",
+      region: "us-east-1",
+    })),
+    deployedState: {
+      targets: {
+        default: { resources: recorded },
+        prod: { resources: { ...recorded, stackName: stackOf("prod") } },
+      },
+    },
+  };
+}
+
+async function prepared(
+  root: string,
+  options: FakeCloudFormationOptions = {},
+  extras: Parameters<typeof fakes>[2] = {},
+) {
+  const subject = fakes(root, options, extras);
   const migration = await subject.migrator.prepare(root);
   cleanups.push(() => migration.dispose());
   return { ...subject, migration };
@@ -209,6 +252,9 @@ describe("FsProjectMigrator apply", () => {
     );
     expect(existsSync(join(root, "agentcore", "cdk", "jest.config.js"))).toBe(false);
     expect(existsSync(join(root, "agentcore", "cdk", "node_modules"))).toBe(false);
+    // The plan lists what changed as it ended up on disk.
+    expect(result.files).toContainEqual({ path: "agentcore/cdk/jest.config.js", kind: "removed" });
+    expect(result.files).toContainEqual({ path: "app/CompatAHarness/harness.yaml", kind: "added" });
     expect(await readFile(join(root, "agentcore", ".cli", "deployed-state.json"), "utf8")).toBe(
       deployedState,
     );
@@ -220,6 +266,31 @@ describe("FsProjectMigrator apply", () => {
     expect(report).toContain("- removes AWS::IAM::Policy `McpGatewayCompatAGwRoleDefaultPolicy`");
     expect(report).toContain("- runtime `CompatAAgent`: `resourceName` = `CompatA_CompatAAgent`");
     expect(report).toContain("Run `agentcore deploy`");
+  });
+
+  test("lists a file the in-place install recreates as modified, not removed", async () => {
+    const root = await project({ files: { "agentcore/cdk/package-lock.json": "{}\n" } });
+    const { migration } = await prepared(
+      root,
+      {},
+      {
+        synthesize: (inner) => async (directory, options) => {
+          await writeFile(join(directory, "agentcore", "cdk", "package-lock.json"), "{ }\n");
+          return inner(directory, options);
+        },
+      },
+    );
+    expect(migration.plan.changes).toContainEqual({
+      path: "agentcore/cdk/package-lock.json",
+      kind: "removed",
+    });
+
+    const result = await migration.apply();
+
+    expect(result.files).toContainEqual({
+      path: "agentcore/cdk/package-lock.json",
+      kind: "modified",
+    });
   });
 
   test("leaves every file untouched when the refactor fails", async () => {
@@ -280,25 +351,17 @@ describe("FsProjectMigrator apply", () => {
   test("restores the files and moves the stack back when the in-place synth fails", async () => {
     const root = await project();
     const before = snapshot(root);
-    const subject = fakes(root);
     let calls = 0;
-    const synthesizing = new FsProjectMigrator({
-      logger: createSilentLogger(),
-      runner: fakeGit({ status: "" }),
-      assetSource: new FsAssetSource(),
-      createCloudFormationClient: subject.cloudFormation.create,
-      ...FAKE_AWS_IDENTITY,
-      synthesize: async (directory, options) => {
-        calls += 1;
-        if (calls === 2) throw new Error("npm install failed: ETIMEDOUT");
-        return subject.synthesize(directory, options);
+    const { migration, cloudFormation } = await prepared(
+      root,
+      {},
+      {
+        synthesize: (inner) => async (directory, options) => {
+          if (++calls === 2) throw new Error("npm install failed: ETIMEDOUT");
+          return inner(directory, options);
+        },
       },
-      createTemplateStore: () => fakeTemplateStore(),
-      poll: { intervalMs: 0, sleep: async () => {} },
-      env: {},
-    });
-    const migration = await synthesizing.prepare(root);
-    cleanups.push(() => migration.dispose());
+    );
 
     const result = await migration.apply();
 
@@ -307,8 +370,43 @@ describe("FsProjectMigrator apply", () => {
       restored: true,
       error: "npm install failed: ETIMEDOUT",
     });
-    expect(subject.cloudFormation.stacks[STACK]!.template).toEqual(V0);
+    expect(cloudFormation.stacks[STACK]!.template).toEqual(V0);
     expect(snapshot(root)).toEqual(before);
+    expect(existsSync(join(root, JOURNAL_RELATIVE_PATH))).toBe(false);
+  });
+
+  test("Ctrl-C lets the running step finish, then puts everything back", async () => {
+    const root = await project();
+    const before = snapshot(root);
+    const steps: string[] = [];
+    let calls = 0;
+    const { migration, cloudFormation } = await prepared(
+      root,
+      {},
+      {
+        synthesize: (inner) => async (directory, options) => {
+          // The in-place synth is interrupted part-way, and still completes.
+          if (++calls === 2) process.emit("SIGINT", "SIGINT");
+          return inner(directory, options);
+        },
+      },
+    );
+
+    const listeners = process.listeners("SIGINT");
+    const result = await migration.apply({ onStep: (step) => steps.push(step) });
+
+    expect(result).toMatchObject({
+      migrated: false,
+      restored: true,
+      error: "Interrupted (Ctrl-C).",
+    });
+    expect(steps.some((step) => step.startsWith("Stopping: finishing the current step"))).toBe(
+      true,
+    );
+    expect(cloudFormation.stacks[STACK]!.template).toEqual(V0);
+    expect(snapshot(root)).toEqual(before);
+    // Apply's own handler is gone again, and the workspace's cleanup is back.
+    expect(process.listeners("SIGINT")).toHaveLength(listeners.length);
   });
 
   test("saves recovery details and gives manual steps when a refactor can't roll back", async () => {
@@ -345,6 +443,101 @@ describe("FsProjectMigrator apply", () => {
   });
 });
 
+describe("FsProjectMigrator apply, several targets", () => {
+  test("a refactor that can't roll back leaves the earlier stack refactored, and says so", async () => {
+    const root = await project(twoTargets());
+    const { migration, cloudFormation } = await prepared(
+      root,
+      {
+        refactors: ({ stackName }) =>
+          stackName === stackOf("prod") ? { execute: { status: "ROLLBACK_FAILED" } } : {},
+      },
+      { targets: ["default", "prod"] },
+    );
+
+    const result = await migration.apply();
+
+    expect(result.stacks.map((stack) => [stack.stackName, stack.outcome])).toEqual([
+      [stackOf("default"), "refactored"],
+      [stackOf("prod"), "failed"],
+    ]);
+    // No undo was attempted: only the two refactors were ever created.
+    expect(
+      cloudFormation.calls.filter((call) => call.command === "CreateStackRefactorCommand"),
+    ).toHaveLength(2);
+    const recovery = result.recovery.join("\n");
+    expect(recovery).toContain(`Stack ${stackOf("prod")} (us-east-1) is part-way through`);
+    expect(recovery).toContain(
+      `Stack ${stackOf("default")} is still refactored to the v1 logical IDs (its resources are intact), because it was refactored before that failure.`,
+    );
+    expect(result.recovery[0]).toContain("and no project file was changed.");
+    expect(specVersion(root)).toBe(1);
+    expect(existsSync(join(root, JOURNAL_RELATIVE_PATH))).toBe(false);
+  });
+
+  test("a later target's failure undoes the earlier one", async () => {
+    const root = await project(twoTargets());
+    const before = snapshot(root);
+    const { migration, cloudFormation } = await prepared(
+      root,
+      {
+        refactors: ({ stackName }) =>
+          stackName === stackOf("prod")
+            ? { execute: { status: "EXECUTE_FAILED", reason: "No" } }
+            : {},
+      },
+      { targets: ["default", "prod"] },
+    );
+
+    const result = await migration.apply();
+
+    expect(result.stacks.map((stack) => stack.outcome)).toEqual(["undone", "failed"]);
+    expect(result).toMatchObject({ restored: true, recovery: [] });
+    expect(cloudFormation.stacks[stackOf("default")]!.template).toEqual(V0);
+    expect(snapshot(root)).toEqual(before);
+  });
+});
+
+describe("an unfinished migration", () => {
+  test("its journal and backup fail a check that says what to look at", async () => {
+    const root = await project({
+      files: {
+        [JOURNAL_RELATIVE_PATH]: JSON.stringify({
+          startedAt: "2026-10-11T00:00:00.000Z",
+          refactors: [{ stackName: STACK, region: "us-east-1", refactorId: "rf-9" }],
+          files: "writing",
+        }),
+        [join(BACKUP_RELATIVE_PATH, "cdk", "bin", "cdk.ts")]: "// v0\n",
+      },
+    });
+    const { migration } = await prepared(root);
+
+    const check = migration.plan.checks.find((entry) => entry.name === "unfinished migration");
+    expect(migration.plan.ready).toBe(false);
+    expect(check?.message).toContain(
+      "(started 2026-10-11T00:00:00.000Z) was stopped before it finished.",
+    );
+    expect(check?.message).toContain("--stack-refactor-id rf-9 --region us-east-1");
+    expect(check?.message).toContain(`The v0 files it replaced are in ${BACKUP_RELATIVE_PATH}`);
+  });
+
+  test("a successful migration leaves no journal, backup, or recovery files", async () => {
+    const root = await project({
+      files: { [join(RECOVERY_RELATIVE_PATH, "old.json")]: "{}", [REPORT_FILE]: "notes\n" },
+    });
+    const { migration } = await prepared(root);
+
+    const result = await migration.apply();
+
+    expect(result.migrated).toBe(true);
+    for (const path of [JOURNAL_RELATIVE_PATH, BACKUP_RELATIVE_PATH, RECOVERY_RELATIVE_PATH]) {
+      expect(existsSync(join(root, path))).toBe(false);
+    }
+    // An existing MIGRATION.md is overwritten, and listed as modified.
+    expect(result.files.at(-1)).toEqual({ path: REPORT_FILE, kind: "modified" });
+  });
+});
+
 describe("symlinks out of the workspace", () => {
   test("fail a check before anything is installed or synthesized", async () => {
     const root = await project();
@@ -367,11 +560,13 @@ describe("symlinks out of the workspace", () => {
   });
 });
 
-describe("a leftover backup", () => {
-  test("fails a check", async () => {
+describe("a leftover backup without a journal", () => {
+  test("fails the check too", async () => {
     const root = await project({ files: { [join(BACKUP_RELATIVE_PATH, "files", "x")]: "x" } });
     const { migration } = await prepared(root);
-    expect(migration.plan.checks.find((check) => check.name === "backup")?.ok).toBe(false);
+    const check = migration.plan.checks.find((entry) => entry.name === "unfinished migration");
+    expect(check?.ok).toBe(false);
+    expect(check?.message).not.toContain("--stack-refactor-id");
     expect(migration.plan.ready).toBe(false);
   });
 });

@@ -97,8 +97,9 @@ export function migrationReport(input: ReportInput): string {
     "",
     `\`agentcore migrate\` moved ${project === "this project" ? project : `project \`${project}\``} ` +
       `from the AgentCore CLI v0 to v1 on ${input.date.toISOString().slice(0, 10)}. Every deployed ` +
-      "AWS resource was kept: none was replaced, renamed, or recreated, and their IDs, ARNs, " +
-      "URLs, and data are unchanged.",
+      "AgentCore resource, ECR repository, and harness role was kept: none was replaced, " +
+      "renamed, or recreated, and their IDs, ARNs, URLs, and data are unchanged. What the first " +
+      "v1 deploy does to the stacks' other resources is listed under each stack below.",
     "",
     "## What changed",
     "",
@@ -110,15 +111,12 @@ export function migrationReport(input: ReportInput): string {
     lines.push(`- ${change.kind} \`${change.path}\`${fileNote(change)}`);
   }
   if (cdkFiles.length > 0) {
-    lines.push(
-      "- replaced `agentcore/cdk/` with the v1 CDK app (" +
-        `${cdkFiles.length} ${cdkFiles.length === 1 ? "file" : "files"}); its dependencies are installed`,
-    );
+    lines.push("- replaced `agentcore/cdk/` with the v1 CDK app, and installed its dependencies");
   }
   lines.push(
     "- kept `agentcore/.cli/deployed-state.json` as it was; v1 reads it",
     "",
-    "Agent code under `app/` was not changed.",
+    "No other file was changed: agent code is as it was.",
     "",
     "### Deployed stacks",
     "",
@@ -189,7 +187,7 @@ export function migrationReport(input: ReportInput): string {
     "## Next step",
     "",
     "1. Review the changes with `git status` and `git diff`, and commit them.",
-    "2. Run `agentcore deploy`. Its first deploy updates the stacks in place as shown above.",
+    "2. Run `agentcore deploy`. Its first deploy changes the stacks as previewed above.",
     "",
     "Going back to v0 takes more than restoring the files from git: the stacks' resources have " +
       "to be moved back to their v0 logical IDs first (a stack refactor with the moves above " +

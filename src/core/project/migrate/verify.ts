@@ -21,6 +21,8 @@ export type VerifyStack = {
   stackName: string;
   /** The template the project now synthesizes for the stack. */
   template: CfnTemplate;
+  /** The template the stack has now (after its refactor), for the harness roles it has. */
+  current?: CfnTemplate;
   client: CloudFormationClient;
   templates: () => Promise<TemplateStore>;
 };
@@ -42,6 +44,14 @@ export async function verifyStack(
   const changeSetName = `agentcore-migrate-verify-${Date.now()}`;
   const template = await templateLocation(stack.template, `${stackName}-v1`, stack.templates);
   options.onStep?.(`Previewing the first v1 deploy of ${stackName} (change set)`);
+  const unverified = (error: string): StackVerification => ({
+    target: stack.target,
+    stackName,
+    changeSetName,
+    error,
+    changes: [],
+    problems: [],
+  });
   try {
     await client.send(
       new CreateChangeSetCommand({
@@ -65,19 +75,17 @@ export async function verifyStack(
       if (NO_CHANGES.test(created.StatusReason ?? "")) {
         return { target: stack.target, stackName, changeSetName, changes: [], problems: [] };
       }
-      return {
-        target: stack.target,
-        stackName,
-        changeSetName,
-        changes: [],
-        problems: [
-          `CloudFormation couldn't create the change set (${created.Status ?? "UNKNOWN"}): ` +
-            `${created.StatusReason ?? "no reason given"}`,
-        ],
-      };
+      return unverified(
+        `CloudFormation couldn't create the change set (${created.Status ?? "UNKNOWN"}): ` +
+          `${created.StatusReason ?? "no reason given"}`,
+      );
     }
     const changes = await allChanges(client, stackName, changeSetName, created);
-    const harnessRoles = rolesUsedByHarnesses(stack.template);
+    // From both templates: a harness role the v1 template drops shows up only as a removal.
+    const harnessRoles = rolesUsedByHarnesses(
+      stack.template,
+      ...(stack.current ? [stack.current] : []),
+    );
     const replaced = replacedIds(changes);
     return {
       target: stack.target,
@@ -86,6 +94,8 @@ export async function verifyStack(
       changes,
       problems: changes.flatMap((change) => problemWith(change, harnessRoles, replaced)),
     };
+  } catch (error) {
+    return unverified(`Couldn't preview the deploy with a change set: ${(error as Error).message}`);
   } finally {
     await client
       .send(new DeleteChangeSetCommand({ StackName: stackName, ChangeSetName: changeSetName }))

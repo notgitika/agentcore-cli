@@ -35,11 +35,15 @@ export const CONFIRMATION_REQUIRED_MESSAGE =
   "Migrating refactors the project's deployed stacks and rewrites its files; re-run with --yes " +
   "to confirm non-interactively, or with --dry-run to see what it would change.";
 
-/** What `agentcore migrate --json` prints once it has applied (or tried to apply) a migration. */
+/**
+ * What `agentcore migrate --json` prints when applying: the plan, the refactors
+ * created from it, and what applying did. A plan that isn't ready stops before
+ * any refactor is created, so it has neither `refactors` entries nor `result`.
+ */
 export type MigrationOutput = {
   plan: MigrationPlan;
   refactors: StackRefactorPreview[];
-  result: MigrationResult;
+  result?: MigrationResult;
 };
 
 /**
@@ -85,7 +89,7 @@ export const createMigrateProjectHandler = (config: MigrateProjectHandlerConfig)
       try {
         const { plan } = prepared;
         if (!plan.ready) {
-          renderResult(ctx, plan, () =>
+          renderResult<MigrationOutput>(ctx, { plan, refactors: [] }, () =>
             io.stdout.write(formatMigrationPlan(plan, { dryRun: false })),
           );
           throw new SilentCLIError("the project can't be migrated yet");
@@ -96,7 +100,9 @@ export const createMigrateProjectHandler = (config: MigrateProjectHandlerConfig)
         // confirms what it will actually do; nothing changes until it's executed.
         const refactors = await prepared.preview({ onStep });
         if (!json) io.stdout.write(formatRefactorPreviews(refactors));
-        if (!flags.yes && !(await confirmMigration(io, plan))) throw new UserCancellationError();
+        if (!flags.yes && !(await confirmMigration(io, plan, refactors))) {
+          throw new UserCancellationError();
+        }
 
         const result = await prepared.apply({ onStep });
         renderResult<MigrationOutput>(ctx, { plan, refactors, result }, () =>
@@ -109,7 +115,11 @@ export const createMigrateProjectHandler = (config: MigrateProjectHandlerConfig)
     },
   });
 
-async function confirmMigration(io: AppIO, plan: MigrationPlan): Promise<boolean> {
+async function confirmMigration(
+  io: AppIO,
+  plan: MigrationPlan,
+  refactors: StackRefactorPreview[],
+): Promise<boolean> {
   const readline = createInterface({ input: io.stdin, output: io.stderr });
   try {
     const cancelled = new Promise<never>((_resolve, reject) => {
@@ -117,12 +127,15 @@ async function confirmMigration(io: AppIO, plan: MigrationPlan): Promise<boolean
       readline.once("SIGINT", cancel);
       readline.once("close", cancel);
     });
-    const stacks = plan.stacks.length;
+    const stacks = refactors.filter((refactor) => refactor.refactorId !== undefined).length;
     const answer = await Promise.race([
       readline.question(
-        `Migrate project '${plan.projectName ?? plan.rootPath}' to v1? This refactors ` +
-          `${stacks} deployed ${stacks === 1 ? "stack" : "stacks"} and rewrites the project's ` +
-          "files as listed above. (y/N) ",
+        `Migrate project '${plan.projectName ?? plan.rootPath}' to v1? This ` +
+          (stacks === 0
+            ? "rewrites the project's files as listed above (no stack needs refactoring). "
+            : `refactors ${stacks} deployed ${stacks === 1 ? "stack" : "stacks"} and rewrites ` +
+              "the project's files as listed above. ") +
+          "(y/N) ",
       ),
       cancelled,
     ]);
@@ -183,6 +196,10 @@ export function formatMigrationResult(result: MigrationResult): string {
   if (result.verification.length > 0) {
     lines.push("", "First v1 deploy (previewed with a change set, not executed)");
     for (const entry of result.verification) {
+      if (entry.error) {
+        lines.push(`  ${entry.stackName}: not verified: ${entry.error}`);
+        continue;
+      }
       const removes = entry.changes.filter((change) => change.action === "Remove").length;
       const replaces = entry.changes.filter((change) => change.replacement === "True").length;
       lines.push(
@@ -190,8 +207,8 @@ export function formatMigrationResult(result: MigrationResult): string {
           `(${replaces} ${replaces === 1 ? "replacement" : "replacements"}, ${removes} ` +
           `${removes === 1 ? "removal" : "removals"}); ` +
           (entry.problems.length === 0
-            ? "every AgentCore resource is kept"
-            : `${entry.problems.length} AgentCore ${entry.problems.length === 1 ? "resource" : "resources"} would be lost`),
+            ? "no AgentCore resource is replaced or removed"
+            : `${entry.problems.length} kept ${entry.problems.length === 1 ? "resource" : "resources"} would be replaced or removed`),
       );
       for (const problem of entry.problems) lines.push(`    ${problem}`);
     }
@@ -199,11 +216,13 @@ export function formatMigrationResult(result: MigrationResult): string {
   if (result.migrated) {
     lines.push("", "Files changed");
     for (const change of result.files) lines.push(`  ${change.kind.padEnd(8)}  ${change.path}`);
-    lines.push(
-      "",
-      `What changed and what's left to do is in ${result.report ?? "MIGRATION.md"}.`,
-      "Next: review the changes (git diff), commit them, then run `agentcore deploy`.",
-    );
+    if (result.warnings?.length) {
+      lines.push("", "Warnings");
+      for (const warning of result.warnings) lines.push(`  - ${warning}`);
+    }
+    lines.push("");
+    if (result.report) lines.push(`What changed and what's left to do is in ${result.report}.`);
+    lines.push("Next: review the changes (git diff), commit them, then run `agentcore deploy`.");
   } else {
     if (result.error) lines.push("", `Error: ${result.error}`);
     if (result.restored) {

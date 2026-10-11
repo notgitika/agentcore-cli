@@ -13,7 +13,11 @@ const NOT_COPIED = new Set(["node_modules", "cdk.out"]);
 
 /** Undoes or keeps a set of file writes. */
 export type ProjectFilesBackup = {
-  /** Puts every file back as it was before the writes. */
+  /**
+   * Puts every file back as it was before the writes. Tries every step even when
+   * one fails, then throws the failures together; the backup is kept until
+   * everything is back.
+   */
   restore(): Promise<void>;
   /** Keeps the writes and deletes the backup. */
   discard(): Promise<void>;
@@ -42,23 +46,51 @@ export async function writeMigratedFiles(input: {
     // agentcore.json last: an interrupted write leaves a project that is still v0.
     .sort((a, b) => Number(isSpec(a.path)) - Number(isSpec(b.path)));
   const written: FileChange[] = [];
+  /** Directories the writes created, outermost first; restore removes them again. */
+  const createdDirectories: string[] = [];
+  /** Directories the writes emptied and removed; restore recreates them. */
+  const removedDirectories: string[] = [];
   let cdkMoved = false;
 
   const restore = async () => {
+    const failures: string[] = [];
+    const attempt = async (what: string, step: () => Promise<unknown>) => {
+      try {
+        await step();
+      } catch (error) {
+        failures.push(`${what}: ${(error as Error).message}`);
+      }
+    };
     for (const change of [...written].reverse()) {
       const target = join(rootPath, change.path);
-      if (change.kind === "added") {
-        await rm(target, { force: true });
-        await removeEmptyParents(rootPath, dirname(target));
-      } else {
-        await mkdir(dirname(target), { recursive: true });
-        await cp(join(backup, "files", change.path), target);
-      }
+      await attempt(change.path, async () => {
+        if (change.kind === "added") {
+          await rm(target, { force: true });
+        } else {
+          await mkdir(dirname(target), { recursive: true });
+          await cp(join(backup, "files", change.path), target);
+        }
+      });
+    }
+    for (const directory of [...createdDirectories].reverse()) {
+      // Only if still empty: anything else in it isn't the migration's.
+      await rmdir(directory).catch(() => {});
+    }
+    for (const directory of removedDirectories) {
+      await attempt(relative(rootPath, directory), () => mkdir(directory, { recursive: true }));
     }
     if (cdkMoved) {
       const cdk = join(rootPath, CDK_RELATIVE_PATH);
-      await rm(cdk, { recursive: true, force: true });
-      if (existsSync(join(backup, "cdk"))) await rename(join(backup, "cdk"), cdk);
+      await attempt(CDK_RELATIVE_PATH, async () => {
+        // Retried: a freshly installed node_modules can be busy for a moment on Windows.
+        await rm(cdk, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+        if (existsSync(join(backup, "cdk"))) await rename(join(backup, "cdk"), cdk);
+      });
+    }
+    if (failures.length > 0) {
+      throw new Error(
+        `${failures.length} ${failures.length === 1 ? "path" : "paths"} couldn't be put back (${failures.join("; ")})`,
+      );
     }
     await rm(backup, { recursive: true, force: true });
   };
@@ -87,9 +119,9 @@ export async function writeMigratedFiles(input: {
       written.push(change);
       if (change.kind === "removed") {
         await rm(target, { force: true });
-        await removeEmptyParents(rootPath, dirname(target));
+        removedDirectories.push(...(await removeEmptyParents(rootPath, dirname(target))));
       } else {
-        await mkdir(dirname(target), { recursive: true });
+        createdDirectories.push(...(await makeDirectories(rootPath, dirname(target))));
         await cp(join(workspaceDirectory, change.path), target);
       }
     }
@@ -109,15 +141,32 @@ function isSpec(path: string): boolean {
   return path === "agentcore/agentcore.json";
 }
 
-/** Deletes `directory` and its parents while they're empty, stopping at the project root. */
-async function removeEmptyParents(rootPath: string, directory: string): Promise<void> {
+/** Creates `directory` and any missing parents; returns the ones it created, outermost first. */
+async function makeDirectories(rootPath: string, directory: string): Promise<string[]> {
+  const missing: string[] = [];
+  for (let current = directory; current !== rootPath && !existsSync(current);) {
+    missing.unshift(current);
+    current = dirname(current);
+  }
+  await mkdir(directory, { recursive: true });
+  return missing;
+}
+
+/**
+ * Deletes `directory` and its parents while they're empty, stopping at the
+ * project root; returns the ones it deleted, deepest first.
+ */
+async function removeEmptyParents(rootPath: string, directory: string): Promise<string[]> {
+  const removed: string[] = [];
   for (let current = directory; current !== rootPath && current.startsWith(rootPath);) {
     try {
       await rmdir(current);
     } catch {
       // Not empty (or already gone): nothing above it can be empty either.
-      return;
+      break;
     }
+    removed.push(current);
     current = dirname(current);
   }
+  return removed;
 }

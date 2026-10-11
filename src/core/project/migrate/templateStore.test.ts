@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { ProjectStateError } from "../../../errors";
 import { fakeCloudFormation, fakeTemplateStore } from "./migrate-test-support";
-import { bootstrapBucket, MAX_TEMPLATE_BODY_BYTES, templateLocation } from "./templateStore";
+import {
+  bootstrapBucket,
+  MAX_TEMPLATE_BODY_BYTES,
+  templateLocation,
+  templateUrl,
+} from "./templateStore";
 
 describe("templateLocation", () => {
   test("passes a template inline up to the limit, and uploads a bigger one", async () => {
@@ -39,5 +44,18 @@ describe("bootstrapBucket", () => {
     await expect(
       bootstrapBucket(cloudFormation.create({ region: "us-east-1" } as never)),
     ).rejects.toThrow("the CDKToolkit stack has no BucketName output");
+  });
+});
+
+describe("templateUrl", () => {
+  test("is path-style, in the region's partition", () => {
+    expect(
+      templateUrl("cdk-hnb659fds-assets-1-us-east-1", "us-east-1", "agentcore-migrate/S-1.json"),
+    ).toBe(
+      "https://s3.us-east-1.amazonaws.com/cdk-hnb659fds-assets-1-us-east-1/agentcore-migrate/S-1.json",
+    );
+    expect(templateUrl("b.with.dots", "cn-north-1", "k.json")).toBe(
+      "https://s3.cn-north-1.amazonaws.com.cn/b.with.dots/k.json",
+    );
   });
 });

@@ -276,8 +276,8 @@ describe("agentcore migrate (apply)", () => {
     expect(output.plan.ready).toBe(true);
     expect(output.refactors[0]).toMatchObject({ stackName: STACK, refactorId: "refactor-1" });
     expect(output.refactors[0]!.actions).toHaveLength(10);
-    expect(output.result).toMatchObject({ migrated: true, report: "MIGRATION.md", recovery: [] });
-    expect(output.result.stacks[0]!.outcome).toBe("refactored");
+    expect(output.result!).toMatchObject({ migrated: true, report: "MIGRATION.md", recovery: [] });
+    expect(output.result!.stacks[0]!.outcome).toBe("refactored");
   });
 });
 

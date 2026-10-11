@@ -64,6 +64,12 @@ export type MigrationWorkspace = {
    * change files outside the copy, such as the project itself.
    */
   escapingSymlinks: string[];
+  /**
+   * Stops Ctrl-C from deleting the workspace (it's still deleted when the process
+   * exits), for a step that handles Ctrl-C itself. Returns the function that turns
+   * the cleanup back on.
+   */
+  pauseInterruptCleanup(): () => void;
   /** Deletes the workspace. */
   dispose(): Promise<void>;
 };
@@ -76,10 +82,23 @@ export type MigrationWorkspace = {
  */
 export async function buildMigrationWorkspace(input: WorkspaceInput): Promise<MigrationWorkspace> {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "agentcore-migrate-")));
-  const detach = removeOnInterrupt(directory);
+  let detach = removeOnInterrupt(directory);
   const dispose = async () => {
     detach();
     await rm(directory, { recursive: true, force: true });
+  };
+  const pauseInterruptCleanup = () => {
+    detach();
+    const remove = () => rmSync(directory, { recursive: true, force: true });
+    process.on("exit", remove);
+    let resumed = false;
+    detach = () => process.off("exit", remove);
+    return () => {
+      if (resumed) return;
+      resumed = true;
+      detach();
+      detach = removeOnInterrupt(directory);
+    };
   };
   try {
     // Symlinks are copied as they are rather than rewritten to point back into the
@@ -122,6 +141,7 @@ export async function buildMigrationWorkspace(input: WorkspaceInput): Promise<Mi
       directory,
       changes: await diffTrees(input.rootPath, directory),
       escapingSymlinks: await escapingSymlinks(directory),
+      pauseInterruptCleanup,
       dispose,
     };
   } catch (error) {

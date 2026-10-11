@@ -31,7 +31,12 @@ import {
 import { defaultSource, type AssetSource } from "../source";
 import { convertHarness } from "./convertHarness";
 import { AWS_TARGETS_RELATIVE_PATH, convertSpec, convertTargets } from "./convertSpec";
-import { MigrationApplier, type PreparedStack } from "./apply";
+import {
+  JOURNAL_RELATIVE_PATH,
+  MigrationApplier,
+  type MigrationJournal,
+  type PreparedStack,
+} from "./apply";
 import { BACKUP_RELATIVE_PATH } from "./files";
 import { planStack, type PlannedStack } from "./plan";
 import type { PollOptions } from "./refactor";
@@ -172,16 +177,8 @@ export class FsProjectMigrator implements ProjectMigrator {
       );
       checks.push(await this.readStack(entry));
     }
-    if (existsSync(join(rootPath, BACKUP_RELATIVE_PATH))) {
-      checks.push({
-        name: "backup",
-        ok: false,
-        message:
-          `${BACKUP_RELATIVE_PATH} holds the v0 files of a migration that didn't finish. Check ` +
-          "that the project's files are as you want them (restore any you need from there), " +
-          "delete the directory, then try again.",
-      });
-    }
+    const unfinished = await unfinishedMigration(rootPath);
+    if (unfinished) checks.push(unfinished);
 
     const workspace = await buildMigrationWorkspace({
       rootPath,
@@ -394,6 +391,50 @@ export class FsProjectMigrator implements ProjectMigrator {
     }
     return plans;
   }
+}
+
+/**
+ * A failing check when an earlier `agentcore migrate` was stopped part-way (a
+ * second Ctrl-C, a crash): it leaves its journal, and its backup of the v0 files
+ * if it got as far as writing them. Says what it may have done and where the
+ * originals are, so nothing is deleted by accident.
+ */
+async function unfinishedMigration(rootPath: string): Promise<MigrationCheck | undefined> {
+  const journalPath = join(rootPath, JOURNAL_RELATIVE_PATH);
+  const backupPath = join(rootPath, BACKUP_RELATIVE_PATH);
+  const hasBackup = existsSync(backupPath);
+  if (!existsSync(journalPath) && !hasBackup) return undefined;
+  let journal: Partial<MigrationJournal> = {};
+  try {
+    journal = JSON.parse(await readFile(journalPath, "utf8")) as MigrationJournal;
+  } catch {
+    // No journal (or an unreadable one): the backup alone still says enough.
+  }
+  const lines = [
+    `An earlier \`agentcore migrate\`${journal.startedAt ? ` (started ${journal.startedAt})` : ""} ` +
+      "was stopped before it finished.",
+  ];
+  for (const refactor of journal.refactors ?? []) {
+    lines.push(
+      `Stack ${refactor.stackName} may be refactored to the v1 logical IDs: check with ` +
+        `\`aws cloudformation describe-stack-refactor --stack-refactor-id ${refactor.refactorId} ` +
+        `--region ${refactor.region}\` (EXECUTE_COMPLETE means it was; running \`agentcore ` +
+        "migrate` again then finds nothing to move in it). Don't deploy it with the v0 CLI " +
+        "until you know.",
+    );
+  }
+  if (hasBackup) {
+    lines.push(
+      `The v0 files it replaced are in ${BACKUP_RELATIVE_PATH}: agentcore/cdk in its cdk ` +
+        "directory, everything else under files/ at its project path. Copy back any that are " +
+        "missing or already converted (or restore them from git).",
+    );
+  }
+  lines.push(
+    `Once the project is a v0 project again, delete ${hasBackup ? `${BACKUP_RELATIVE_PATH} and ` : ""}` +
+      `${JOURNAL_RELATIVE_PATH}, then try again.`,
+  );
+  return { name: "unfinished migration", ok: false, message: lines.join("\n") };
 }
 
 /** A migration that can't go ahead: there is only the plan saying why. */

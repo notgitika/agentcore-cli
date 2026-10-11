@@ -190,6 +190,79 @@ describe("executeRefactor", () => {
   });
 });
 
+describe("executeRefactor, when it can't tell what happened", () => {
+  test("an Execute call that fails before CloudFormation starts it leaves the stack unchanged", async () => {
+    const { stack } = setup(["S"], {
+      refactors: () => ({ executeThrows: { message: "socket hang up", started: false } }),
+    });
+    const created = await createRefactor(stack("S"), NO_WAIT);
+
+    const error = await rejection(executeRefactor(created, NO_WAIT));
+
+    expect(error.details.kind).toBe("execute-failed");
+    expect(error.message).toBe(
+      "CloudFormation didn't start the refactor of stack 'S': socket hang up. The stack is unchanged.",
+    );
+  });
+
+  test("an Execute call that fails after CloudFormation started it is followed to the end", async () => {
+    const { cloudFormation, stack } = setup(["S"], {
+      refactors: () => ({ executeThrows: { message: "socket hang up", started: true } }),
+    });
+    const created = await createRefactor(stack("S"), NO_WAIT);
+
+    await executeRefactor(created, NO_WAIT);
+
+    expect(Object.keys(cloudFormation.stacks.S!.template!.Resources!)).toContain("NewMemory");
+  });
+
+  test("rides out a few failed reads", async () => {
+    const { stack } = setup(["S"], { refactors: () => ({ failedReads: 3 }) });
+    const created = await createRefactor(stack("S"), NO_WAIT);
+    await executeRefactor(created, NO_WAIT);
+  });
+
+  test("losing track of it (reads keep failing, or a timeout) is unknown, not rolled back", async () => {
+    const { stack } = setup(["S", "T"], {
+      refactors: ({ stackName }) =>
+        stackName === "S" ? { failedReads: 10 } : { executeSteps: ["EXECUTE_IN_PROGRESS"] },
+    });
+    const failing = await rejection(
+      executeRefactor(await createRefactor(stack("S"), NO_WAIT), NO_WAIT),
+    );
+    expect(failing.details).toMatchObject({ kind: "unknown", reason: "Rate exceeded" });
+    expect(failing.message).toContain("whether it finished isn't known");
+
+    const slow = await rejection(
+      executeRefactor(await createRefactor(stack("T"), NO_WAIT), { ...NO_WAIT, timeoutMs: 0 }),
+    );
+    expect(slow.details.kind).toBe("unknown");
+  });
+
+  test("an EXECUTE_FAILED that goes on to roll back is followed to its rollback", async () => {
+    const { stack } = setup(["S"], {
+      refactors: () => ({
+        executeSteps: ["EXECUTE_FAILED", "ROLLBACK_IN_PROGRESS"],
+        execute: { status: "ROLLBACK_FAILED", reason: "Import failed" },
+      }),
+    });
+
+    const error = await rejection(
+      executeRefactor(await createRefactor(stack("S"), NO_WAIT), NO_WAIT),
+    );
+
+    expect(error.details).toMatchObject({ kind: "rollback-failed", status: "ROLLBACK_FAILED" });
+  });
+
+  test("an OBSOLETE refactor is unknown", async () => {
+    const { stack } = setup(["S"], { refactors: () => ({ execute: { status: "OBSOLETE" } }) });
+    const error = await rejection(
+      executeRefactor(await createRefactor(stack("S"), NO_WAIT), NO_WAIT),
+    );
+    expect(error.details).toMatchObject({ kind: "unknown", status: "OBSOLETE" });
+  });
+});
+
 describe("executeRefactors", () => {
   test("refactors every stack in turn", async () => {
     const { cloudFormation, stack } = setup(["A", "B"]);
@@ -280,6 +353,28 @@ describe("executeRefactors", () => {
     expect(
       cloudFormation.calls.filter((call) => call.command === "CreateStackRefactorCommand"),
     ).toHaveLength(2);
+  });
+});
+
+describe("executeRefactors, stopped", () => {
+  test("stops before the next stack when asked, undoing the ones before it", async () => {
+    const { cloudFormation, stack } = setup(["A", "B"]);
+    const created = [
+      await createRefactor(stack("A"), NO_WAIT),
+      await createRefactor(stack("B"), NO_WAIT),
+    ];
+    let asked = 0;
+
+    const run = await executeRefactors(created, {
+      ...NO_WAIT,
+      stop: () => (++asked > 1 ? "Interrupted (Ctrl-C)." : undefined),
+    });
+
+    expect(run.failure?.error.message).toBe("Interrupted (Ctrl-C).");
+    expect(run.failure?.error.details.stackName).toBe("B");
+    expect(run.failure?.undone.map((entry) => entry.stackName)).toEqual(["A"]);
+    expect(cloudFormation.stacks.A!.template).toEqual(DEPLOYED);
+    expect(cloudFormation.stacks.B!.template).toEqual(DEPLOYED);
   });
 });
 

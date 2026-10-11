@@ -338,6 +338,15 @@ export type FakeRefactorOutcome = {
   create?: { status: string; reason?: string };
   /** Its ExecutionStatus once executed; anything but EXECUTE_COMPLETE fails it. */
   execute?: { status: string; reason?: string };
+  /**
+   * ExecutionStatus for successive reads after execution, before `execute`'s
+   * (which every later read returns), e.g. a rollback in progress.
+   */
+  executeSteps?: string[];
+  /** ExecuteStackRefactor throws this; `started` says whether CloudFormation ran it anyway. */
+  executeThrows?: { message: string; started: boolean };
+  /** How many reads after execution throw before the refactor reads normally again. */
+  failedReads?: number;
 };
 
 /** A change set as the fake reports it: the changes, or a failed creation. */
@@ -426,6 +435,12 @@ export function fakeCloudFormation(
               ExecutionStatus: create.status === "CREATE_COMPLETE" ? "AVAILABLE" : "UNAVAILABLE",
             };
       }
+      if ((refactor.outcome.failedReads ?? 0) > 0) {
+        refactor.outcome.failedReads! -= 1;
+        throw Object.assign(new Error("Rate exceeded"), { name: "Throttling" });
+      }
+      const step = refactor.outcome.executeSteps?.shift();
+      if (step) return { StackRefactorId: id, Status: "CREATE_COMPLETE", ExecutionStatus: step };
       const execute = refactor.outcome.execute ?? { status: "EXECUTE_COMPLETE" };
       return {
         StackRefactorId: id,
@@ -450,6 +465,8 @@ export function fakeCloudFormation(
       };
     }
     if (name === ExecuteStackRefactorCommand.name) {
+      const throws = refactor.outcome.executeThrows;
+      if (throws && !throws.started) throw new Error(throws.message);
       refactor.executed = true;
       // A completed refactor leaves the stack on the refactor's template; a failed
       // one rolls back, and one that couldn't roll back is left as it was here.
@@ -457,6 +474,7 @@ export function fakeCloudFormation(
         stacks[refactor.stackName]!.template = refactor.template;
         delete stacks[refactor.stackName]!.templateBody;
       }
+      if (throws) throw new Error(throws.message);
       return {};
     }
     return undefined;

@@ -101,7 +101,9 @@ describe("migrationReport", () => {
     );
     expect(report).toContain("- removed `app/h/harness.json`: replaced by harness.yaml\n");
     expect(report).toContain("- added `app/h/harness.yaml`: converted from harness.json\n");
-    expect(report).toContain("- replaced `agentcore/cdk/` with the v1 CDK app (2 files)");
+    expect(report).toContain(
+      "- replaced `agentcore/cdk/` with the v1 CDK app, and installed its dependencies\n",
+    );
     expect(report).toContain("deployed-state.json` as it was");
     expect(report).toContain("#### `AgentCore-CompatMig-default` (target `default`, us-east-1)");
     expect(report).toContain("A CloudFormation stack refactor (`rf-1`) moved 1 resource");

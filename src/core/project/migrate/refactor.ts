@@ -38,8 +38,21 @@ export type PollOptions = {
   onStep?: (message: string) => void;
 };
 
-/** Why a refactor stopped: it was never created, it failed and rolled back, or it couldn't roll back. */
-export type RefactorFailureKind = "create-failed" | "execute-failed" | "rollback-failed";
+/**
+ * Why a refactor stopped: it was never created; it failed and left the stack
+ * unchanged; it couldn't roll back, leaving the stack part-moved; or its outcome
+ * couldn't be read. The last two need a person to look at the stack.
+ */
+export type RefactorFailureKind =
+  "create-failed" | "execute-failed" | "rollback-failed" | "unknown";
+
+/** Whether a failure leaves the stack in a state only a person can sort out. */
+export function needsManualRepair(error: unknown): error is StackRefactorError {
+  return (
+    error instanceof StackRefactorError &&
+    (error.details.kind === "rollback-failed" || error.details.kind === "unknown")
+  );
+}
 
 /** A stack refactor that didn't finish. */
 export class StackRefactorError extends Error {
@@ -130,7 +143,8 @@ export async function createRefactor(
 /**
  * Executes a created refactor and waits for it to finish. A refactor that fails
  * and rolls back leaves the stack as it was; one that can't roll back leaves it
- * part-moved, which only manual work can repair.
+ * part-moved, which only manual work can repair; one whose outcome couldn't be
+ * read is `unknown`, and must be checked before anything else is done to it.
  */
 export async function executeRefactor(
   created: CreatedRefactor,
@@ -138,35 +152,37 @@ export async function executeRefactor(
 ): Promise<void> {
   const { stack, refactorId } = created;
   const { client, stackName, region } = stack;
-  const fail = (state: DescribeStackRefactorCommandOutput | undefined, error?: Error): never => {
+  const details = (state?: DescribeStackRefactorCommandOutput, fallbackReason?: string) => {
     const status = state?.ExecutionStatus;
-    const reason = state?.ExecutionStatusReason ?? state?.StatusReason ?? error?.message;
-    const details = {
-      stackName,
-      region,
-      refactorId,
-      ...(status && { status }),
-      ...(reason && { reason }),
-    };
-    if (status === "ROLLBACK_FAILED") {
-      throw new StackRefactorError(
-        `The refactor of stack '${stackName}' failed and CloudFormation couldn't roll it back ` +
-          `(${reason ?? "no reason given"}). Some resources may be under their old logical IDs ` +
-          "and some under their new ones.",
-        { kind: "rollback-failed", ...details },
-      );
-    }
+    const reason = state?.ExecutionStatusReason ?? state?.StatusReason ?? fallbackReason;
+    return { stackName, region, refactorId, ...(status && { status }), ...(reason && { reason }) };
+  };
+  const lost = (error: Error): never => {
     throw new StackRefactorError(
-      `The refactor of stack '${stackName}' failed (${status ?? "not started"}): ` +
-        `${reason ?? "no reason given"}. CloudFormation rolled it back, so the stack is unchanged.`,
-      { kind: "execute-failed", ...details },
+      `Lost track of the refactor of stack '${stackName}' (${error.message}), so whether it ` +
+        "finished isn't known.",
+      { kind: "unknown", ...details(undefined, error.message) },
     );
   };
 
   try {
     await client.send(new ExecuteStackRefactorCommand({ StackRefactorId: refactorId }));
   } catch (error) {
-    fail(undefined, error as Error);
+    // The request may have reached CloudFormation even though the response
+    // didn't come back; only a refactor still waiting to run wasn't started.
+    let state: DescribeStackRefactorCommandOutput | undefined;
+    try {
+      state = await describe(client, refactorId);
+    } catch {
+      lost(error as Error);
+    }
+    if (state?.ExecutionStatus === "AVAILABLE") {
+      throw new StackRefactorError(
+        `CloudFormation didn't start the refactor of stack '${stackName}': ` +
+          `${(error as Error).message}. The stack is unchanged.`,
+        { kind: "execute-failed", ...details(state, (error as Error).message) },
+      );
+    }
   }
   options.onStep?.(`Refactoring stack ${stackName}`);
   let state: DescribeStackRefactorCommandOutput;
@@ -179,16 +195,49 @@ export async function executeRefactor(
         !current.ExecutionStatus?.endsWith("_IN_PROGRESS"),
       options,
     );
+    if (state.ExecutionStatus === "EXECUTE_FAILED") {
+      // A failed execution may still be about to roll back: give it a few more
+      // reads to show ROLLBACK_IN_PROGRESS, and follow the rollback if it does.
+      let reads = 0;
+      state = await poll(
+        () => describe(client, refactorId),
+        (current) =>
+          (current.ExecutionStatus === "EXECUTE_FAILED" && ++reads > EXECUTE_FAILED_GRACE_READS) ||
+          (current.ExecutionStatus !== "EXECUTE_FAILED" &&
+            !current.ExecutionStatus?.endsWith("_IN_PROGRESS")),
+        options,
+      );
+    }
   } catch (error) {
-    // Lost track of it (timeout or a read error): its outcome is unknown, so it
-    // must be treated like one that couldn't roll back.
+    lost(error as Error);
+  }
+  const status = state!.ExecutionStatus;
+  if (status === "EXECUTE_COMPLETE") return;
+  const reason = details(state!).reason ?? "no reason given";
+  if (status === "ROLLBACK_FAILED") {
     throw new StackRefactorError(
-      `Lost track of the refactor of stack '${stackName}': ${(error as Error).message}.`,
-      { kind: "rollback-failed", stackName, region, refactorId, reason: (error as Error).message },
+      `The refactor of stack '${stackName}' failed and CloudFormation couldn't roll it back ` +
+        `(${reason}). Some resources may be under their old logical IDs and some under their new ones.`,
+      { kind: "rollback-failed", ...details(state!) },
     );
   }
-  if (state.ExecutionStatus !== "EXECUTE_COMPLETE") fail(state);
+  if (status === "EXECUTE_FAILED" || status === "ROLLBACK_COMPLETE") {
+    throw new StackRefactorError(
+      `The refactor of stack '${stackName}' failed (${status}): ${reason}. CloudFormation ` +
+        "rolled it back, so the stack is unchanged.",
+      { kind: "execute-failed", ...details(state!) },
+    );
+  }
+  // OBSOLETE, UNAVAILABLE, or a status this code doesn't know.
+  throw new StackRefactorError(
+    `The refactor of stack '${stackName}' ended ${status ?? "with no status"} (${reason}), so ` +
+      "whether it moved anything isn't known.",
+    { kind: "unknown", ...details(state!) },
+  );
 }
+
+/** Reads after EXECUTE_FAILED in which a rollback may still start. */
+const EXECUTE_FAILED_GRACE_READS = 3;
 
 /**
  * The refactor that undoes an executed one: the stack's current template (the
@@ -229,29 +278,42 @@ export type RefactorRun = {
 /**
  * Executes created refactors one stack at a time. When one fails, the ones before
  * it are undone, so the stacks end up either all refactored or all as they were.
- * A refactor that couldn't roll back stops everything at once: it needs manual
- * repair, and changing more stacks would only add to what has to be repaired.
+ * A refactor that couldn't roll back (or whose outcome is unknown) stops
+ * everything at once: it needs manual repair, and changing more stacks would only
+ * add to what has to be repaired. `stop` is asked before each stack; when it says
+ * so (the user pressed Ctrl-C), the run stops and undoes what it did.
  */
 export async function executeRefactors(
   created: CreatedRefactor[],
-  options: PollOptions = {},
+  options: PollOptions & { stop?: () => string | undefined } = {},
 ): Promise<RefactorRun> {
   const refactored: RefactorStack[] = [];
   for (const refactor of created) {
-    try {
-      await executeRefactor(refactor, options);
-      refactored.push(refactor.stack);
-    } catch (error) {
-      const failure = asRefactorError(error, refactor.stack);
-      if (failure.details.kind === "rollback-failed") {
-        return { refactored, failure: { error: failure, undone: [], undoFailed: [] } };
+    let failure: StackRefactorError | undefined;
+    const stopped = options.stop?.();
+    if (stopped) {
+      failure = new StackRefactorError(stopped, {
+        kind: "execute-failed",
+        stackName: refactor.stack.stackName,
+        region: refactor.stack.region,
+      });
+    } else {
+      try {
+        await executeRefactor(refactor, options);
+        refactored.push(refactor.stack);
+        continue;
+      } catch (error) {
+        failure = asRefactorError(error, refactor.stack);
       }
-      const undo = await undoRefactors(refactored, options);
-      return {
-        refactored: undo.undoFailed.map(({ stack }) => stack),
-        failure: { error: failure, ...undo },
-      };
     }
+    if (needsManualRepair(failure)) {
+      return { refactored, failure: { error: failure, undone: [], undoFailed: [] } };
+    }
+    const undo = await undoRefactors(refactored, options);
+    return {
+      refactored: undo.undoFailed.map(({ stack }) => stack),
+      failure: { error: failure, ...undo },
+    };
   }
   return { refactored };
 }
@@ -316,6 +378,9 @@ async function listActions(
   }));
 }
 
+/** Consecutive failed reads a poll rides out before failing. */
+const MAX_FAILED_READS = 3;
+
 /** Reads until `done` holds, sleeping between reads, failing after the timeout. */
 export async function poll<T>(
   read: () => Promise<T>,
@@ -326,8 +391,18 @@ export async function poll<T>(
   const timeout = options.timeoutMs ?? 30 * 60_000;
   const sleep = options.sleep ?? sleepFor;
   const deadline = Date.now() + timeout;
+  let failedReads = 0;
   for (;;) {
-    const value = await read();
+    let value: T;
+    try {
+      value = await read();
+      failedReads = 0;
+    } catch (error) {
+      // The SDK has already retried; a few more reads ride out a longer blip.
+      if (++failedReads > MAX_FAILED_READS || Date.now() >= deadline) throw error;
+      await sleep(interval);
+      continue;
+    }
     if (done(value)) return value;
     if (Date.now() >= deadline) {
       throw new Error(`still not finished after ${Math.round(timeout / 1000)} s`);

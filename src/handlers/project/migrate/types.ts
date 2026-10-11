@@ -191,6 +191,8 @@ export type StackVerification = {
   target: string;
   stackName: string;
   changeSetName: string;
+  /** Why the change set couldn't be created or read; the stack isn't verified. */
+  error?: string;
   changes: ChangeSetResourceChange[];
   /** AgentCore resources (or ECR repositories, harness roles) it would replace or delete; empty means verified. */
   problems: string[];
@@ -235,6 +237,8 @@ export type MigrationResult = {
   restored?: boolean;
   /** Steps only the user can take; empty unless something couldn't be undone. */
   recovery: string[];
+  /** Housekeeping that failed after a completed migration (MIGRATION.md, cleanup). */
+  warnings?: string[];
 };
 
 export type MigrationApplyOptions = {
