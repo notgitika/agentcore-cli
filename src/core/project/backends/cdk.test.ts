@@ -563,6 +563,51 @@ describe("CdkBackend.deploy", () => {
     });
   });
 
+  test("keeps createdByCli on a pinned provider a later deploy only updated", async () => {
+    const input = await project();
+    await writeAssembly(input, [TARGET.name]);
+    const statePath = join(input.rootPath, DEPLOYED_STATE_RELATIVE_PATH);
+    const pinned = { credentialProviderArn: "arn:apikey:key", providerName: "key" };
+    await Bun.write(
+      statePath,
+      JSON.stringify({
+        targets: {
+          default: {
+            resources: {
+              credentials: {
+                key: { ...pinned, createdByCli: true },
+                other: { credentialProviderArn: "arn:apikey:other", createdByCli: true },
+              },
+            },
+          },
+        },
+      }),
+    );
+    // eslint-disable-next-line require-yield -- returns the provisioned records only
+    const provisionCredentials: CredentialProvisioner = async function* () {
+      return {
+        key: pinned,
+        other: { credentialProviderArn: "arn:apikey:other" },
+        renamed: { credentialProviderArn: "arn:apikey:renamed", providerName: "renamed" },
+      };
+    };
+    const subject = harness({
+      outputs: { RuntimeArn: "arn:runtime" },
+      stackArn: "arn:aws:cloudformation:us-east-1:111122223333:stack/AgentCore-example-default/abc",
+      provisionCredentials,
+    });
+
+    await collectDeploy(subject.backend.deploy(input, deployInput()));
+
+    const state = JSON.parse(await Bun.file(statePath).text());
+    expect(state.targets.default.resources.credentials).toEqual({
+      key: { ...pinned, createdByCli: true },
+      // Only pinned providers carry the marker over.
+      other: { credentialProviderArn: "arn:apikey:other" },
+      renamed: { credentialProviderArn: "arn:apikey:renamed", providerName: "renamed" },
+    });
+  });
+
   test("fails a deploy whose result carries no stack ARN, recording no binding", async () => {
     const input = await project();
     await writeAssembly(input, [TARGET.name]);

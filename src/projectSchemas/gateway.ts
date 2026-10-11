@@ -5,6 +5,7 @@ import { GatewayAuthorizerConfigSchema, GatewayAuthorizerTypeSchema } from "./au
 import { ToolDefinitionSchema } from "./mcp-defs";
 import { TagsSchema } from "./tags";
 import { z } from "zod";
+import { LambdaFunctionNameSchema, resourceNameSchema } from "./resource-name";
 export const GatewayTargetTypeSchema = z.enum([
   "lambda",
   "mcpServer",
@@ -176,6 +177,8 @@ const CodeZipRuntimeConfigSchema = z
     build: z.literal("CodeZip"),
     pythonVersion: PythonRuntimeSchema,
     name: AgentRuntimeNameSchema,
+    /** Pinned AWS name of the runtime; see {@link resourceNameSchema}. */
+    resourceName: resourceNameSchema(48).optional(),
     entrypoint: PythonEntrypointSchema,
     codeLocation: DirectoryPathSchema,
     instrumentation: InstrumentationSchema.optional(),
@@ -195,6 +198,8 @@ const LambdaComputeConfigSchema = z
     timeout: z.number().int().min(1).max(900).optional(),
     memorySize: z.number().int().min(128).max(10240).optional(),
     iamPolicy: IamPolicyDocumentSchema.optional(),
+    /** Pinned Lambda function name; see {@link LambdaFunctionNameSchema}. */
+    functionName: LambdaFunctionNameSchema.optional(),
   })
   .strict()
   .refine(

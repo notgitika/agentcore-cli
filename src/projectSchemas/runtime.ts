@@ -13,6 +13,7 @@ import { AuthorizerConfigSchema, RuntimeAuthorizerTypeSchema } from "./auth";
 import { ConnectionSchema } from "./connections";
 import { TagsSchema } from "./tags";
 import { z } from "zod";
+import { EcrRepositoryNameSchema, resourceNameSchema } from "./resource-name";
 export const AgentNameSchema = z
   .string()
   .min(1, "Name is required")
@@ -287,6 +288,9 @@ export const ModelProviderSchema = z.preprocess(
 export const ProjectRuntimeSchema = z
   .object({
     name: AgentNameSchema,
+    resourceName: resourceNameSchema(48).optional(),
+    /** Pinned ECR repository name for a Container build; see {@link EcrRepositoryNameSchema}. */
+    repositoryName: EcrRepositoryNameSchema.optional(),
     /**
      * The model provider a template scaffold wired into this runtime's code.
      * Written by scaffolds whose template renders provider client code; absent
@@ -394,7 +398,12 @@ export const ProjectRuntimeSchema = z
         path: ["runtimeVersion"],
       });
     }
-    for (const field of ["dockerfile", "buildContextPath", "customDockerBuildArgs"] as const) {
+    for (const field of [
+      "dockerfile",
+      "buildContextPath",
+      "customDockerBuildArgs",
+      "repositoryName",
+    ] as const) {
       if (data.build !== "Container" && data[field]) {
         ctx.addIssue({
           code: "custom",

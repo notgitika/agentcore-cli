@@ -1,5 +1,6 @@
 import z from "zod";
 import { PaymentProviderSchema } from "./payment";
+import { CredentialProviderNameSchema } from "./resource-name";
 // Max length and character set are the Identity service's own limits. The min
 // is temporarily raised above 1 so `add` never produces a name that the pinned
 // @aws/agentcore-cdk rejects at `build`; drop it back to 1 once a release that
@@ -29,6 +30,7 @@ export type SecretReference = z.infer<typeof SecretReferenceSchema>;
 export const ApiKeyCredentialSchema = z.object({
   authorizerType: z.literal("ApiKeyCredentialProvider"),
   name: CredentialNameSchema,
+  providerName: CredentialProviderNameSchema.optional(),
   /** External Secrets Manager reference; when absent the key comes from .env.local. */
   secretRef: SecretReferenceSchema.optional(),
 });
@@ -50,6 +52,7 @@ export const OAuthCredentialSchema = z
   .object({
     authorizerType: z.literal("OAuthCredentialProvider"),
     name: CredentialNameSchema,
+    providerName: CredentialProviderNameSchema.optional(),
     /** Credential provider vendor (free-form to track the service without CLI releases). */
     vendor: z.string().default(CUSTOM_OAUTH_VENDOR),
     /** Guided custom OAuth fields. */
@@ -104,6 +107,7 @@ export type OAuthCredential = z.infer<typeof OAuthCredentialSchema>;
 export const PaymentCredentialSchema = z.object({
   authorizerType: z.literal("PaymentCredentialProvider"),
   name: CredentialNameSchema,
+  providerName: CredentialProviderNameSchema.optional(),
   provider: PaymentProviderSchema,
 });
 export type PaymentCredential = z.infer<typeof PaymentCredentialSchema>;

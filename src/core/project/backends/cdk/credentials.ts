@@ -33,15 +33,34 @@ export type DeployedCredential = {
    * empties the spec before the deploy that tears the target down.
    */
   authorizerType?: CredentialType;
+  /**
+   * The credential's pinned provider name, when it has one. Recorded so a provider
+   * whose credential later leaves the spec is still known to be a pinned one, which
+   * the CLI keeps rather than deletes.
+   */
+  providerName?: string;
+  /**
+   * Set when this CLI created the pinned provider rather than adopting the one a v0
+   * CLI made. Such a provider is still kept on removal, but the message says so.
+   */
+  createdByCli?: boolean;
 };
 export type DeployedCredentials = Record<string, DeployedCredential>;
 
 /**
  * The Identity name a credential's provider is created under. Scoped to the project
  * and target so two targets in one account and region never share a provider.
+ *
+ * A credential that pins `providerName` keeps that name instead: `agentcore migrate`
+ * pins the bare name a v0 CLI created the provider under, so deploys keep updating
+ * the existing provider rather than creating a second one.
  */
-function providerName(projectName: string, targetName: string, credentialName: string): string {
-  return `${projectName}_${targetName}_${credentialName}`;
+function providerName(
+  projectName: string,
+  targetName: string,
+  credential: Pick<Credential, "name" | "providerName">,
+): string {
+  return credential.providerName ?? `${projectName}_${targetName}_${credential.name}`;
 }
 
 const PROVIDER_NAME_MAX_LENGTH = 128;
@@ -94,8 +113,12 @@ export type CredentialProvisioner = (
   input: CredentialProvisionInput,
 ) => AsyncGenerator<ProjectEvent, DeployedCredentials>;
 
-/** A credential's spec name and provider kind, enough to name and delete its provider. */
-export type CredentialProviderRef = Pick<Credential, "name" | "authorizerType">;
+/**
+ * A credential's spec name, provider kind, and pinned provider name if any: enough to
+ * name and delete its provider.
+ */
+export type CredentialProviderRef = Pick<Credential, "name" | "authorizerType" | "providerName"> &
+  Pick<DeployedCredential, "createdByCli">;
 
 export type CredentialRemovalInput = CredentialProvisionInput & {
   /** The credentials whose providers to delete. The caller decides the set. */
@@ -114,15 +137,25 @@ export type CredentialRemover = (
  *
  * A recorded entry without `authorizerType` was written by a CLI that named providers
  * by the bare credential name, so nothing exists under the scoped name and the entry
- * is skipped.
+ * is skipped. A recorded `providerName` is passed on, so the remover keeps it.
  */
 export function orphanedCredentials(
   recorded: DeployedCredentials,
   declared: readonly Credential[],
 ): CredentialProviderRef[] {
   const names = new Set(declared.map(({ name }) => name));
-  return Object.entries(recorded).flatMap(([name, { authorizerType }]) =>
-    authorizerType && !names.has(name) ? [{ name, authorizerType }] : [],
+  return Object.entries(recorded).flatMap(
+    ([name, { authorizerType, providerName, createdByCli }]) =>
+      authorizerType && !names.has(name)
+        ? [
+            {
+              name,
+              authorizerType,
+              ...(providerName && { providerName }),
+              ...(createdByCli && { createdByCli }),
+            },
+          ]
+        : [],
   );
 }
 
@@ -133,6 +166,10 @@ export function orphanedCredentials(
  * nothing outside this target can be using it. A provider that is already gone is
  * not an error, and a provider that cannot be deleted is reported rather than
  * failing the deploy that already changed the stack.
+ *
+ * A provider under a pinned `providerName` is kept: it was created by a v0 CLI, which
+ * named providers by the bare credential name, so another target in the same account
+ * and region may share it.
  */
 export function createCredentialRemover(identity: ProviderDeletes): CredentialRemover {
   return async function* removeCredentials(
@@ -140,8 +177,20 @@ export function createCredentialRemover(identity: ProviderDeletes): CredentialRe
     { region, credentials, targetName, providers },
   ) {
     const options: CoreOptions = { region, credentials };
-    for (const { name, authorizerType } of providers) {
-      const provider = providerName(project.name, targetName, name);
+    for (const ref of providers) {
+      const { authorizerType } = ref;
+      const provider = providerName(project.name, targetName, ref);
+      if (ref.providerName) {
+        const origin = ref.createdByCli ? "this CLI created it, but its name is pinned, so " : "";
+        yield {
+          type: "step",
+          message:
+            `Keeping credential provider '${provider}': ${origin}other deployment targets may share it. ` +
+            `Delete it with 'aws bedrock-agentcore-control ${DELETE_COMMANDS[authorizerType]}' ` +
+            `once nothing uses it.`,
+        };
+        continue;
+      }
       yield { type: "step", message: `Removing credential provider '${provider}'` };
       try {
         await deleteProvider(identity, authorizerType, provider, options);
@@ -192,7 +241,7 @@ export function createCredentialProvisioner(
     // Every name is composed and checked before the first lookup, so one that is
     // too long fails the deploy before it touches Identity.
     const named: NamedCredential[] = declared.map((credential) => {
-      const provider = providerName(project.name, targetName, credential.name);
+      const provider = providerName(project.name, targetName, credential);
       if (provider.length > PROVIDER_NAME_MAX_LENGTH) {
         throw new ProjectStateError(
           `Credential '${credential.name}' would create a credential provider named ` +
@@ -230,8 +279,9 @@ export function createCredentialProvisioner(
     try {
       for (const { credential, provider, provision } of plans) {
         yield { type: "step", message: `Preparing credential provider '${provider}'` };
+        const pinned = credential.providerName && { providerName: credential.providerName };
         if ("reuse" in provision) {
-          provisioned[credential.name] = provision.reuse;
+          provisioned[credential.name] = { ...provision.reuse, ...pinned };
           continue;
         }
         // Recorded before the write, not after: a create whose response then fails
@@ -239,7 +289,11 @@ export function createCredentialProvisioner(
         // it. A create that never reached the service leaves nothing to delete, which
         // rollback treats as already gone.
         if (provision.kind === "create") created.push({ credential, provider });
-        provisioned[credential.name] = await provision.write();
+        provisioned[credential.name] = {
+          ...(await provision.write()),
+          ...pinned,
+          ...(pinned && provision.kind === "create" && { createdByCli: true }),
+        };
       }
     } catch (error) {
       yield* rollback(identity, created, options);

@@ -1,5 +1,6 @@
 import { KmsKeyArnSchema } from "./evaluator";
 import { z } from "zod";
+import { resourceNameSchema } from "./resource-name";
 export const ConfigBundleNameSchema = z
   .string()
   .min(1, "Name is required")
@@ -23,6 +24,7 @@ export const ConfigBundleBranchNameSchema = z
 export const ConfigBundleCommitMessageSchema = z.string().max(500);
 export const ConfigBundleSchema = z.object({
   name: ConfigBundleNameSchema,
+  resourceName: resourceNameSchema(100).optional(),
   type: z.literal("ConfigurationBundle").default("ConfigurationBundle"),
   description: ConfigBundleDescriptionSchema,
   components: ComponentConfigurationMapSchema,
