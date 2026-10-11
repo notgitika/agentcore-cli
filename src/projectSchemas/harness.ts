@@ -16,7 +16,7 @@ import { uniqueBy } from "./zod-util";
 import { TagsSchema } from "./tags";
 import { z } from "zod";
 import { modelIdHelp } from "./modelDocs";
-import { resourceNameSchema } from "./resource-name";
+import { EcrRepositoryNameSchema, IamRoleNameSchema, resourceNameSchema } from "./resource-name";
 export const CONTAINER_URI_PATTERN =
   /^(([0-9]{12})\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com(\.cn)?|public\.ecr\.aws)\/((?:[a-z0-9]+(?:[._-][a-z0-9]+)*\/)*[a-z0-9]+(?:[._-][a-z0-9]+)*)(?::([^:@]{1,300}))?(?:@(.+))?$/;
 export const MAX_CONTAINER_URI_LENGTH = 1024;
@@ -901,6 +901,10 @@ function withoutUndefined(record: Record<string, unknown>): Record<string, unkno
 export const HarnessRegistryEntrySchema = z.object({
   name: HarnessNameSchema,
   resourceName: resourceNameSchema(40).optional(),
+  /** Pinned name of the harness's execution role; see {@link IamRoleNameSchema}. */
+  roleName: IamRoleNameSchema.optional(),
+  /** Pinned ECR repository name for a Dockerfile build; see {@link EcrRepositoryNameSchema}. */
+  repositoryName: EcrRepositoryNameSchema.optional(),
   path: z.string().min(1, "Path to harness config directory is required"),
 });
 export type HarnessRegistryEntry = z.infer<typeof HarnessRegistryEntrySchema>;

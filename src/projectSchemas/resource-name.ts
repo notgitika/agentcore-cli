@@ -49,3 +49,28 @@ export const LambdaFunctionNameSchema = z
     /^[a-zA-Z0-9_-]+$/,
     "Function name must contain only alphanumeric characters, hyphens, and underscores (max 64 chars)",
   );
+
+/**
+ * The name of an ECR repository the project creates for a container build, when it
+ * must not be derived. `agentcore migrate` sets it to the `<project>/<name>`
+ * (lowercased) repository a v0 CLI created. Validated with ECR's name rules.
+ */
+export const EcrRepositoryNameSchema = z
+  .string()
+  .min(2, "Repository name must be at least 2 characters")
+  .max(256, "Repository name must be 256 characters or less")
+  .regex(
+    /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$/,
+    "Repository name must be lowercase letters and digits, separated by '.', '_', '-' or '/'",
+  );
+
+/**
+ * The name of an IAM role the project creates, when it must not be derived.
+ * `agentcore migrate` sets it on harnesses whose execution role a v0 CLI named
+ * `<project>_<harness>`. Validated with IAM's role name rules.
+ */
+export const IamRoleNameSchema = z
+  .string()
+  .min(1, "Role name is required")
+  .max(64, "Role name must be 64 characters or less")
+  .regex(/^[\w+=,.@-]+$/, "Role name must contain only alphanumeric characters and +=,.@_-");

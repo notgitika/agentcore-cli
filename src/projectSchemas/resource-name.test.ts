@@ -8,9 +8,12 @@ import { OnlineEvalConfigSchema } from "./online-eval-config";
 import { PolicyEngineSchema } from "./policy";
 import {
   CredentialProviderNameSchema,
+  EcrRepositoryNameSchema,
+  IamRoleNameSchema,
   LambdaFunctionNameSchema,
   resourceNameSchema,
 } from "./resource-name";
+import { AgentCoreGatewaySchema, ToolRuntimeSchema } from "./gateway";
 import { ProjectRuntimeSchema } from "./runtime";
 
 describe("resourceNameSchema", () => {
@@ -45,6 +48,26 @@ describe("LambdaFunctionNameSchema", () => {
 
   test.each(["", "has space", "colon:name", "x".repeat(65)])("rejects %p", (name) => {
     expect(LambdaFunctionNameSchema.safeParse(name).success).toBe(false);
+  });
+});
+
+describe("EcrRepositoryNameSchema", () => {
+  test.each(["proj/agent", "proj/harness-h", "a1", "a.b_c-d/e"])("accepts %s", (name) => {
+    expect(EcrRepositoryNameSchema.safeParse(name).success).toBe(true);
+  });
+
+  test.each(["Proj/agent", "a", "/a", "a//b", "a/"])("rejects %p", (name) => {
+    expect(EcrRepositoryNameSchema.safeParse(name).success).toBe(false);
+  });
+});
+
+describe("IamRoleNameSchema", () => {
+  test.each(["Proj_harness", "a+b=c,d.e@f-g"])("accepts %s", (name) => {
+    expect(IamRoleNameSchema.safeParse(name).success).toBe(true);
+  });
+
+  test.each(["", "has space", "x".repeat(65)])("rejects %p", (name) => {
+    expect(IamRoleNameSchema.safeParse(name).success).toBe(false);
   });
 });
 
@@ -110,6 +133,72 @@ describe("pinned names on resources", () => {
     const invalid = structuredClone(codeBased);
     invalid.config.codeBased.managed.functionName = "Proj eval";
     expect(EvaluatorSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  test("Container runtimes take a repositoryName; CodeZip runtimes don't", () => {
+    const container = {
+      ...runtime,
+      build: "Container",
+      runtimeVersion: undefined,
+      repositoryName: "proj/agent",
+    };
+    expect(ProjectRuntimeSchema.safeParse(container).success).toBe(true);
+    const codeZip = ProjectRuntimeSchema.safeParse({ ...runtime, repositoryName: "proj/agent" });
+    expect(codeZip.success).toBe(false);
+    expect(codeZip.error?.issues[0]?.message).toBe(
+      "repositoryName is only allowed for Container builds",
+    );
+  });
+
+  test("harness registry entries take a roleName and a repositoryName", () => {
+    const parsed = HarnessRegistryEntrySchema.parse({
+      ...harness,
+      roleName: "Proj_h",
+      repositoryName: "proj/harness-h",
+    });
+    expect(parsed).toMatchObject({ roleName: "Proj_h", repositoryName: "proj/harness-h" });
+    expect(
+      HarnessRegistryEntrySchema.safeParse({ ...harness, repositoryName: "Proj/H" }).success,
+    ).toBe(false);
+  });
+
+  test("tool runtimes and gateway-target runtimes take a resourceName; target Lambdas a functionName", () => {
+    const codeZip = {
+      build: "CodeZip",
+      pythonVersion: "PYTHON_3_12",
+      name: "toolRuntime",
+      entrypoint: "server.py:app",
+      codeLocation: "tools/rt",
+      resourceName: "Proj_toolRuntime",
+    };
+    const tool = ToolRuntimeSchema.parse({
+      name: "tool",
+      toolDefinition: { name: "tool", description: "d", inputSchema: { type: "object" } },
+      compute: {
+        host: "AgentCoreRuntime",
+        implementation: { language: "Python", path: "tools/rt", handler: "server.py:app" },
+        runtime: codeZip,
+      },
+    });
+    expect(tool.compute.runtime?.resourceName).toBe("Proj_toolRuntime");
+    const gateway = AgentCoreGatewaySchema.parse({
+      name: "gw",
+      targets: [
+        {
+          name: "fn",
+          targetType: "lambda",
+          toolDefinitions: [{ name: "fn", description: "d", inputSchema: { type: "object" } }],
+          compute: {
+            host: "Lambda",
+            implementation: { language: "Python", path: "tools/fn", handler: "handler.main" },
+            pythonVersion: "PYTHON_3_12",
+            functionName: "Proj-fn",
+          },
+        },
+      ],
+    });
+    const compute = gateway.targets[0]?.compute;
+    expect(compute?.host === "Lambda" && compute.functionName).toBe("Proj-fn");
   });
 
   test("policy engines and policies take a resourceName", () => {
