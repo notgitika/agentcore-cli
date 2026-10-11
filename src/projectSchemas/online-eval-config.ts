@@ -1,5 +1,6 @@
 import { TagsSchema } from "./tags";
 import { z } from "zod";
+import { resourceNameSchema } from "./resource-name";
 
 export const ONLINE_EVAL_MAX_EVALUATORS = 10;
 export const OnlineEvalConfigNameSchema = z
@@ -23,6 +24,7 @@ export const OnlineEvalEvaluatorsSchema = z
 export const OnlineEvalConfigSchema = z
   .object({
     name: OnlineEvalConfigNameSchema,
+    resourceName: resourceNameSchema(48).optional(),
     agent: z.string().min(1, "Agent name is required").optional(),
     endpoint: z.string().min(1).optional(),
     logGroupNames: z.array(z.string().min(1)).min(1).max(5).optional(),

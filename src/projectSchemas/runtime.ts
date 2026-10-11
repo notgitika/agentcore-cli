@@ -13,6 +13,7 @@ import { AuthorizerConfigSchema, RuntimeAuthorizerTypeSchema } from "./auth";
 import { ConnectionSchema } from "./connections";
 import { TagsSchema } from "./tags";
 import { z } from "zod";
+import { resourceNameSchema } from "./resource-name";
 export const AgentNameSchema = z
   .string()
   .min(1, "Name is required")
@@ -287,6 +288,7 @@ export const ModelProviderSchema = z.preprocess(
 export const ProjectRuntimeSchema = z
   .object({
     name: AgentNameSchema,
+    resourceName: resourceNameSchema(48).optional(),
     /**
      * The model provider a template scaffold wired into this runtime's code.
      * Written by scaffolds whose template renders provider client code; absent

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { TagsSchema } from "./tags";
+import { resourceNameSchema } from "./resource-name";
 export const EvaluationLevelSchema = z.enum(["SESSION", "TRACE", "TOOL_CALL"]);
 export type EvaluationLevel = z.infer<typeof EvaluationLevelSchema>;
 export const EvaluatorNameSchema = z
@@ -116,6 +117,7 @@ export const EvaluatorTypeSchema = z.literal("CustomEvaluator");
 export type EvaluatorType = z.infer<typeof EvaluatorTypeSchema>;
 export const EvaluatorSchema = z.object({
   name: EvaluatorNameSchema,
+  resourceName: resourceNameSchema(48).optional(),
   level: EvaluationLevelSchema,
   description: z.string().optional(),
   config: EvaluatorConfigSchema,

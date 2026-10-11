@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TagsSchema } from "./tags";
 import { uniqueBy } from "./zod-util";
+import { resourceNameSchema } from "./resource-name";
 export const MemoryStrategyTypeSchema = z.enum([
   "SEMANTIC",
   "SUMMARIZATION",
@@ -147,6 +148,7 @@ export const MEMORY_DESCRIPTION_MAX_LENGTH = 4096;
 export const MemorySchema = z
   .object({
     name: MemoryNameSchema,
+    resourceName: resourceNameSchema(48).optional(),
     description: z.string().min(1).max(MEMORY_DESCRIPTION_MAX_LENGTH).optional(),
     eventExpiryDuration: z.number().int().min(3).max(365),
     strategies: z

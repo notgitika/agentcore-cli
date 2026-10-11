@@ -16,6 +16,7 @@ import { uniqueBy } from "./zod-util";
 import { TagsSchema } from "./tags";
 import { z } from "zod";
 import { modelIdHelp } from "./modelDocs";
+import { resourceNameSchema } from "./resource-name";
 export const CONTAINER_URI_PATTERN =
   /^(([0-9]{12})\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com(\.cn)?|public\.ecr\.aws)\/((?:[a-z0-9]+(?:[._-][a-z0-9]+)*\/)*[a-z0-9]+(?:[._-][a-z0-9]+)*)(?::([^:@]{1,300}))?(?:@(.+))?$/;
 export const MAX_CONTAINER_URI_LENGTH = 1024;
@@ -808,6 +809,7 @@ export const HarnessYamlSchema = z
 
 export const HarnessRegistryEntrySchema = z.object({
   name: HarnessNameSchema,
+  resourceName: resourceNameSchema(40).optional(),
   path: z.string().min(1, "Path to harness config directory is required"),
 });
 export type HarnessRegistryEntry = z.infer<typeof HarnessRegistryEntrySchema>;

@@ -1,6 +1,7 @@
 import { uniqueBy } from "./zod-util";
 import { TagsSchema } from "./tags";
 import { z } from "zod";
+import { resourceNameSchema } from "./resource-name";
 export const PolicyEngineNameSchema = z
   .string()
   .min(1, "Policy engine name is required")
@@ -25,6 +26,7 @@ export const EnforcementModeSchema = z.enum(["ACTIVE", "LOG_ONLY"]).default("ACT
 export type EnforcementMode = z.infer<typeof EnforcementModeSchema>;
 export const PolicySchema = z.object({
   name: PolicyNameSchema,
+  resourceName: resourceNameSchema(48).optional(),
   description: z.string().min(1).max(4096).optional(),
   statement: z.string().min(1, "Cedar policy statement is required"),
   sourceFile: z.string().optional(),
@@ -35,6 +37,7 @@ export const PolicySchema = z.object({
 export type Policy = z.infer<typeof PolicySchema>;
 export const PolicyEngineSchema = z.object({
   name: PolicyEngineNameSchema,
+  resourceName: resourceNameSchema(48).optional(),
   description: z.string().min(1).max(4096).optional(),
   encryptionKeyArn: z.string().optional(),
   tags: TagsSchema.optional(),
