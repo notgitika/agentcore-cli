@@ -6,7 +6,11 @@ import { HarnessRegistryEntrySchema } from "./harness";
 import { MemorySchema } from "./memory";
 import { OnlineEvalConfigSchema } from "./online-eval-config";
 import { PolicyEngineSchema } from "./policy";
-import { CredentialProviderNameSchema, resourceNameSchema } from "./resource-name";
+import {
+  CredentialProviderNameSchema,
+  LambdaFunctionNameSchema,
+  resourceNameSchema,
+} from "./resource-name";
 import { ProjectRuntimeSchema } from "./runtime";
 
 describe("resourceNameSchema", () => {
@@ -31,6 +35,16 @@ describe("CredentialProviderNameSchema", () => {
 
   test.each(["", "has space", "dot.name", "x".repeat(129)])("rejects %p", (name) => {
     expect(CredentialProviderNameSchema.safeParse(name).success).toBe(false);
+  });
+});
+
+describe("LambdaFunctionNameSchema", () => {
+  test.each(["proj-eval-judge", "a_b", "1fn"])("accepts Lambda-style name %s", (name) => {
+    expect(LambdaFunctionNameSchema.safeParse(name).success).toBe(true);
+  });
+
+  test.each(["", "has space", "colon:name", "x".repeat(65)])("rejects %p", (name) => {
+    expect(LambdaFunctionNameSchema.safeParse(name).success).toBe(false);
   });
 });
 
@@ -82,6 +96,20 @@ describe("pinned names on resources", () => {
     expect(EvaluatorSchema.safeParse({ ...evaluator, resourceName: "Proj-judge" }).success).toBe(
       false,
     );
+  });
+
+  test("managed code-based evaluators take a pinned Lambda functionName", () => {
+    const codeBased = {
+      ...evaluator,
+      config: {
+        codeBased: { managed: { codeLocation: "app/eval", functionName: "Proj-eval-judge" } },
+      },
+    };
+    const parsed = EvaluatorSchema.parse(codeBased);
+    expect(parsed.config.codeBased?.managed?.functionName).toBe("Proj-eval-judge");
+    const invalid = structuredClone(codeBased);
+    invalid.config.codeBased.managed.functionName = "Proj eval";
+    expect(EvaluatorSchema.safeParse(invalid).success).toBe(false);
   });
 
   test("policy engines and policies take a resourceName", () => {

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TagsSchema } from "./tags";
-import { resourceNameSchema } from "./resource-name";
+import { LambdaFunctionNameSchema, resourceNameSchema } from "./resource-name";
 export const EvaluationLevelSchema = z.enum(["SESSION", "TRACE", "TOOL_CALL"]);
 export type EvaluationLevel = z.infer<typeof EvaluationLevelSchema>;
 export const EvaluatorNameSchema = z
@@ -74,6 +74,8 @@ export const LlmAsAJudgeConfigSchema = z.object({
 export type LlmAsAJudgeConfig = z.infer<typeof LlmAsAJudgeConfigSchema>;
 export const DEFAULT_CODE_BASED_TIMEOUT_SECONDS = 60;
 export const ManagedCodeBasedConfigSchema = z.object({
+  /** Pinned Lambda function name; see {@link LambdaFunctionNameSchema}. */
+  functionName: LambdaFunctionNameSchema.optional(),
   codeLocation: z.string().min(1),
   entrypoint: z.string().min(1).default("lambda_function.handler"),
   timeoutSeconds: z.number().int().min(1).max(300).default(DEFAULT_CODE_BASED_TIMEOUT_SECONDS),

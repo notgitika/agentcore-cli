@@ -34,3 +34,18 @@ export const CredentialProviderNameSchema = z
     /^[a-zA-Z0-9_-]+$/,
     "Provider name must contain only alphanumeric characters, hyphens, and underscores (max 128 chars)",
   );
+
+/**
+ * The name of a Lambda function the project creates, when it must not be derived
+ * from the project, target, and resource names. `agentcore migrate` sets it on
+ * managed code-based evaluators a v0 CLI already deployed, which named the function
+ * `<project>-eval-<evaluator>`. Validated with Lambda's function name rules.
+ */
+export const LambdaFunctionNameSchema = z
+  .string()
+  .min(1, "Function name is required")
+  .max(64, "Function name must be 64 characters or less")
+  .regex(
+    /^[a-zA-Z0-9_-]+$/,
+    "Function name must contain only alphanumeric characters, hyphens, and underscores (max 64 chars)",
+  );
