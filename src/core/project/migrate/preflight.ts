@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import type { ProcessRunner } from "../../../io";
+import { ProcessFailedError, type ProcessRunner } from "../../../io";
 import type { MigrationCheck } from "../../../handlers/project/migrate/types";
 import {
   V0AgentCoreProjectSpecSchema,
@@ -97,8 +97,21 @@ const GIT_REQUIRED =
   "agentcore migrate needs the project in a git repository with a clean working tree, so the " +
   "migration can be reviewed and undone.";
 
-/** The project must be in a git repository whose working tree is clean. */
+/** A spawn failure (no exit code), which for git means it isn't installed or isn't on PATH. */
+function gitMissing(error: unknown): boolean {
+  return error instanceof ProcessFailedError && error.meta.exitCode === null;
+}
+
+const GIT_NOT_INSTALLED =
+  `${GIT_REQUIRED} git isn't installed or isn't on your PATH: install it from ` +
+  "https://git-scm.com/downloads, then try again.";
+
+/**
+ * The project must be in a git repository, with agentcore.json committed and a
+ * clean working tree.
+ */
 export async function checkGit(rootPath: string, runner: ProcessRunner): Promise<MigrationCheck> {
+  const fail = (message: string): MigrationCheck => ({ name: "git", ok: false, message });
   const run = async (command: string[]): Promise<string> => {
     let output = "";
     await runner(command, { cwd: rootPath, onOutput: (chunk) => (output += chunk) });
@@ -106,22 +119,28 @@ export async function checkGit(rootPath: string, runner: ProcessRunner): Promise
   };
   try {
     await run(["git", "rev-parse", "--is-inside-work-tree"]);
-  } catch {
-    return {
-      name: "git",
-      ok: false,
-      message: `${GIT_REQUIRED} This project isn't in one: run 'git init' and commit the project, then try again.`,
-    };
+  } catch (error) {
+    if (gitMissing(error)) return fail(GIT_NOT_INSTALLED);
+    return fail(
+      `${GIT_REQUIRED} This project isn't in one: run 'git init' and commit the project, then try again.`,
+    );
+  }
+  try {
+    await run(["git", "ls-files", "--error-unmatch", "agentcore/agentcore.json"]);
+  } catch (error) {
+    if (gitMissing(error)) return fail(GIT_NOT_INSTALLED);
+    return fail(
+      `${GIT_REQUIRED} ${PROJECT_SPEC_RELATIVE_PATH} isn't committed: commit the project, then try again.`,
+    );
   }
   let status: string;
   try {
-    status = await run(["git", "status", "--porcelain", "--", "."]);
+    // --no-optional-locks: a read-only check must not take git's index lock and
+    // race an editor or another git process.
+    status = await run(["git", "--no-optional-locks", "status", "--porcelain", "--", "."]);
   } catch (error) {
-    return {
-      name: "git",
-      ok: false,
-      message: `Couldn't read git status: ${(error as Error).message}`,
-    };
+    if (gitMissing(error)) return fail(GIT_NOT_INSTALLED);
+    return fail(`Couldn't read git status: ${(error as Error).message}`);
   }
   // The runner merges stderr into the output; only porcelain status lines
   // ("XY path") are changes, so a git warning can't fail the check.
@@ -132,11 +151,7 @@ export async function checkGit(rootPath: string, runner: ProcessRunner): Promise
   if (dirty.length > 0) {
     const shown = dirty.slice(0, 5).map((line) => `  ${line}`);
     if (dirty.length > shown.length) shown.push(`  ...and ${dirty.length - shown.length} more`);
-    return {
-      name: "git",
-      ok: false,
-      message: `${GIT_REQUIRED} Commit or stash these changes first:\n${shown.join("\n")}`,
-    };
+    return fail(`${GIT_REQUIRED} Commit or stash these changes first:\n${shown.join("\n")}`);
   }
   return { name: "git", ok: true, message: "working tree is clean" };
 }

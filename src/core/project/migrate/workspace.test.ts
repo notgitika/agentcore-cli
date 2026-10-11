@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FsAssetSource } from "../source";
 import { writeV0Project } from "./migrate-test-support";
-import { buildMigrationWorkspace, diffTrees } from "./workspace";
+import { buildMigrationWorkspace, diffTrees, removeOnInterrupt } from "./workspace";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(() => Promise.all(cleanups.splice(0).map((cleanup) => cleanup())));
@@ -88,6 +88,41 @@ describe("buildMigrationWorkspace", () => {
     expect(existsSync(join(outside, "harness.yaml"))).toBe(false);
   });
 
+  test("leaves secrets, virtual environments, and caches out of the copy and the changes", async () => {
+    const { root, cleanup } = await writeV0Project({
+      files: {
+        "agentcore/.env.local": "AGENTCORE_CREDENTIAL_KEY=secret\n",
+        ".env": "X=1\n",
+        "app/CompatAAgent/venv/bin/python": "x",
+        "app/CompatAAgent/__pycache__/main.cpython-313.pyc": "x",
+        "app/CompatAAgent/.pytest_cache/v/cache": "x",
+      },
+    });
+    cleanups.push(cleanup);
+    const workspace = await buildMigrationWorkspace({
+      rootPath: root,
+      spec: {},
+      harnesses: [],
+      assetSource: new FsAssetSource(),
+    });
+    cleanups.push(workspace.dispose);
+
+    for (const path of [
+      "agentcore/.env.local",
+      ".env",
+      "app/CompatAAgent/venv",
+      "app/CompatAAgent/__pycache__",
+      "app/CompatAAgent/.pytest_cache",
+    ]) {
+      expect({ path, copied: existsSync(join(workspace.directory, path)) }).toEqual({
+        path,
+        copied: false,
+      });
+    }
+    const paths = workspace.changes.map((change) => change.path);
+    expect(paths.some((path) => /\.env|venv|__pycache__|pytest_cache/.test(path))).toBe(false);
+  });
+
   test("dispose removes the workspace", async () => {
     const { root, cleanup } = await writeV0Project();
     cleanups.push(cleanup);
@@ -128,5 +163,31 @@ describe("diffTrees", () => {
       { path: "b/changed.txt", kind: "modified" },
       { path: "gone.txt", kind: "removed" },
     ]);
+  });
+});
+
+describe("removeOnInterrupt", () => {
+  test("removes the directory on exit or interrupt until detached", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agentcore-interrupt-"));
+    const exitListeners = process.listenerCount("exit");
+    const sigintListeners = process.listenerCount("SIGINT");
+
+    const detach = removeOnInterrupt(directory);
+    expect(process.listenerCount("exit")).toBe(exitListeners + 1);
+    expect(process.listenerCount("SIGINT")).toBe(sigintListeners + 1);
+
+    // Another SIGINT handler stays in charge of exiting, so invoking ours here only cleans up.
+    const keepAlive = () => {};
+    process.on("SIGINT", keepAlive);
+    try {
+      const onInterrupt = process.listeners("SIGINT").at(-2) as () => void;
+      onInterrupt();
+    } finally {
+      process.off("SIGINT", keepAlive);
+    }
+    expect(existsSync(directory)).toBe(false);
+    expect(process.listenerCount("exit")).toBe(exitListeners);
+    expect(process.listenerCount("SIGINT")).toBe(sigintListeners);
+    detach();
   });
 });

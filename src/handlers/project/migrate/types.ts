@@ -22,6 +22,7 @@ export type MigrationProblem = {
 /** The resource kinds whose deployed AWS names a migration pins. */
 export type PinnedResourceType =
   | "runtime"
+  | "runtime-repository"
   | "memory"
   | "evaluator"
   | "evaluator-function"
@@ -30,7 +31,12 @@ export type PinnedResourceType =
   | "policy"
   | "config-bundle"
   | "harness"
+  | "harness-role"
+  | "harness-repository"
   | "gateway"
+  | "gateway-target-function"
+  | "gateway-target-runtime"
+  | "tool-runtime"
   | "credential";
 
 /** A deployed resource's existing AWS name, written into agentcore.json so v1 keeps it. */
@@ -59,6 +65,11 @@ export type MigrationPlan = {
   projectName?: string;
   checks: MigrationCheck[];
   problems: MigrationProblem[];
+  /**
+   * Fields v1 drops from already-deployed resources, which would change them on the
+   * next deploy. They block the migration like problems do, but are listed apart.
+   */
+  deployedChanges: MigrationProblem[];
   pins: PinnedName[];
   /** Things the migration drops or the user should know about; none block it. */
   warnings: string[];

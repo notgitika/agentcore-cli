@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join, posix } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -9,7 +10,8 @@ import {
   HarnessYamlSchema,
   type HarnessSpec,
 } from "../../../projectSchemas/harness";
-import { V0HarnessSpecSchema } from "../../../projectSchemas/v0";
+import { V0HarnessSpecSchema, type V0HarnessSpec } from "../../../projectSchemas/v0";
+import type { HarnessFacts } from "./convertSpec";
 import { describePath, droppedPaths, problemsFromZodError } from "./issues";
 
 const YAML_HEADER =
@@ -23,6 +25,9 @@ export type ConvertedHarness = {
   /** The harness.yaml content; absent when the harness has problems. */
   yaml?: string;
   problems: MigrationProblem[];
+  warnings: string[];
+  /** What harness.json says about the AWS resources v0 made; absent when it couldn't be read. */
+  facts?: HarnessFacts;
 };
 
 /** Reads a harness registry entry's `harness.json` and converts it to `harness.yaml`. */
@@ -41,6 +46,7 @@ export async function convertHarness(
     return {
       name: entry.name,
       directory,
+      warnings: [],
       problems: [
         {
           file: "agentcore/agentcore.json",
@@ -57,12 +63,40 @@ export async function convertHarness(
     return {
       name: entry.name,
       directory,
+      warnings: [],
       problems: [
         { file, path: "(file)", message: `Couldn't read it: ${(error as Error).message}` },
       ],
     };
   }
-  return { name: entry.name, directory, ...harnessJsonToYaml(raw, file) };
+  const converted = harnessJsonToYaml(raw, file);
+  const warnings: string[] = [];
+  // v0 and v1 resolve the prompt the same way: an inline systemPrompt wins, and
+  // system-prompt.md is read only when there is none. The conversion keeps the
+  // inline prompt inline and never inlines the file, so the deployed prompt stays
+  // the same; a file shadowed by an inline prompt is worth pointing out.
+  if (
+    converted.facts?.systemPrompt !== undefined &&
+    existsSync(join(rootPath, directory, "system-prompt.md"))
+  ) {
+    warnings.push(
+      `${directory}/system-prompt.md is ignored because harness.json sets systemPrompt inline; ` +
+        "v1 does the same. Delete the file, or remove systemPrompt from harness.yaml to use it.",
+    );
+  }
+  const facts = converted.facts && {
+    dockerfile: converted.facts.dockerfile,
+    containerUri: converted.facts.containerUri,
+    executionRoleArn: converted.facts.executionRoleArn,
+  };
+  return {
+    name: entry.name,
+    directory,
+    yaml: converted.yaml,
+    problems: converted.problems,
+    warnings,
+    facts,
+  };
 }
 
 /**
@@ -76,15 +110,17 @@ export async function convertHarness(
 export function harnessJsonToYaml(
   raw: unknown,
   file: string,
-): { yaml?: string; problems: MigrationProblem[] } {
+): { yaml?: string; problems: MigrationProblem[]; facts?: V0HarnessSpec } {
   const v0 = V0HarnessSpecSchema.safeParse(raw);
   if (!v0.success) return { problems: problemsFromZodError(file, raw, v0.error) };
+  const facts = v0.data;
 
   const v1 = HarnessSpecSchema.safeParse(v0.data);
-  if (!v1.success) return { problems: problemsFromZodError(file, v0.data, v1.error) };
+  if (!v1.success) return { facts, problems: problemsFromZodError(file, v0.data, v1.error) };
   const dropped = droppedPaths(v0.data, v1.data);
   if (dropped.length > 0) {
     return {
+      facts,
       problems: dropped.map((path) => ({
         file,
         path: describePath(v0.data, path),
@@ -97,6 +133,7 @@ export function harnessJsonToYaml(
   const decoded = HarnessYamlSchema.safeParse(parse(yaml));
   if (!decoded.success) {
     return {
+      facts,
       problems: problemsFromZodError(file, v1.data, decoded.error).map((problem) => ({
         ...problem,
         message: `can't be written to harness.yaml: ${problem.message}`,
@@ -106,6 +143,7 @@ export function harnessJsonToYaml(
   const changed = changedPaths(canonical(v1.data), canonical(decoded.data));
   if (changed.length > 0) {
     return {
+      facts,
       problems: changed.map((path) => ({
         file,
         path: describePath(v1.data, path),
@@ -113,7 +151,7 @@ export function harnessJsonToYaml(
       })),
     };
   }
-  return { yaml, problems: [] };
+  return { yaml, facts, problems: [] };
 }
 
 /**

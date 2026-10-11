@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { ProcessRunner } from "../../../io";
+import { ProcessFailedError, type ProcessRunner } from "../../../io";
 
 /** A deployed v0 project shaped like the live-tested F1 fixture, trimmed to one of each resource. */
 export const F1_SPEC = {
@@ -167,6 +167,7 @@ export const F1_DEPLOYED_STATE = {
             harnessArn: `${ARN}:harness/CompatA_CompatAHarness-frP175fqBI`,
             roleArn: "arn:aws:iam::998846730471:role/CompatA_CompatAHarness",
             status: "READY",
+            provisioner: "cloudformation",
           },
         },
         stackName: "AgentCore-CompatA-default",
@@ -253,18 +254,38 @@ export function commitAll(root: string): void {
 }
 
 /** A process runner that answers git commands from a script instead of spawning git. */
-export function fakeGit(responses: { insideWorkTree?: boolean; status?: string }): ProcessRunner {
+export function fakeGit(responses: {
+  /** git isn't installed: every command fails to spawn. */
+  missing?: boolean;
+  insideWorkTree?: boolean;
+  /** agentcore/agentcore.json is tracked; defaults to true. */
+  specTracked?: boolean;
+  status?: string;
+}): ProcessRunner {
   return async (command, options) => {
-    if (command.join(" ") === "git rev-parse --is-inside-work-tree") {
-      if (responses.insideWorkTree === false) throw new Error("fatal: not a git repository");
+    if (responses.missing) {
+      throw new ProcessFailedError(command, options.cwd, null, "Error: spawn git ENOENT");
+    }
+    const joined = command.join(" ");
+    if (joined === "git rev-parse --is-inside-work-tree") {
+      if (responses.insideWorkTree === false) {
+        throw new ProcessFailedError(command, options.cwd, 128, "fatal: not a git repository");
+      }
       options.onOutput?.("true\n");
       return;
     }
-    if (command.slice(0, 3).join(" ") === "git status --porcelain") {
+    if (joined === "git ls-files --error-unmatch agentcore/agentcore.json") {
+      if (responses.specTracked === false) {
+        throw new ProcessFailedError(command, options.cwd, 1, "error: pathspec did not match");
+      }
+      options.onOutput?.("agentcore/agentcore.json\n");
+      return;
+    }
+    if (joined === "git --no-optional-locks status --porcelain -- .") {
       options.onOutput?.(responses.status ?? "");
       return;
     }
-    throw new Error(`unexpected command: ${command.join(" ")}`);
+    throw new Error(`unexpected command: ${joined}`);
   };
 }
 

@@ -111,6 +111,13 @@ describe("formatMigrationPlan", () => {
         { name: "v0 project", ok: true, message: "'Proj' is a v0 project" },
         { name: "git", ok: false, message: "Commit or stash these changes first:\n  ?? x" },
       ],
+      deployedChanges: [
+        {
+          file: "agentcore/agentcore.json",
+          path: "payments[pm].x",
+          message: "v1 drops this field",
+        },
+      ],
       problems: [
         { file: "agentcore/agentcore.json", path: "credentials[ab].name", message: "too short" },
       ],
@@ -144,17 +151,27 @@ describe("formatMigrationPlan", () => {
         "Warnings",
         "  - Dropped fields v1 doesn't use: credentials[o].usage",
         "",
+        "Would change deployed configuration",
+        "  - agentcore/agentcore.json payments[pm].x: v1 drops this field",
+        "",
         "Fix before migrating",
         "  - agentcore/agentcore.json credentials[ab].name: too short",
         "",
-        "Not ready to migrate: 2 issues need fixing first.",
+        "Not ready to migrate: 3 issues need fixing first.",
         "",
       ].join("\n"),
     );
   });
 
   test("says when nothing is deployed and skips sections for a project it couldn't read", () => {
-    const base = { rootPath: "/p", problems: [], pins: [], warnings: [], changes: [] };
+    const base = {
+      rootPath: "/p",
+      problems: [],
+      deployedChanges: [],
+      pins: [],
+      warnings: [],
+      changes: [],
+    };
     expect(
       formatMigrationPlan({
         ...base,

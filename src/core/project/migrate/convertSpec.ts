@@ -9,6 +9,7 @@ import type { V0DeployedState, V0ProjectSpec } from "../../../projectSchemas/v0"
 import { PROJECT_SPEC_RELATIVE_PATH } from "../fsUtils";
 import { translateV0Spec } from "../legacy/translate";
 import { describePath, droppedPaths, problemsFromZodError } from "./issues";
+import { pinCollisions } from "./pinCollisions";
 
 type Json = Record<string, unknown>;
 
@@ -21,10 +22,24 @@ export type ConvertedSpec = {
   warnings: string[];
   /** Why the converted spec doesn't parse as v1 (or a pin can't be trusted); empty when it does. */
   problems: MigrationProblem[];
+  /**
+   * Fields v1 drops from resources that are already deployed. Dropping one changes
+   * the deployed resource on the next deploy, so each blocks the migration.
+   */
+  deployedChanges: MigrationProblem[];
 };
 
+/** What a harness's harness.json says about the AWS resources v0 created for it. */
+export type HarnessFacts = {
+  dockerfile?: string;
+  containerUri?: string;
+  executionRoleArn?: string;
+};
+
+type HarnessRecord = { harnessId: string; roleArn: string; provisioner?: string };
+
 /** The deployed resources a v0 deployed state records, by kind, across every target. */
-type DeployedResources = {
+export type DeployedResources = {
   runtimes: Map<string, string[]>;
   memories: Map<string, string[]>;
   evaluators: Map<string, string[]>;
@@ -33,15 +48,19 @@ type DeployedResources = {
   /** Keyed `engine/policy`, as v0 records them. */
   policies: Map<string, string[]>;
   configBundles: Map<string, string[]>;
-  harnesses: Map<string, string[]>;
+  harnesses: Map<string, HarnessRecord[]>;
   gateways: Map<string, string[]>;
   /** Credential provider ARNs. */
   credentials: Map<string, string[]>;
+  /** Runtime IDs of tool runtimes and gateway-target runtimes, keyed by tool or target name. */
+  mcpRuntimes: Map<string, string[]>;
+  /** Function names of gateway-target Lambdas, keyed by target name. */
+  mcpLambdas: Map<string, string[]>;
 };
 
 /**
- * Collects, for every resource any target deployed, the IDs (or ARNs, for
- * credentials) each target recorded. The IDs start with the resource's AWS name,
+ * Collects, for every resource any target deployed, what each target recorded
+ * about it. Recorded IDs are the resource's AWS name plus a 10-character suffix,
  * which is how pins are checked against what was actually deployed.
  */
 export function deployedResources(state: V0DeployedState): DeployedResources {
@@ -56,14 +75,16 @@ export function deployedResources(state: V0DeployedState): DeployedResources {
     harnesses: new Map(),
     gateways: new Map(),
     credentials: new Map(),
+    mcpRuntimes: new Map(),
+    mcpLambdas: new Map(),
   };
-  const add = <T>(
-    into: Map<string, string[]>,
+  const add = <T, R>(
+    into: Map<string, R[]>,
     entries: Record<string, T> | undefined,
-    id: (entry: T) => string,
+    record: (entry: T) => R,
   ) => {
     for (const [name, entry] of Object.entries(entries ?? {})) {
-      into.set(name, [...(into.get(name) ?? []), id(entry)]);
+      into.set(name, [...(into.get(name) ?? []), record(entry)]);
     }
   };
   for (const { resources } of Object.values(state.targets)) {
@@ -75,10 +96,16 @@ export function deployedResources(state: V0DeployedState): DeployedResources {
     add(deployed.policyEngines, resources.policyEngines, (p) => p.policyEngineId);
     add(deployed.policies, resources.policies, (p) => p.policyId);
     add(deployed.configBundles, resources.configBundles, (b) => b.bundleId);
-    add(deployed.harnesses, resources.harnesses, (h) => h.harnessId);
+    add(deployed.harnesses, resources.harnesses, (h) => ({
+      harnessId: h.harnessId,
+      roleArn: h.roleArn,
+      provisioner: h.provisioner,
+    }));
     add(deployed.gateways, resources.gateways, (g) => g.gatewayId);
     add(deployed.gateways, resources.mcp?.gateways, (g) => g.gatewayId);
     add(deployed.credentials, resources.credentials, (c) => c.credentialProviderArn);
+    add(deployed.mcpRuntimes, resources.mcp?.runtimes, (r) => r.runtimeId);
+    add(deployed.mcpLambdas, resources.mcp?.lambdas, (l) => l.functionName);
   }
   return deployed;
 }
@@ -88,8 +115,15 @@ export function deployedResources(state: V0DeployedState): DeployedResources {
  * everything already deployed, so v1 updates those resources in place instead of
  * replacing them. Never throws for a project v0 accepted: anything v1 rejects is
  * returned as a problem with its field path.
+ *
+ * `harnesses` carries each harness's harness.json facts (by harness name), which
+ * decide whether v0 created an execution role and an ECR repository for it.
  */
-export function convertSpec(v0: V0ProjectSpec, state: V0DeployedState): ConvertedSpec {
+export function convertSpec(
+  v0: V0ProjectSpec,
+  state: V0DeployedState,
+  harnesses: Record<string, HarnessFacts> = {},
+): ConvertedSpec {
   const { spec, extras } = translateV0Spec(v0);
   const candidate = spec as unknown as Json;
   const warnings: string[] = [];
@@ -108,11 +142,12 @@ export function convertSpec(v0: V0ProjectSpec, state: V0DeployedState): Converte
   }
 
   const deployed = deployedResources(state);
-  const { pins, problems } = pinDeployedNames(v0.name, candidate, deployed);
-
   const everDeployed = Object.values(state.targets).some(
     ({ resources }) => resources !== undefined,
   );
+  const { pins, problems } = pinDeployedNames(v0.name, candidate, deployed, harnesses);
+  problems.push(...pinCollisions(v0.name, candidate));
+
   const unrecorded = v0.credentials
     .map((credential) => credential.name)
     .filter((name) => !deployed.credentials.has(name));
@@ -134,19 +169,90 @@ export function convertSpec(v0: V0ProjectSpec, state: V0DeployedState): Converte
         ...problems,
         ...problemsFromZodError(PROJECT_SPEC_RELATIVE_PATH, candidate, parsed.error),
       ],
+      deployedChanges: [],
     };
   }
 
-  const dropped = droppedPaths(candidate, parsed.data).map((path) => describePath(candidate, path));
-  if (dropped.length > 0) {
-    warnings.push(`Dropped fields v1 doesn't use: ${dropped.join(", ")}`);
+  const harmless: string[] = [];
+  const deployedChanges: MigrationProblem[] = [];
+  const undeployed: string[] = [];
+  for (const path of droppedPaths(candidate, parsed.data)) {
+    const described = describePath(candidate, path);
+    if (isHarmlessDrop(path)) harmless.push(described);
+    else if (isDeployedResource(candidate, path, deployed, everDeployed)) {
+      deployedChanges.push({
+        file: PROJECT_SPEC_RELATIVE_PATH,
+        path: described,
+        message: "v1 drops this field, which changes the deployed resource on the next deploy",
+      });
+    } else undeployed.push(described);
   }
-  return { json: parsed.data as unknown as Json, pins, warnings, problems };
+  if (harmless.length > 0 || undeployed.length > 0) {
+    warnings.push(`Dropped fields v1 doesn't use: ${[...harmless, ...undeployed].join(", ")}`);
+  }
+  return { json: parsed.data as unknown as Json, pins, warnings, problems, deployedChanges };
+}
+
+/**
+ * Fields only the v0 CLI read, never sent to AWS: dropping them changes nothing
+ * deployed. Every other dropped field is assumed to reach AWS.
+ */
+const HARMLESS_DROPS: RegExp[] = [
+  // How the v0 CLI labelled an OAuth credential (inbound or outbound); not a provider property.
+  /^credentials\.\d+\.usage$/,
+];
+
+function isHarmlessDrop(path: PropertyKey[]): boolean {
+  const key = path.map(String).join(".");
+  return HARMLESS_DROPS.some((pattern) => pattern.test(key));
+}
+
+/** The deployed-resource map for each top-level collection whose entries v0 records by name. */
+const RECORDED_COLLECTIONS: Record<string, keyof DeployedResources> = {
+  runtimes: "runtimes",
+  memories: "memories",
+  evaluators: "evaluators",
+  onlineEvalConfigs: "onlineEvalConfigs",
+  policyEngines: "policyEngines",
+  configBundles: "configBundles",
+  harnesses: "harnesses",
+  agentCoreGateways: "gateways",
+  credentials: "credentials",
+  toolRuntimes: "mcpRuntimes",
+};
+
+/**
+ * Whether the resource a dropped field belongs to is deployed. For collections v0
+ * records by name that is exact; for anything else (payments, knowledge bases,
+ * top-level fields) it is assumed to be deployed if the project ever was.
+ */
+function isDeployedResource(
+  spec: Json,
+  path: PropertyKey[],
+  deployed: DeployedResources,
+  everDeployed: boolean,
+): boolean {
+  const [collection, index] = path;
+  const recorded = RECORDED_COLLECTIONS[String(collection)];
+  if (!recorded || typeof index !== "number") return everDeployed;
+  const entry = (spec[String(collection)] as Json[] | undefined)?.[index];
+  return deployed[recorded].has(String(entry?.name));
+}
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** A recorded resource ID: the AWS name, a hyphen, and the service's 10-character suffix. */
+function idOf(value: string, caseInsensitive = false): (id: string) => boolean {
+  const pattern = new RegExp(
+    `^${escapeRegExp(value)}-[A-Za-z0-9]{10}$`,
+    caseInsensitive ? "i" : "",
+  );
+  return (id) => pattern.test(id);
 }
 
 /**
  * Writes the v0 physical name of every deployed resource into `spec` (mutating it)
- * and checks each against the IDs the targets recorded. A name that doesn't match
+ * and checks each against what the targets recorded. A name that doesn't match
  * means v0 named the resource some other way; pinning it would replace the
  * resource, so it is reported as a problem.
  */
@@ -154,40 +260,54 @@ function pinDeployedNames(
   project: string,
   spec: Json,
   deployed: DeployedResources,
+  harnesses: Record<string, HarnessFacts>,
 ): { pins: PinnedName[]; problems: MigrationProblem[] } {
   const pins: PinnedName[] = [];
   const problems: MigrationProblem[] = [];
   const list = (key: string) => (spec[key] as Json[] | undefined) ?? [];
+  const problem = (resourceType: PinnedResourceType, name: string, message: string) =>
+    problems.push({ file: PROJECT_SPEC_RELATIVE_PATH, path: `${resourceType} ${name}`, message });
+  const set = (
+    resourceType: PinnedResourceType,
+    name: string,
+    target: Json,
+    field: string,
+    value: string,
+    label = field,
+  ) => {
+    target[field] = value;
+    pins.push({ resourceType, name, field: label, value });
+  };
 
+  /** Pins `value` when every recorded entry matches it; `false` when nothing was pinned. */
   const pin = (
     resourceType: PinnedResourceType,
     name: string,
     target: Json,
     field: string,
     value: string,
-    ids: string[] | undefined,
-    matches: (id: string) => boolean = (id) => id.startsWith(`${value}-`),
+    recorded: string[] | undefined,
+    matches: (recorded: string) => boolean = idOf(value),
+    label = field,
   ): boolean => {
-    if (!ids) return false;
-    const mismatched = ids.filter((id) => !matches(id));
+    if (!recorded) return false;
+    const mismatched = recorded.filter((entry) => !matches(entry));
     if (mismatched.length > 0) {
-      problems.push({
-        file: PROJECT_SPEC_RELATIVE_PATH,
-        path: `${resourceType} ${name}`,
-        message:
-          `deployed as '${mismatched.join("', '")}', which doesn't match the name ` +
+      problem(
+        resourceType,
+        name,
+        `deployed as '${mismatched.join("', '")}', which doesn't match the name ` +
           `'${value}' v0 would have given it, so its name can't be kept safely`,
-      });
+      );
       return false;
     }
-    target[field] = value;
-    pins.push({ resourceType, name, field, value });
+    set(resourceType, name, target, field, value, label);
     return true;
   };
 
   for (const runtime of list("runtimes")) {
     const name = String(runtime.name);
-    pin(
+    const pinned = pin(
       "runtime",
       name,
       runtime,
@@ -195,6 +315,15 @@ function pinDeployedNames(
       `${project}_${name}`,
       deployed.runtimes.get(name),
     );
+    if (pinned && runtime.build === "Container") {
+      set(
+        "runtime-repository",
+        name,
+        runtime,
+        "repositoryName",
+        `${project}/${name}`.toLowerCase(),
+      );
+    }
   }
   for (const memory of list("memories")) {
     const name = String(memory.name);
@@ -214,14 +343,14 @@ function pinDeployedNames(
       ?.managed;
     // Deployed state records no ID for the function, so it rides on the evaluator's own check.
     if (managed && pinned) {
-      const functionName = `${project}-eval-${name}`;
-      managed.functionName = functionName;
-      pins.push({
-        resourceType: "evaluator-function",
+      set(
+        "evaluator-function",
         name,
-        field: "config.codeBased.managed.functionName",
-        value: functionName,
-      });
+        managed,
+        "functionName",
+        `${project}-eval-${name}`,
+        "config.codeBased.managed.functionName",
+      );
     }
   }
   for (const config of list("onlineEvalConfigs")) {
@@ -264,22 +393,116 @@ function pinDeployedNames(
   }
   for (const harness of list("harnesses")) {
     const name = String(harness.name);
-    pin(
+    const records = deployed.harnesses.get(name);
+    if (!records) continue;
+    // A record without the CloudFormation marker is a harness the v0 preview built
+    // with API calls, outside any stack; CloudFormation can't adopt it.
+    if (records.some((record) => record.provisioner !== "cloudformation")) {
+      problem(
+        "harness",
+        name,
+        `was created outside CloudFormation; remove it with 'npx @aws/agentcore@0 remove harness ${name} --keep' ` +
+          "(or delete it) before migrating",
+      );
+      continue;
+    }
+    const pinned = pin(
       "harness",
       name,
       harness,
       "resourceName",
       `${project}_${name}`,
-      deployed.harnesses.get(name),
+      records.map((record) => record.harnessId),
     );
+    const facts = harnesses[name];
+    if (!pinned || !facts) continue;
+    if (!facts.executionRoleArn) {
+      const roleName = `${project}_${name}`;
+      pin(
+        "harness-role",
+        name,
+        harness,
+        "roleName",
+        roleName,
+        records.map((record) => record.roleArn),
+        (arn) => arn.endsWith(`/${roleName}`),
+      );
+    }
+    if (facts.dockerfile && !facts.containerUri) {
+      set(
+        "harness-repository",
+        name,
+        harness,
+        "repositoryName",
+        `${project}/harness-${name}`.toLowerCase(),
+      );
+    }
   }
   for (const gateway of list("agentCoreGateways")) {
     const name = String(gateway.name);
     const value =
       typeof gateway.resourceName === "string" ? gateway.resourceName : `${project}-${name}`;
     // Gateway IDs are the lowercased name plus a suffix.
-    pin("gateway", name, gateway, "resourceName", value, deployed.gateways.get(name), (id) =>
-      id.startsWith(`${value.toLowerCase()}-`),
+    pin(
+      "gateway",
+      name,
+      gateway,
+      "resourceName",
+      value,
+      deployed.gateways.get(name),
+      idOf(value.toLowerCase(), true),
+    );
+    for (const target of (gateway.targets as Json[] | undefined) ?? []) {
+      const targetName = String(target.name);
+      const compute = target.compute as Json | undefined;
+      if (compute?.host === "Lambda") {
+        const functionNames = deployed.mcpLambdas.get(targetName);
+        const unique = [...new Set(functionNames ?? [])];
+        if (unique.length > 1) {
+          problem(
+            "gateway-target-function",
+            targetName,
+            `deployed under different function names ('${unique.join("', '")}'), so one name can't be kept`,
+          );
+        } else if (unique[0] !== undefined) {
+          set(
+            "gateway-target-function",
+            targetName,
+            compute,
+            "functionName",
+            unique[0],
+            "compute.functionName",
+          );
+        }
+      }
+      const runtime = compute?.runtime as Json | undefined;
+      if (compute?.host === "AgentCoreRuntime" && runtime) {
+        pin(
+          "gateway-target-runtime",
+          targetName,
+          runtime,
+          "resourceName",
+          `${project}_${String(runtime.name)}`,
+          deployed.mcpRuntimes.get(targetName),
+          undefined,
+          "compute.runtime.resourceName",
+        );
+      }
+    }
+  }
+  for (const tool of list("toolRuntimes")) {
+    const name = String(tool.name);
+    const runtime = (tool.compute as Json | undefined)?.runtime as Json | undefined;
+    if (!runtime) continue;
+    pin(
+      "tool-runtime",
+      name,
+      runtime,
+      "resourceName",
+      `${project}_${String(runtime.name)}`,
+      deployed.mcpRuntimes.get(name),
+      undefined,
+      "compute.runtime.resourceName",
     );
   }
   for (const credential of list("credentials")) {

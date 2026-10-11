@@ -36,13 +36,28 @@ export class FsProjectMigrator implements ProjectMigrator {
   public async plan(rootPath: string): Promise<MigrationPlan> {
     const { checks, context } = await preflight(rootPath, this.runner);
     if (!context) {
-      return { rootPath, checks, problems: [], pins: [], warnings: [], changes: [], ready: false };
+      return {
+        rootPath,
+        checks,
+        problems: [],
+        deployedChanges: [],
+        pins: [],
+        warnings: [],
+        changes: [],
+        ready: false,
+      };
     }
     const { v0Spec, deployedState } = context;
 
-    const converted = convertSpec(v0Spec, deployedState);
     const harnesses = await Promise.all(
       v0Spec.harnesses.map((entry) => convertHarness(rootPath, entry)),
+    );
+    const converted = convertSpec(
+      v0Spec,
+      deployedState,
+      Object.fromEntries(
+        harnesses.flatMap(({ name, facts }) => (facts ? [[name, facts] as const] : [])),
+      ),
     );
     const problems: MigrationProblem[] = [
       ...converted.problems,
@@ -64,10 +79,14 @@ export class FsProjectMigrator implements ProjectMigrator {
         projectName: v0Spec.name,
         checks,
         problems,
+        deployedChanges: converted.deployedChanges,
         pins: converted.pins,
-        warnings: converted.warnings,
+        warnings: [...converted.warnings, ...harnesses.flatMap((harness) => harness.warnings)],
         changes: workspace.changes,
-        ready: checks.every((check) => check.ok) && problems.length === 0,
+        ready:
+          checks.every((check) => check.ok) &&
+          problems.length === 0 &&
+          converted.deployedChanges.length === 0,
       };
     } finally {
       await workspace.dispose();

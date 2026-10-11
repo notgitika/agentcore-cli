@@ -88,6 +88,13 @@ export function formatMigrationPlan(plan: MigrationPlan): string {
     for (const warning of plan.warnings) lines.push(`  - ${warning}`);
   }
 
+  if (plan.deployedChanges.length > 0) {
+    lines.push("", "Would change deployed configuration");
+    for (const change of plan.deployedChanges) {
+      lines.push(`  - ${change.file} ${change.path}: ${change.message}`);
+    }
+  }
+
   if (plan.problems.length > 0) {
     lines.push("", "Fix before migrating");
     for (const problem of plan.problems) {
@@ -95,7 +102,10 @@ export function formatMigrationPlan(plan: MigrationPlan): string {
     }
   }
 
-  const failed = plan.checks.filter((check) => !check.ok).length + plan.problems.length;
+  const failed =
+    plan.checks.filter((check) => !check.ok).length +
+    plan.problems.length +
+    plan.deployedChanges.length;
   lines.push(
     "",
     plan.ready

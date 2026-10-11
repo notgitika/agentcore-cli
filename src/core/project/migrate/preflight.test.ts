@@ -102,8 +102,22 @@ describe("checkGit", () => {
     });
     expect(commands).toEqual([
       ["git", "rev-parse", "--is-inside-work-tree"],
-      ["git", "status", "--porcelain", "--", "."],
+      ["git", "ls-files", "--error-unmatch", "agentcore/agentcore.json"],
+      ["git", "--no-optional-locks", "status", "--porcelain", "--", "."],
     ]);
+  });
+
+  test("tells a missing git apart from a missing repository", async () => {
+    const check = await checkGit("/p", fakeGit({ missing: true }));
+    expect(check.ok).toBe(false);
+    expect(check.message).toContain("git isn't installed or isn't on your PATH");
+    expect(check.message).not.toContain("git init");
+  });
+
+  test("fails when agentcore.json isn't committed", async () => {
+    const check = await checkGit("/p", fakeGit({ specTracked: false }));
+    expect(check.ok).toBe(false);
+    expect(check.message).toContain("agentcore/agentcore.json isn't committed");
   });
 });
 

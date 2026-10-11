@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { ProjectSpecSchema } from "../../../projectSchemas/project";
 import { V0AgentCoreProjectSpecSchema, type V0DeployedState } from "../../../projectSchemas/v0";
 import { rawFixture, v0Fixture, validV0FixtureNames } from "../legacy/fixtures-test-support";
-import { convertSpec, convertTargets, deployedResources } from "./convertSpec";
+import { convertSpec, convertTargets, deployedResources, type HarnessFacts } from "./convertSpec";
 import { F1_DEPLOYED_STATE, F1_SPEC } from "./migrate-test-support";
 
 type Json = Record<string, unknown>;
@@ -11,7 +11,7 @@ const f1 = () => V0AgentCoreProjectSpecSchema.parse(structuredClone(F1_SPEC));
 const f1State = () => structuredClone(F1_DEPLOYED_STATE) as V0DeployedState;
 
 /**
- * The audit fixtures v1 validates more strictly than v0 (from /tmp/schema-audit/report.txt),
+ * The audit fixtures v1 validates more strictly than v0 (the schema audit; see the design doc),
  * with the field each one fails on. Every other v0-valid fixture converts cleanly.
  */
 const EXPECTED_PROBLEMS: Record<string, string[]> = {
@@ -214,7 +214,7 @@ describe("convertSpec pins", () => {
           resources: {
             mcp: {
               gateways: {
-                CompatAGw: { gatewayId: "compata-compatagw-abc", gatewayArn: "arn:gw" },
+                CompatAGw: { gatewayId: "compata-compatagw-abcde12345", gatewayArn: "arn:gw" },
               },
             },
           },
@@ -232,7 +232,7 @@ describe("convertSpec pins", () => {
     const v0 = f1();
     v0.agentCoreGateways[0]!.resourceName = "custom-gw";
     const state = f1State();
-    state.targets.default!.resources!.gateways!.CompatAGw!.gatewayId = "custom-gw-xyz";
+    state.targets.default!.resources!.gateways!.CompatAGw!.gatewayId = "custom-gw-xyzab12345";
     const pin = convertSpec(v0, state).pins.find((p) => p.resourceType === "gateway");
     expect(pin?.value).toBe("custom-gw");
   });
@@ -271,7 +271,7 @@ describe("convertSpec pins", () => {
         default: {
           resources: {
             evaluators: {
-              CodeJudge: { evaluatorId: "CompatA_CodeJudge-abc", evaluatorArn: "arn:e" },
+              CodeJudge: { evaluatorId: "CompatA_CodeJudge-abcde12345", evaluatorArn: "arn:e" },
             },
           },
         },
@@ -308,7 +308,7 @@ describe("convertSpec pins", () => {
         default: {
           resources: {
             evaluators: {
-              CodeJudge: { evaluatorId: "Other_CodeJudge-abc", evaluatorArn: "arn:e" },
+              CodeJudge: { evaluatorId: "Other_CodeJudge-abcde12345", evaluatorArn: "arn:e" },
             },
           },
         },
@@ -388,5 +388,208 @@ describe("convertTargets", () => {
   test("blocks target names that differ only by case", () => {
     const problems = convertTargets(rawFixture("aws-targets_case-dup.json"));
     expect(problems[0]?.message).toContain("Duplicate deployment target name");
+  });
+});
+
+describe("convertSpec pins for tool runtimes, gateway-target compute, and containers", () => {
+  const recorded = (resources: Record<string, unknown>): V0DeployedState =>
+    ({ targets: { default: { resources } } }) as V0DeployedState;
+
+  test("pins deployed tool runtimes, target Lambdas, and Container runtime repositories", () => {
+    const state = recorded({
+      runtimes: {
+        agentB: {
+          runtimeId: "maxproj_agentB-abcde12345",
+          runtimeArn: "arn:r",
+          roleArn: "arn:role",
+        },
+      },
+      mcp: {
+        runtimes: {
+          rtTool: {
+            runtimeId: "maxproj_rtToolRuntime-abcde12345",
+            runtimeArn: "arn:rt",
+            runtimeEndpoint: "https://rt",
+          },
+        },
+        lambdas: {
+          lambdaTs: { functionName: "maxproj-lambdaTs", functionArn: "arn:fn" },
+        },
+      },
+    });
+    const { pins, problems, json } = convertSpec(v0Fixture("top-mcpRuntimeTools.json"), state);
+    expect(problems).toEqual([]);
+    expect(pins).toEqual([
+      { resourceType: "runtime", name: "agentB", field: "resourceName", value: "maxproj_agentB" },
+      {
+        resourceType: "runtime-repository",
+        name: "agentB",
+        field: "repositoryName",
+        value: "maxproj/agentb",
+      },
+      {
+        resourceType: "gateway-target-function",
+        name: "lambdaTs",
+        field: "compute.functionName",
+        value: "maxproj-lambdaTs",
+      },
+      {
+        resourceType: "tool-runtime",
+        name: "rtTool",
+        field: "compute.runtime.resourceName",
+        value: "maxproj_rtToolRuntime",
+      },
+    ]);
+    const spec = ProjectSpecSchema.parse(json);
+    expect(spec.runtimes.find((r) => r.name === "agentB")?.repositoryName).toBe("maxproj/agentb");
+    expect(spec.toolRuntimes?.[0]?.compute.runtime?.resourceName).toBe("maxproj_rtToolRuntime");
+    const lambdaTs = spec.agentCoreGateways
+      .flatMap((g) => g.targets)
+      .find((t) => t.name === "lambdaTs")?.compute;
+    expect(lambdaTs?.host === "Lambda" && lambdaTs.functionName).toBe("maxproj-lambdaTs");
+  });
+
+  test("pins a deployed gateway target's AgentCore Runtime", () => {
+    const state = recorded({
+      mcp: {
+        runtimes: {
+          mcpRt: {
+            runtimeId: "maxproj_rtToolRuntime-abcde12345",
+            runtimeArn: "arn:rt",
+            runtimeEndpoint: "https://rt",
+          },
+        },
+      },
+    });
+    const { pins, problems } = convertSpec(
+      v0Fixture("gateway-target-mcpServer-agentcoreRuntime-compute.json"),
+      state,
+    );
+    expect(problems).toEqual([]);
+    expect(pins).toEqual([
+      {
+        resourceType: "gateway-target-runtime",
+        name: "mcpRt",
+        field: "compute.runtime.resourceName",
+        value: "maxproj_rtToolRuntime",
+      },
+    ]);
+  });
+
+  test("refuses one Lambda name when targets recorded different ones", () => {
+    const state: V0DeployedState = {
+      targets: {
+        dev: {
+          resources: { mcp: { lambdas: { lambdaTs: { functionName: "a", functionArn: "x" } } } },
+        },
+        prod: {
+          resources: { mcp: { lambdas: { lambdaTs: { functionName: "b", functionArn: "y" } } } },
+        },
+      },
+    };
+    const { problems } = convertSpec(v0Fixture("top-mcpRuntimeTools.json"), state);
+    expect(problems.map((problem) => problem.path)).toEqual(["gateway-target-function lambdaTs"]);
+  });
+
+  test("checks the whole recorded ID shape, not just its prefix", () => {
+    const state = f1State();
+    state.targets.default!.resources!.runtimes!.CompatAAgent!.runtimeId =
+      "CompatA_CompatAAgent-short";
+    const { problems } = convertSpec(f1(), state);
+    expect(problems.map((problem) => problem.path)).toEqual(["runtime CompatAAgent"]);
+  });
+});
+
+describe("convertSpec harness pins", () => {
+  test("blocks a harness v0 created outside CloudFormation", () => {
+    const state = f1State();
+    delete state.targets.default!.resources!.harnesses!.CompatAHarness!.provisioner;
+    const { pins, problems } = convertSpec(f1(), state);
+    expect(pins.some((pin) => pin.resourceType === "harness")).toBe(false);
+    expect(problems).toEqual([
+      {
+        file: "agentcore/agentcore.json",
+        path: "harness CompatAHarness",
+        message:
+          "was created outside CloudFormation; remove it with " +
+          "'npx @aws/agentcore@0 remove harness CompatAHarness --keep' (or delete it) before migrating",
+      },
+    ]);
+  });
+
+  test("pins the execution role v0 created, checked against the recorded role ARN", () => {
+    const { pins, problems } = convertSpec(f1(), f1State(), { CompatAHarness: {} });
+    expect(problems).toEqual([]);
+    expect(pins).toContainEqual({
+      resourceType: "harness-role",
+      name: "CompatAHarness",
+      field: "roleName",
+      value: "CompatA_CompatAHarness",
+    });
+
+    const state = f1State();
+    state.targets.default!.resources!.harnesses!.CompatAHarness!.roleArn =
+      "arn:aws:iam::998846730471:role/Other";
+    const mismatched = convertSpec(f1(), state, { CompatAHarness: {} });
+    expect(mismatched.problems.map((problem) => problem.path)).toEqual([
+      "harness-role CompatAHarness",
+    ]);
+  });
+
+  test("pins no role for a harness with its own execution role", () => {
+    const { pins } = convertSpec(f1(), f1State(), {
+      CompatAHarness: { executionRoleArn: "arn:aws:iam::998846730471:role/Mine" },
+    });
+    expect(pins.some((pin) => pin.resourceType === "harness-role")).toBe(false);
+  });
+
+  test("pins the ECR repository of a Dockerfile harness, but not of a prebuilt image", () => {
+    const repository = (facts: HarnessFacts) =>
+      convertSpec(f1(), f1State(), { CompatAHarness: facts }).pins.find(
+        (pin) => pin.resourceType === "harness-repository",
+      );
+    expect(repository({ dockerfile: "Dockerfile" })).toEqual({
+      resourceType: "harness-repository",
+      name: "CompatAHarness",
+      field: "repositoryName",
+      value: "compata/harness-compataharness",
+    });
+    expect(
+      repository({ dockerfile: "Dockerfile", containerUri: "public.ecr.aws/x/y" }),
+    ).toBeUndefined();
+  });
+});
+
+describe("convertSpec dropped fields", () => {
+  test("blocks a field v1 drops from a deployed resource, and only warns otherwise", () => {
+    // v1 drops a runtime's capacityProviderConfiguration (preflight also blocks it).
+    const v0 = v0Fixture("runtime-capacityProviderArn-only.json");
+    const deployed: V0DeployedState = {
+      targets: {
+        default: {
+          resources: {
+            runtimes: {
+              agentB: { runtimeId: "maxproj_agentB-abcde12345", runtimeArn: "a", roleArn: "r" },
+            },
+          },
+        },
+      },
+    };
+    const result = convertSpec(v0, deployed);
+    expect(result.deployedChanges).toEqual([
+      {
+        file: "agentcore/agentcore.json",
+        path: "runtimes[agentB].capacityProviderConfiguration",
+        message: "v1 drops this field, which changes the deployed resource on the next deploy",
+      },
+    ]);
+    // A credential's usage label never reached AWS, so it only warns.
+    expect(result.warnings).toContain(
+      "Dropped fields v1 doesn't use: credentials[my-oauth].usage, credentials[gw1-oauth].usage",
+    );
+
+    const undeployed = convertSpec(v0, NEVER_DEPLOYED);
+    expect(undeployed.deployedChanges).toEqual([]);
+    expect(undeployed.warnings[0]).toContain("runtimes[agentB].capacityProviderConfiguration");
   });
 });

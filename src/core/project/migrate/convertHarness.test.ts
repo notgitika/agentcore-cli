@@ -219,6 +219,48 @@ describe("convertHarness", () => {
     },
   );
 
+  test("returns the harness facts the pins depend on", async () => {
+    const dir = await root({
+      "app/h/harness.json": JSON.stringify({
+        ...F1_HARNESS,
+        dockerfile: "Dockerfile",
+        executionRoleArn: "arn:aws:iam::123456789012:role/mine",
+      }),
+    });
+    const result = await convertHarness(dir, { name: "h", path: "app/h" });
+    expect(result.facts).toEqual({
+      dockerfile: "Dockerfile",
+      containerUri: undefined,
+      executionRoleArn: "arn:aws:iam::123456789012:role/mine",
+    });
+    expect(result.warnings).toEqual([]);
+  });
+
+  test("keeps a file-backed prompt in system-prompt.md, inlining nothing", async () => {
+    const dir = await root({
+      "app/h/harness.json": JSON.stringify(F1_HARNESS),
+      "app/h/system-prompt.md": "From the file.\n",
+    });
+    const result = await convertHarness(dir, { name: "h", path: "app/h" });
+    expect(parse(result.yaml!)).not.toHaveProperty("systemPrompt");
+    expect(result.warnings).toEqual([]);
+  });
+
+  test("keeps an inline prompt inline and warns that system-prompt.md is ignored", async () => {
+    const dir = await root({
+      "app/h/harness.json": JSON.stringify({ ...F1_HARNESS, systemPrompt: "Inline." }),
+      "app/h/system-prompt.md": "From the file.\n",
+    });
+    const result = await convertHarness(dir, { name: "h", path: "app/h" });
+    expect((parse(result.yaml!) as Record<string, unknown>).systemPrompt).toEqual([
+      { text: "Inline." },
+    ]);
+    expect(result.warnings).toEqual([
+      "app/h/system-prompt.md is ignored because harness.json sets systemPrompt inline; v1 does " +
+        "the same. Delete the file, or remove systemPrompt from harness.yaml to use it.",
+    ]);
+  });
+
   test("reports a missing harness.json", async () => {
     const result = await convertHarness(await root({}), { name: "h", path: "app/h" });
     expect(result.yaml).toBeUndefined();

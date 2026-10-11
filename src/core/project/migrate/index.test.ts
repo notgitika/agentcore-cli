@@ -36,7 +36,14 @@ describe("FsProjectMigrator.plan", () => {
     expect(plan.projectName).toBe("CompatA");
     expect(plan.checks.every((check) => check.ok)).toBe(true);
     expect(plan.problems).toEqual([]);
-    expect(plan.pins).toHaveLength(11);
+    // Every pin convertSpec makes for F1, plus the harness role it can name only from harness.json.
+    expect(plan.pins).toHaveLength(12);
+    expect(plan.pins).toContainEqual({
+      resourceType: "harness-role",
+      name: "CompatAHarness",
+      field: "roleName",
+      value: "CompatA_CompatAHarness",
+    });
     expect(plan.warnings).toEqual([
       "Dropped fields v1 doesn't use: credentials[compatA-oauth].usage",
     ]);
