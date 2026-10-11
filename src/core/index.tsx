@@ -148,7 +148,14 @@ export class CoreClient implements AwsClients {
         ),
     });
     this.bedrockAgentImporter = config.bedrockAgentImporter ?? new BedrockAgentImporter();
-    this.projectMigrator = config.projectMigrator ?? new FsProjectMigrator();
+    // Shares the CloudFormation client factory, so stack reads go through the same
+    // record/replay seam as deploy.
+    this.projectMigrator =
+      config.projectMigrator ??
+      new FsProjectMigrator({
+        logger: this.logger.child({ module: "projectMigrator" }),
+        createCloudFormationClient: config.createCloudFormationClient,
+      });
   }
 
   // control returns the control-plane client for `config`, creating and caching it

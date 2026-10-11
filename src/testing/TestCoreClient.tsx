@@ -2670,7 +2670,13 @@ export class TestCoreClient implements Core {
   };
 
   constructor(options?: TestCoreClientOptions) {
-    this.projectMigrator = options?.projectMigrator ?? new FsProjectMigrator();
+    this.projectMigrator =
+      options?.projectMigrator ??
+      new FsProjectMigrator({
+        logger: options?.logger ?? createSilentLogger(),
+        // Tests that reach AWS reads pass their own migrator with fake seams.
+        createCloudFormationClient: options?.createCloudFormationClient,
+      });
     this.projectManager = new FsProjectManager({
       logger: options?.logger ?? createSilentLogger(),
       createCloudFormationClient: options?.createCloudFormationClient,

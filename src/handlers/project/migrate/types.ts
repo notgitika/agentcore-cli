@@ -129,11 +129,18 @@ export type MigrationPlan = {
   /** Things the migration drops or the user should know about; none block it. */
   warnings: string[];
   changes: FileChange[];
-  /** Every check passed and nothing needs fixing first. */
+  /** One per deployment target with a deployed stack, once its checks pass and the v1 app synthesizes. */
+  stacks: StackMigrationPlan[];
+  /** Every check passed, nothing needs fixing first, and no stack has a blocker. */
   ready: boolean;
+};
+
+export type MigrationPlanOptions = {
+  /** Called as planning starts each slow step (reading stacks, installing, synthesizing). */
+  onStep?: (message: string) => void;
 };
 
 /** Plans the migration of a v0 project to v1. Implemented in src/core/project/migrate. */
 export interface ProjectMigrator {
-  plan(rootPath: string): Promise<MigrationPlan>;
+  plan(rootPath: string, options?: MigrationPlanOptions): Promise<MigrationPlan>;
 }
