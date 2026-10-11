@@ -427,6 +427,35 @@ describe("createCredentialProvisioner", () => {
     expect(subject.optionsSeen).toEqual([]);
   });
 
+  test("creates and updates a pinned provider under its providerName, not the scoped name", async () => {
+    const pinned = { ...API_KEY, providerName: "openai-key" };
+    const subject = account({
+      "openai-key": { credentialProviderArn: "arn:existing", clientSecretArn: "arn:existing/s" },
+    });
+    const input = await project(
+      [pinned, { ...COINBASE, providerName: "wallet" }],
+      "AGENTCORE_CREDENTIAL_OPENAI_KEY='sk-live'\n" +
+        "AGENTCORE_CREDENTIAL_WALLET_API_KEY_ID='id'\n" +
+        "AGENTCORE_CREDENTIAL_WALLET_API_KEY_SECRET='secret'\n" +
+        "AGENTCORE_CREDENTIAL_WALLET_WALLET_SECRET='wallet'\n",
+    );
+
+    const { events, result } = await run(subject.provision, input);
+
+    expect(stepMessages(events)).toEqual([
+      "Preparing credential provider 'openai-key'",
+      "Preparing credential provider 'wallet'",
+    ]);
+    expect(Object.keys(subject.contents()).sort()).toEqual(["openai-key", "wallet"]);
+    expect(subject.contents()["openai-key"]?.operation).toBe("updated");
+    expect(subject.contents()["wallet"]?.operation).toBe("created");
+    expect(subject.configFor("openai-key")).toEqual({ name: "openai-key", apiKey: "sk-live" });
+    // The pinned name is recorded, so the provider stays known as pinned once its
+    // credential leaves the spec.
+    expect(result["openai-key"]?.providerName).toBe("openai-key");
+    expect(result["wallet"]?.providerName).toBe("wallet");
+  });
+
   test("updates a provider that already exists with the current secret", async () => {
     const subject = account({
       [OPENAI_PROVIDER]: {
@@ -903,6 +932,20 @@ describe("orphanedCredentials", () => {
       { name: "openai-key", authorizerType: "ApiKeyCredentialProvider" },
     ]);
   });
+
+  test("passes on a recorded pinned provider name, so the remover keeps that provider", async () => {
+    const recorded: DeployedCredentials = {
+      "my-oauth": {
+        ...recordedAs("OAuthCredentialProvider", { credentialProviderArn: "arn:oauth" }),
+        providerName: "my-oauth",
+      },
+    };
+    const input = await project([]);
+
+    expect(orphanedCredentials(recorded, input.spec.credentials)).toEqual([
+      { name: "my-oauth", authorizerType: "OAuthCredentialProvider", providerName: "my-oauth" },
+    ]);
+  });
 });
 
 describe("createCredentialRemover", () => {
@@ -936,6 +979,24 @@ describe("createCredentialRemover", () => {
       `Removing credential provider '${WALLET_PROVIDER}'`,
     ]);
     expect(subject.optionsSeen).toEqual([OPTIONS, OPTIONS, OPTIONS]);
+  });
+
+  test("keeps a provider under a pinned providerName and names the command to delete it", async () => {
+    const subject = account({
+      "my-oauth": { credentialProviderArn: "arn:oauth:my-oauth" },
+      [OPENAI_PROVIDER]: { credentialProviderArn: `arn:apikey:${OPENAI_PROVIDER}` },
+    });
+
+    const { events } = await remove(subject, [{ ...OAUTH, providerName: "my-oauth" }, API_KEY]);
+
+    expect(subject.deleted).toEqual([{ kind: "apikey", name: OPENAI_PROVIDER }]);
+    expect(Object.keys(subject.contents())).toEqual(["my-oauth"]);
+    expect(stepMessages(events)).toEqual([
+      "Keeping credential provider 'my-oauth': other deployment targets may share it. " +
+        "Delete it with 'aws bedrock-agentcore-control delete-oauth2-credential-provider' " +
+        "once nothing uses it.",
+      `Removing credential provider '${OPENAI_PROVIDER}'`,
+    ]);
   });
 
   test("treats a provider that is already gone as removed", async () => {
