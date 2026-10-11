@@ -205,6 +205,21 @@ describe("executeRefactor, when it can't tell what happened", () => {
     );
   });
 
+  test("a failed Execute call is only 'not started' after several AVAILABLE reads", async () => {
+    const { cloudFormation, stack } = setup(["S"], {
+      refactors: () => ({ executeThrows: { message: "socket hang up", started: false } }),
+    });
+    const created = await createRefactor(stack("S"), NO_WAIT);
+    const before = cloudFormation.calls.length;
+
+    await rejection(executeRefactor(created, NO_WAIT));
+
+    const reads = cloudFormation.calls
+      .slice(before)
+      .filter((call) => call.command === "DescribeStackRefactorCommand");
+    expect(reads.length).toBeGreaterThan(4);
+  });
+
   test("an Execute call that fails after CloudFormation started it is followed to the end", async () => {
     const { cloudFormation, stack } = setup(["S"], {
       refactors: () => ({ executeThrows: { message: "socket hang up", started: true } }),
@@ -371,6 +386,7 @@ describe("executeRefactors, stopped", () => {
     });
 
     expect(run.failure?.error.message).toBe("Interrupted (Ctrl-C).");
+    expect(run.failure?.stopped).toBe(true);
     expect(run.failure?.error.details.stackName).toBe("B");
     expect(run.failure?.undone.map((entry) => entry.stackName)).toEqual(["A"]);
     expect(cloudFormation.stacks.A!.template).toEqual(DEPLOYED);

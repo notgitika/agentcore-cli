@@ -170,9 +170,16 @@ export async function executeRefactor(
   } catch (error) {
     // The request may have reached CloudFormation even though the response
     // didn't come back; only a refactor still waiting to run wasn't started.
+    // One AVAILABLE read doesn't prove it: an accepted execution reads AVAILABLE
+    // until CloudFormation picks it up, so it has to stay AVAILABLE a while.
     let state: DescribeStackRefactorCommandOutput | undefined;
+    let reads = 0;
     try {
-      state = await describe(client, refactorId);
+      state = await poll(
+        () => describe(client, refactorId),
+        (current) => current.ExecutionStatus !== "AVAILABLE" || ++reads > NOT_STARTED_READS,
+        options,
+      );
     } catch {
       lost(error as Error);
     }
@@ -236,6 +243,9 @@ export async function executeRefactor(
   );
 }
 
+/** Reads that must all show AVAILABLE before a failed Execute call counts as not started. */
+const NOT_STARTED_READS = 4;
+
 /** Reads after EXECUTE_FAILED in which a rollback may still start. */
 const EXECUTE_FAILED_GRACE_READS = 3;
 
@@ -272,6 +282,8 @@ export type RefactorRun = {
     undone: RefactorStack[];
     /** Earlier stacks that couldn't be moved back, with why. */
     undoFailed: { stack: RefactorStack; error: Error }[];
+    /** The run was stopped (`stop` said so) before `error`'s stack started. */
+    stopped?: boolean;
   };
 };
 
@@ -312,7 +324,7 @@ export async function executeRefactors(
     const undo = await undoRefactors(refactored, options);
     return {
       refactored: undo.undoFailed.map(({ stack }) => stack),
-      failure: { error: failure, ...undo },
+      failure: { error: failure, ...undo, ...(stopped && { stopped: true }) },
     };
   }
   return { refactored };

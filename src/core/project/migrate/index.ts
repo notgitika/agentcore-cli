@@ -37,7 +37,7 @@ import {
   type MigrationJournal,
   type PreparedStack,
 } from "./apply";
-import { BACKUP_RELATIVE_PATH } from "./files";
+import { BACKUP_RELATIVE_PATH, type writeMigratedFiles } from "./files";
 import { planStack, type PlannedStack } from "./plan";
 import type { PollOptions } from "./refactor";
 import { preflight } from "./preflight";
@@ -80,6 +80,8 @@ export type FsProjectMigratorConfig = {
   poll?: PollOptions;
   /** Read for {@link CDK_LIBRARY_OVERRIDE_ENV}, to note it in MIGRATION.md; defaults to `process.env`. */
   env?: NodeJS.ProcessEnv;
+  /** Writes the migrated files into the project; tests make it fail. */
+  writeFiles?: typeof writeMigratedFiles;
 };
 
 /** A deployment target with a deployed stack, and what planning has read about it. */
@@ -110,6 +112,7 @@ export class FsProjectMigrator implements ProjectMigrator {
   private readonly createTemplateStore: NonNullable<FsProjectMigratorConfig["createTemplateStore"]>;
   private readonly poll: PollOptions;
   private readonly env: NodeJS.ProcessEnv;
+  private readonly writeFiles?: typeof writeMigratedFiles;
 
   constructor(config: FsProjectMigratorConfig) {
     this.runner = config.runner ?? runProcess;
@@ -124,6 +127,7 @@ export class FsProjectMigrator implements ProjectMigrator {
     this.createTemplateStore = config.createTemplateStore ?? bootstrapBucketStore;
     this.poll = config.poll ?? {};
     this.env = config.env ?? process.env;
+    if (config.writeFiles) this.writeFiles = config.writeFiles;
   }
 
   public async plan(rootPath: string, options: MigrationPlanOptions = {}): Promise<MigrationPlan> {
@@ -238,6 +242,7 @@ export class FsProjectMigrator implements ProjectMigrator {
         json: this.json,
         poll: this.poll,
         libraryOverride: this.env[CDK_LIBRARY_OVERRIDE_ENV]?.trim() || undefined,
+        ...(this.writeFiles && { writeFiles: this.writeFiles }),
       });
       const requireReady = () => {
         if (!plan.ready) {

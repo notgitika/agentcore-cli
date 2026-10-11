@@ -6,7 +6,7 @@ import { ProjectStateError } from "../../../errors";
 import { createSilentLogger } from "../../../testing";
 import { FsAssetSource } from "../source";
 import { JOURNAL_RELATIVE_PATH, RECOVERY_RELATIVE_PATH } from "./apply";
-import { BACKUP_RELATIVE_PATH } from "./files";
+import { BACKUP_RELATIVE_PATH, FilesRestoreError, type writeMigratedFiles } from "./files";
 import { FsProjectMigrator } from "./index";
 import {
   F1_DEPLOYED_STATE,
@@ -71,6 +71,7 @@ function fakes(
     targets?: string[];
     /** Wraps the fake synthesizer, e.g. to fail or interrupt a run. */
     synthesize?: (inner: WorkspaceSynthesizer) => WorkspaceSynthesizer;
+    writeFiles?: typeof writeMigratedFiles;
   } = {},
 ) {
   const targets = extras.targets ?? ["default"];
@@ -106,6 +107,7 @@ function fakes(
     createTemplateStore: () => fakeTemplateStore(),
     poll: { intervalMs: 0, sleep: async () => {} },
     env: {},
+    ...(extras.writeFiles && { writeFiles: extras.writeFiles }),
   });
   return { migrator, cloudFormation, events, synthesize };
 }
@@ -375,6 +377,33 @@ describe("FsProjectMigrator apply", () => {
     expect(existsSync(join(root, JOURNAL_RELATIVE_PATH))).toBe(false);
   });
 
+  test("says so when writing the files failed and putting them back did too", async () => {
+    const root = await project();
+    const { migration, cloudFormation } = await prepared(
+      root,
+      {},
+      {
+        writeFiles: async () => {
+          throw new FilesRestoreError(new Error("ENOSPC: no space left"), new Error("EACCES"));
+        },
+      },
+    );
+
+    const result = await migration.apply();
+
+    expect(result).toMatchObject({
+      migrated: false,
+      restored: false,
+      error: "ENOSPC: no space left",
+    });
+    expect(result.recovery[0]).toStartWith(
+      "Couldn't restore all of the project's v0 files (EACCES).",
+    );
+    // The stack still moves back, and the record of the migration stays for the next run.
+    expect(cloudFormation.stacks[STACK]!.template).toEqual(V0);
+    expect(existsSync(join(root, JOURNAL_RELATIVE_PATH))).toBe(true);
+  });
+
   test("Ctrl-C lets the running step finish, then puts everything back", async () => {
     const root = await project();
     const before = snapshot(root);
@@ -400,7 +429,7 @@ describe("FsProjectMigrator apply", () => {
       restored: true,
       error: "Interrupted (Ctrl-C).",
     });
-    expect(steps.some((step) => step.startsWith("Stopping: finishing the current step"))).toBe(
+    expect(steps.some((step) => step.startsWith("Stopping: once the current step ends"))).toBe(
       true,
     );
     expect(cloudFormation.stacks[STACK]!.template).toEqual(V0);
@@ -472,7 +501,8 @@ describe("FsProjectMigrator apply, several targets", () => {
     );
     expect(result.recovery[0]).toContain("and no project file was changed.");
     expect(specVersion(root)).toBe(1);
-    expect(existsSync(join(root, JOURNAL_RELATIVE_PATH))).toBe(false);
+    // Kept, so the next run's "unfinished migration" check names both stacks.
+    expect(existsSync(join(root, JOURNAL_RELATIVE_PATH))).toBe(true);
   });
 
   test("a later target's failure undoes the earlier one", async () => {

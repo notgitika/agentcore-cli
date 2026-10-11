@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { CloudFormationClient } from "@aws-sdk/client-cloudformation";
@@ -16,7 +16,12 @@ import type {
 } from "../../../handlers/project/migrate/types";
 import type { AwsDeploymentTarget } from "../../../projectSchemas/aws-targets";
 import { stackArtifactForTarget } from "../backends/cdk/assembly";
-import { BACKUP_RELATIVE_PATH, writeMigratedFiles, type ProjectFilesBackup } from "./files";
+import {
+  BACKUP_RELATIVE_PATH,
+  FilesRestoreError,
+  writeMigratedFiles,
+  type ProjectFilesBackup,
+} from "./files";
 import type { PlannedStack } from "./plan";
 import {
   createRefactor,
@@ -61,6 +66,8 @@ export type ApplierConfig = {
   /** The CDK library override in effect, if any; MIGRATION.md notes it. */
   libraryOverride?: string;
   now?: () => Date;
+  /** Writes the migrated files; injectable so tests can make writing (and restoring) fail. */
+  writeFiles?: typeof writeMigratedFiles;
 };
 
 /** Where the details of a refactor that needs manual repair are saved, relative to the project root. */
@@ -133,7 +140,9 @@ export class MigrationApplier {
 
   async apply(options: MigrationApplyOptions = {}): Promise<MigrationResult> {
     if (!this.created) await this.preview(options);
-    const guard = guardInterrupts(options.onStep);
+    const guard = guardInterrupts(options.onStep, () =>
+      rmSync(this.config.workspace.directory, { recursive: true, force: true }),
+    );
     const resume = this.config.workspace.pauseInterruptCleanup();
     try {
       return await this.run(this.created!, guard.stop, options);
@@ -185,8 +194,11 @@ export class MigrationApplier {
     const run = await executeRefactors(created, { ...poll, stop });
     for (const stack of run.refactored) set(stack.stackName, { outcome: "refactored" });
     if (run.failure) {
-      const { error, undone, undoFailed } = run.failure;
-      set(error.details.stackName, { outcome: "failed", message: error.message });
+      const { error, undone, undoFailed, stopped } = run.failure;
+      set(error.details.stackName, {
+        outcome: stopped ? "not-started" : "failed",
+        message: error.message,
+      });
       for (const stack of undone) set(stack.stackName, { outcome: "undone" });
       for (const { stack, error: undoError } of undoFailed) {
         set(stack.stackName, { outcome: "undo-failed", message: undoError.message });
@@ -195,7 +207,8 @@ export class MigrationApplier {
       // weren't undone; they're still refactored.
       const stillRefactored = needsManualRepair(error) ? run.refactored : [];
       const recovery = await this.recoveryFor(error, undoFailed, stillRefactored, "untouched");
-      await this.removeJournal();
+      // A stack that needs repair keeps the record, so the next run says so too.
+      if (!needsManualRepair(error)) await this.removeJournal();
       return {
         migrated: false,
         stacks: stacks(),
@@ -218,7 +231,7 @@ export class MigrationApplier {
       checkpoint();
       options.onStep?.("Writing the v1 project files");
       await this.writeJournal({ ...journal, files: "writing" });
-      backup = await writeMigratedFiles({
+      backup = await (this.config.writeFiles ?? writeMigratedFiles)({
         rootPath,
         workspaceDirectory: this.config.workspace.directory,
         changes: plan.changes,
@@ -329,6 +342,8 @@ export class MigrationApplier {
     let files: FilesState = backup === undefined ? "untouched" : "restored";
     const recovery: string[] = [];
     try {
+      // Writing them failed part-way and putting them back failed too.
+      if (error instanceof FilesRestoreError) throw error.restoreError;
       await backup?.restore();
     } catch (restoreError) {
       files = "restore-failed";
@@ -346,14 +361,14 @@ export class MigrationApplier {
       set(stack.stackName, { outcome: "undo-failed", message: undoError.message });
     }
     recovery.push(...(await this.recoveryFor(undefined, undo.undoFailed, [], files)));
-    // A failed restore leaves the backup, and the record of what was going on, in place.
-    if (files !== "restore-failed") await this.removeJournal();
+    // A failed restore, or a stack left to repair, keeps the record of what was going on.
+    if (recovery.length === 0) await this.removeJournal();
     return {
       migrated: false,
       stacks: stacks(),
       files: [],
       verification,
-      error: error.message,
+      error: error instanceof FilesRestoreError ? error.original.message : error.message,
       restored: files !== "restore-failed" && recovery.length === 0,
       recovery,
     };
@@ -511,7 +526,10 @@ export class MigrationApplier {
  * Turns Ctrl-C during apply into a request to stop: the step running finishes,
  * then the migration undoes what it did. A second Ctrl-C exits at once.
  */
-function guardInterrupts(onStep?: (message: string) => void): {
+function guardInterrupts(
+  onStep: ((message: string) => void) | undefined,
+  removeWorkspace: () => void,
+): {
   stop: () => string | undefined;
   release: () => void;
 } {
@@ -519,13 +537,16 @@ function guardInterrupts(onStep?: (message: string) => void): {
   const onInterrupt = () => {
     if (interrupted) {
       release();
+      // Exiting by signal skips the 'exit' handlers that would delete it.
+      removeWorkspace();
       // Nothing else is listening any more, so this exits the way Ctrl-C does.
       process.kill(process.pid, "SIGINT");
       return;
     }
     interrupted = true;
     onStep?.(
-      "Stopping: finishing the current step, then putting the stacks and files back. Press " +
+      "Stopping: once the current step ends (an install or synth in progress stops too), the " +
+        "stacks and files are put back. Press " +
         `Ctrl-C again to exit at once (that can leave stacks refactored; ${JOURNAL_RELATIVE_PATH} ` +
         "records what was done)",
     );

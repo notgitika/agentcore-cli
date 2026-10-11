@@ -11,6 +11,17 @@ const CDK_RELATIVE_PATH = join("agentcore", "cdk");
 /** Never copied out of the workspace's CDK app: they're rebuilt in place. */
 const NOT_COPIED = new Set(["node_modules", "cdk.out"]);
 
+/** Writing the files failed, and so did putting back what had been written. */
+export class FilesRestoreError extends Error {
+  constructor(
+    readonly original: Error,
+    readonly restoreError: Error,
+  ) {
+    super(`${original.message}; then restoring the files failed: ${restoreError.message}`);
+    this.name = "FilesRestoreError";
+  }
+}
+
 /** Undoes or keeps a set of file writes. */
 export type ProjectFilesBackup = {
   /**
@@ -126,7 +137,11 @@ export async function writeMigratedFiles(input: {
       }
     }
   } catch (error) {
-    await restore();
+    try {
+      await restore();
+    } catch (restoreError) {
+      throw new FilesRestoreError(error as Error, restoreError as Error);
+    }
     throw error;
   }
   return { restore, discard: () => rm(backup, { recursive: true, force: true }) };
