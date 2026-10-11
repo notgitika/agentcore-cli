@@ -215,6 +215,8 @@ import type { Logger } from "../logging";
 import type { ReadWriteJson } from "../io";
 import { createSilentLogger } from "./logging";
 import { FsProjectManager, type ProjectBackend } from "../core/project";
+import { FsProjectMigrator } from "../core/project/migrate";
+import type { ProjectMigrator } from "../handlers/project/migrate/types";
 import type {
   BedrockAgentImportPlan,
   BedrockAgentImportRequest,
@@ -1368,6 +1370,8 @@ export class TestGatewayClient implements CoreGatewayClient {
 
 type TestCoreClientOptions = {
   logger?: Logger;
+  /** Defaults to the real migrator, which reads the project on disk and runs git. */
+  projectMigrator?: ProjectMigrator;
   json?: ReadWriteJson;
   backends?: Partial<Record<ManagedBy, ProjectBackend>>;
   createCloudFormationClient?: CreateCloudFormationClient;
@@ -2638,6 +2642,7 @@ export class TestCoreClient implements Core {
     throw new Error("TestCoreClient.fetch is not configured; set it in the test that needs it");
   }) as unknown as CoreFetch;
   readonly projectManager: ProjectManager;
+  readonly projectMigrator: ProjectMigrator;
 
   // Commands the project manager would have run (npm install, git init, ...),
   // recorded instead of spawned so tests stay fast and hermetic.
@@ -2665,6 +2670,7 @@ export class TestCoreClient implements Core {
   };
 
   constructor(options?: TestCoreClientOptions) {
+    this.projectMigrator = options?.projectMigrator ?? new FsProjectMigrator();
     this.projectManager = new FsProjectManager({
       logger: options?.logger ?? createSilentLogger(),
       createCloudFormationClient: options?.createCloudFormationClient,
