@@ -19,6 +19,8 @@ import { createExportProjectResourceHandler } from "./export";
 import { createProjectInvokeHandler } from "./invoke";
 import { createProjectLogsHandler } from "./logs";
 import { createProjectTracesHandler } from "./traces";
+import { createMigrateProjectHandler } from "./migrate";
+import { FsProjectMigrator } from "../../core/project/migrate";
 
 export function createProjectHandlers(core: Core, io: AppIO): Handler[] {
   const projectManager: ProjectManager = core.projectManager;
@@ -77,6 +79,9 @@ export function createProjectHandlers(core: Core, io: AppIO): Handler[] {
       io,
       middlewares: [withProjectMiddleware],
     }),
+    // Resolves the project itself: withProject's v1 loader can't read the v0
+    // projects it upgrades.
+    createMigrateProjectHandler({ migrator: new FsProjectMigrator(), io }),
   ];
 
   return [createHandler, ...projectBoundHandlers];
