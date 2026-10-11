@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRootHandler } from "../../index";
-import { SilentCLIError } from "../../../errors";
+import { InputValidationError, SilentCLIError, UserCancellationError } from "../../../errors";
 import {
   createSilentLogger,
   TestCoreClient,
@@ -16,12 +17,20 @@ import {
   FAKE_AWS_IDENTITY,
   fakeCloudFormation,
   fakeSynth,
+  fakeTemplateStore,
   templateFixture,
   writeV0Project,
+  type FakeCloudFormationOptions,
 } from "../../../core/project/migrate/migrate-test-support";
 import { FsAssetSource } from "../../../core/project/source";
-import { APPLY_UNAVAILABLE_MESSAGE, formatMigrationPlan, formatStackPlan } from "./index";
-import type { MigrationPlan, StackMigrationPlan } from "./types";
+import {
+  CONFIRMATION_REQUIRED_MESSAGE,
+  formatMigrationPlan,
+  formatMigrationResult,
+  formatStackPlan,
+  type MigrationOutput,
+} from "./index";
+import type { MigrationPlan, MigrationResult, StackMigrationPlan } from "./types";
 
 const originalCwd = process.cwd();
 const cleanups: Array<() => Promise<void>> = [];
@@ -37,23 +46,39 @@ const STACK = "AgentCore-CompatA-default";
  * the path. Only AWS and the v1 synth are faked: F1's stack is deployed with the
  * live-tested CompatMig template, and the v1 app synthesizes its v1 template.
  */
-function cli(v1 = templateFixture("pinned.v1")) {
-  const io = testIO();
+function cli(
+  v1 = templateFixture("pinned.v1"),
+  options: { tty?: boolean; stdin?: string; cloudFormation?: FakeCloudFormationOptions } = {},
+) {
+  const io = testIO({
+    isTTY: options.tty ?? false,
+    ...(options.stdin !== undefined && { stdin: options.stdin }),
+  });
+  const cloudFormation = fakeCloudFormation(
+    { [STACK]: { template: templateFixture("pinned.v0") } },
+    options.cloudFormation,
+  );
   const projectMigrator = new FsProjectMigrator({
     logger: createSilentLogger(),
     assetSource: new FsAssetSource(),
-    createCloudFormationClient: fakeCloudFormation({
-      [STACK]: { template: templateFixture("pinned.v0") },
-    }).create,
+    createCloudFormationClient: cloudFormation.create,
     ...FAKE_AWS_IDENTITY,
     synthesize: fakeSynth([{ target: "default", stackName: STACK, template: v1 }]),
+    createTemplateStore: () => fakeTemplateStore(),
+    poll: { intervalMs: 0, sleep: async () => {} },
+    env: {},
   });
   const root = createRootHandler(new TestCoreClient({ projectMigrator }), {
     io: io.io,
     globalConfigAccessor: new TestGlobalConfigAccessor(),
     logger: createSilentLogger(),
   });
-  return { io, run: (...args: string[]) => root.route(["node", "agentcore", "migrate", ...args]) };
+  return {
+    io,
+    cloudFormation,
+    commands: () => cloudFormation.calls.map((call) => call.command),
+    run: (...args: string[]) => root.route(["node", "agentcore", "migrate", ...args]),
+  };
 }
 
 /** Writes the F1 v0 project, commits it, and cds into it. */
@@ -137,16 +162,157 @@ describe("agentcore migrate", () => {
     expect(subject.io.stdout()).toEndWith("Not ready to migrate: 1 issue needs fixing first.");
   });
 
-  test("refuses to apply a migration without --dry-run", async () => {
-    await inV0Project();
-    await expect(cli().run()).rejects.toThrow(APPLY_UNAVAILABLE_MESSAGE);
-  });
-
   test("fails outside a project", async () => {
     const dir = await mkdtemp(join(tmpdir(), "agentcore-no-project-"));
     cleanups.push(() => rm(dir, { recursive: true, force: true }));
     process.chdir(dir);
     await expect(cli().run("--dry-run")).rejects.toThrow("No AgentCore project found");
+  });
+});
+
+describe("agentcore migrate (apply)", () => {
+  const specVersion = (root: string) =>
+    (
+      JSON.parse(readFileSync(join(root, "agentcore", "agentcore.json"), "utf8")) as {
+        version: number;
+      }
+    ).version;
+
+  test("--yes refactors, writes the files, verifies, and reports", async () => {
+    const root = await inV0Project();
+    const subject = cli();
+
+    await subject.run("--yes");
+
+    const out = subject.io.stdout();
+    expect(out).toStartWith("Migration plan for project 'CompatA'\n");
+    expect(out).toContain(`Stack refactor refactor-1 for ${STACK}, validated by CloudFormation:\n`);
+    expect(out).toMatch(
+      /\n {2}MOVE {4}ApplicationMemoryMigagentMemoryCA18A787 +ApplicationMemoryMigagentMemoryMemoryA587350B +No configuration changes detected\.\n/,
+    );
+    expect(out).toContain("No configuration changes detected.\n\nMigrated to v1.");
+    expect(out).toContain(`\nMigrated to v1.\n\nStacks\n  ${STACK}: refactored\n`);
+    expect(out).toContain("  modified  agentcore/agentcore.json\n");
+    expect(out).toContain("  added     MIGRATION.md\n");
+    expect(out).toEndWith(
+      "Next: review the changes (git diff), commit them, then run `agentcore deploy`.",
+    );
+    expect(subject.io.stderr()).toContain(`Refactoring stack ${STACK}...\n`);
+    expect(subject.commands()).toContain("ExecuteStackRefactorCommand");
+    expect(specVersion(root)).toBe(2);
+    expect(existsSync(join(root, "MIGRATION.md"))).toBe(true);
+  });
+
+  test("refuses without --yes when it can't ask, before reading anything", async () => {
+    const root = await inV0Project();
+    const subject = cli();
+
+    await expect(subject.run()).rejects.toThrow(CONFIRMATION_REQUIRED_MESSAGE);
+    await expect(subject.run()).rejects.toBeInstanceOf(InputValidationError);
+
+    expect(subject.commands()).toEqual([]);
+    expect(specVersion(root)).toBe(1);
+  });
+
+  test("asks for confirmation after showing the validated refactor", async () => {
+    const root = await inV0Project();
+    const subject = cli(undefined, { tty: true, stdin: "y\n" });
+
+    await subject.run();
+
+    expect(subject.io.stderr()).toContain(
+      "Migrate project 'CompatA' to v1? This refactors 1 deployed stack",
+    );
+    expect(subject.io.stdout()).toContain("Migrated to v1.");
+    expect(specVersion(root)).toBe(2);
+  });
+
+  test("changes nothing when the confirmation is declined", async () => {
+    const root = await inV0Project();
+    const subject = cli(undefined, { tty: true, stdin: "n\n" });
+
+    await expect(subject.run()).rejects.toBeInstanceOf(UserCancellationError);
+
+    expect(subject.commands()).toContain("CreateStackRefactorCommand");
+    expect(subject.commands()).not.toContain("ExecuteStackRefactorCommand");
+    expect(specVersion(root)).toBe(1);
+  });
+
+  test("prints the plan and stops when the project can't migrate", async () => {
+    await inV0Project();
+    const subject = cli(templateFixture("codezip.v1-rc3"));
+
+    await expect(subject.run("--yes")).rejects.toBeInstanceOf(SilentCLIError);
+
+    expect(subject.io.stdout()).toEndWith("Not ready to migrate: 1 issue needs fixing first.");
+    expect(subject.commands()).not.toContain("CreateStackRefactorCommand");
+  });
+
+  test("reports a failed refactor, exits non-zero, and leaves the files alone", async () => {
+    const root = await inV0Project();
+    const subject = cli(undefined, {
+      cloudFormation: {
+        refactors: () => ({ execute: { status: "EXECUTE_FAILED", reason: "Access denied" } }),
+      },
+    });
+
+    await expect(subject.run("--yes")).rejects.toBeInstanceOf(SilentCLIError);
+
+    const out = subject.io.stdout();
+    expect(out).toContain(`Migration didn't complete.\n\nStacks\n  ${STACK}: FAILED\n`);
+    expect(out).toContain("Error: The refactor of stack");
+    expect(out).toContain("Access denied");
+    expect(out).toContain("Nothing was changed: every stack and file is as it was");
+    expect(specVersion(root)).toBe(1);
+  });
+
+  test("--yes --json prints the plan, the refactors, and the result as one document", async () => {
+    await inV0Project();
+    const subject = cli();
+
+    await subject.run("--yes", "--json");
+
+    const output = JSON.parse(subject.io.stdout()) as MigrationOutput;
+    expect(output.plan.ready).toBe(true);
+    expect(output.refactors[0]).toMatchObject({ stackName: STACK, refactorId: "refactor-1" });
+    expect(output.refactors[0]!.actions).toHaveLength(10);
+    expect(output.result).toMatchObject({ migrated: true, report: "MIGRATION.md", recovery: [] });
+    expect(output.result.stacks[0]!.outcome).toBe("refactored");
+  });
+});
+
+describe("formatMigrationResult", () => {
+  test("numbers the recovery steps of a migration that couldn't be undone", () => {
+    const result: MigrationResult = {
+      migrated: false,
+      stacks: [
+        { target: "a", stackName: "SA", region: "r", outcome: "undo-failed", message: "Throttled" },
+        { target: "b", stackName: "SB", region: "r", outcome: "failed", message: "boom" },
+      ],
+      files: [],
+      verification: [],
+      error: "boom",
+      restored: false,
+      recovery: ["First.", "Second."],
+    };
+    expect(formatMigrationResult(result)).toBe(
+      [
+        "",
+        "Migration didn't complete.",
+        "",
+        "Stacks",
+        "  SA: refactored; moving it back FAILED",
+        "    Throttled",
+        "  SB: FAILED",
+        "",
+        "Error: boom",
+        "",
+        "To recover",
+        "  1. First.",
+        "  2. Second.",
+        "",
+      ].join("\n"),
+    );
   });
 });
 
