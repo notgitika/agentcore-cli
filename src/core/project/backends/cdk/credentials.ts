@@ -39,6 +39,11 @@ export type DeployedCredential = {
    * the CLI keeps rather than deletes.
    */
   providerName?: string;
+  /**
+   * Set when this CLI created the pinned provider rather than adopting the one a v0
+   * CLI made. Such a provider is still kept on removal, but the message says so.
+   */
+  createdByCli?: boolean;
 };
 export type DeployedCredentials = Record<string, DeployedCredential>;
 
@@ -112,7 +117,8 @@ export type CredentialProvisioner = (
  * A credential's spec name, provider kind, and pinned provider name if any: enough to
  * name and delete its provider.
  */
-export type CredentialProviderRef = Pick<Credential, "name" | "authorizerType" | "providerName">;
+export type CredentialProviderRef = Pick<Credential, "name" | "authorizerType" | "providerName"> &
+  Pick<DeployedCredential, "createdByCli">;
 
 export type CredentialRemovalInput = CredentialProvisionInput & {
   /** The credentials whose providers to delete. The caller decides the set. */
@@ -138,10 +144,18 @@ export function orphanedCredentials(
   declared: readonly Credential[],
 ): CredentialProviderRef[] {
   const names = new Set(declared.map(({ name }) => name));
-  return Object.entries(recorded).flatMap(([name, { authorizerType, providerName }]) =>
-    authorizerType && !names.has(name)
-      ? [{ name, authorizerType, ...(providerName && { providerName }) }]
-      : [],
+  return Object.entries(recorded).flatMap(
+    ([name, { authorizerType, providerName, createdByCli }]) =>
+      authorizerType && !names.has(name)
+        ? [
+            {
+              name,
+              authorizerType,
+              ...(providerName && { providerName }),
+              ...(createdByCli && { createdByCli }),
+            },
+          ]
+        : [],
   );
 }
 
@@ -167,10 +181,11 @@ export function createCredentialRemover(identity: ProviderDeletes): CredentialRe
       const { authorizerType } = ref;
       const provider = providerName(project.name, targetName, ref);
       if (ref.providerName) {
+        const origin = ref.createdByCli ? "this CLI created it, but its name is pinned, so " : "";
         yield {
           type: "step",
           message:
-            `Keeping credential provider '${provider}': other deployment targets may share it. ` +
+            `Keeping credential provider '${provider}': ${origin}other deployment targets may share it. ` +
             `Delete it with 'aws bedrock-agentcore-control ${DELETE_COMMANDS[authorizerType]}' ` +
             `once nothing uses it.`,
         };
@@ -274,7 +289,11 @@ export function createCredentialProvisioner(
         // it. A create that never reached the service leaves nothing to delete, which
         // rollback treats as already gone.
         if (provision.kind === "create") created.push({ credential, provider });
-        provisioned[credential.name] = { ...(await provision.write()), ...pinned };
+        provisioned[credential.name] = {
+          ...(await provision.write()),
+          ...pinned,
+          ...(pinned && provision.kind === "create" && { createdByCli: true }),
+        };
       }
     } catch (error) {
       yield* rollback(identity, created, options);

@@ -37,6 +37,7 @@ import {
   orphanedCredentials,
   type CredentialProviderCalls,
   type CredentialProviderRef,
+  type DeployedCredentials,
   type CredentialProvisioner,
   type CredentialRemover,
 } from "./cdk/credentials";
@@ -290,7 +291,7 @@ export class CdkBackend implements ProjectBackend {
     // Recorded every deploy (even when empty) so dropping the last credential
     // from the spec clears the stale entry instead of leaving it advertised.
     await updateTargetState(this.json, project.rootPath, target.name, {
-      resources: { credentials: provisioned },
+      resources: { credentials: keepCreatedByCli(recorded, provisioned) },
     });
 
     yield* this.synthesize(project, false);
@@ -686,4 +687,25 @@ export class CdkBackend implements ProjectBackend {
   private assemblyDirectory(project: Project): string {
     return join(this.cdkDirectory(project), "cdk.out");
   }
+}
+
+/**
+ * Carries `createdByCli` over from the previous record for a pinned provider that a
+ * later deploy only updated, so the marker survives every deploy after the one that
+ * created the provider.
+ */
+function keepCreatedByCli(
+  recorded: DeployedCredentials,
+  provisioned: DeployedCredentials,
+): DeployedCredentials {
+  return Object.fromEntries(
+    Object.entries(provisioned).map(([name, credential]) => {
+      const previous = recorded[name];
+      const carried =
+        credential.providerName !== undefined &&
+        previous?.createdByCli === true &&
+        previous.providerName === credential.providerName;
+      return [name, carried ? { ...credential, createdByCli: true } : credential];
+    }),
+  );
 }

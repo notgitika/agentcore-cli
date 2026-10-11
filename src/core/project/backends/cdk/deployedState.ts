@@ -29,6 +29,12 @@ const CredentialStateSchema = z
     authorizerType: z
       .enum(["ApiKeyCredentialProvider", "OAuthCredentialProvider", "PaymentCredentialProvider"])
       .optional(),
+    // A pinned provider name (`providerName` in the spec). Pinned providers are kept
+    // on teardown, since v0 named them by the bare credential name and other targets
+    // may share them.
+    providerName: z.string().optional(),
+    // Whether this CLI created the pinned provider, rather than adopting one v0 made.
+    createdByCli: z.boolean().optional(),
   })
   .passthrough();
 

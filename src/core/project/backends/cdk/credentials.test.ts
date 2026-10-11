@@ -454,6 +454,9 @@ describe("createCredentialProvisioner", () => {
     // credential leaves the spec.
     expect(result["openai-key"]?.providerName).toBe("openai-key");
     expect(result["wallet"]?.providerName).toBe("wallet");
+    // Only the provider this deploy created is marked as the CLI's own.
+    expect(result["openai-key"]?.createdByCli).toBeUndefined();
+    expect(result["wallet"]?.createdByCli).toBe(true);
   });
 
   test("updates a provider that already exists with the current secret", async () => {
@@ -996,6 +999,21 @@ describe("createCredentialRemover", () => {
         "Delete it with 'aws bedrock-agentcore-control delete-oauth2-credential-provider' " +
         "once nothing uses it.",
       `Removing credential provider '${OPENAI_PROVIDER}'`,
+    ]);
+  });
+
+  test("says when the kept pinned provider is one this CLI created", async () => {
+    const subject = account({ wallet: { credentialProviderArn: "arn:payment:wallet" } });
+
+    const { events } = await remove(subject, [
+      { ...COINBASE, providerName: "wallet", createdByCli: true },
+    ]);
+
+    expect(subject.deleted).toEqual([]);
+    expect(stepMessages(events)).toEqual([
+      "Keeping credential provider 'wallet': this CLI created it, but its name is pinned, so " +
+        "other deployment targets may share it. Delete it with 'aws bedrock-agentcore-control " +
+        "delete-payment-credential-provider' once nothing uses it.",
     ]);
   });
 
