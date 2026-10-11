@@ -1,8 +1,10 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ProcessFailedError, type ProcessRunner } from "../../../io";
+import type { CfnTemplate } from "./templates";
 
 /** A deployed v0 project shaped like the live-tested F1 fixture, trimmed to one of each resource. */
 export const F1_SPEC = {
@@ -291,4 +293,11 @@ export function fakeGit(responses: {
 
 function json(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+/** A saved CloudFormation template from `__fixtures__/templates` (account IDs sanitized). */
+export function templateFixture(name: string): CfnTemplate {
+  return JSON.parse(
+    readFileSync(join(import.meta.dir, "__fixtures__", "templates", `${name}.json`), "utf8"),
+  ) as CfnTemplate;
 }

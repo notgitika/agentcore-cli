@@ -58,6 +58,61 @@ export type FileChange = {
   kind: FileChangeKind;
 };
 
+/** A resource in a stack, by logical ID. */
+export type StackResource = {
+  logicalId: string;
+  type: string;
+};
+
+/** A deployed resource that a stack refactor moves to a new logical ID, keeping the AWS resource. */
+export type StackResourceMove = {
+  type: string;
+  /** Logical ID in the deployed (v0) stack. */
+  from: string;
+  /** Logical ID in the v1 template. */
+  to: string;
+};
+
+/**
+ * How much a change the v1 deploy makes after the refactor matters: a blocker
+ * stops the migration (an AgentCore resource would be lost), a warning is safe
+ * but worth knowing, and info is expected housekeeping.
+ */
+export type StackChangeSeverity = "blocker" | "warning" | "info";
+
+/** A deployed resource the first v1 deploy after the refactor replaces or deletes. */
+export type StackResourceChange = StackResource & {
+  severity: StackChangeSeverity;
+  /** Why it happens and what it means. */
+  reason: string;
+};
+
+/** How migrating moves one deployment target's stack onto the v1 template. */
+export type StackMigrationPlan = {
+  target: string;
+  account: string;
+  region: string;
+  stackName: string;
+  /** Deployed resources that move to a new logical ID. */
+  moves: StackResourceMove[];
+  /** How many deployed resources keep their logical ID. */
+  unchanged: number;
+  /** Resources the first v1 deploy creates. */
+  added: StackResource[];
+  /** Deployed resources the first v1 deploy deletes (or, when retained, leaves in the account). */
+  removed: StackResourceChange[];
+  /** Deployed resources the first v1 deploy replaces with new physical resources. */
+  replaced: StackResourceChange[];
+  /**
+   * Problems with the stack as a whole (its name, the refactor template) that stop
+   * it migrating. Resource-level blockers are the removed and replaced entries
+   * with severity `blocker`.
+   */
+  blockers: string[];
+  /** No blockers of either kind: the stack can be refactored and deployed as v1 without losing a resource. */
+  ready: boolean;
+};
+
 /** Everything a migration would do to a project, and whether it can. */
 export type MigrationPlan = {
   rootPath: string;
