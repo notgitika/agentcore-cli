@@ -1,8 +1,20 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import {
+  DescribeStacksCommand,
+  GetStackPolicyCommand,
+  GetTemplateCommand,
+  type CloudFormationClient,
+} from "@aws-sdk/client-cloudformation";
 import { ProcessFailedError, type ProcessRunner } from "../../../io";
+import type { CreateCloudFormationClient } from "../../types";
+import type { AccountResolver } from "../backends/cdk/environment";
+import type { CdkCredentialResolver } from "../backends/cdk/toolkit";
+import type { WorkspaceSynthesizer } from "./synth";
+import type { CfnTemplate } from "./templates";
 
 /** A deployed v0 project shaped like the live-tested F1 fixture, trimmed to one of each resource. */
 export const F1_SPEC = {
@@ -292,3 +304,100 @@ export function fakeGit(responses: {
 function json(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
+
+/** A saved CloudFormation template from `__fixtures__/templates` (account IDs sanitized). */
+export function templateFixture(name: string): CfnTemplate {
+  return JSON.parse(
+    readFileSync(join(import.meta.dir, "__fixtures__", "templates", `${name}.json`), "utf8"),
+  ) as CfnTemplate;
+}
+
+/** A stack as the fake CloudFormation client reports it. */
+export type FakeStack = {
+  status?: string;
+  /** A stack policy document; absent means none. */
+  policy?: string;
+  template?: CfnTemplate;
+  /** Raw TemplateBody, overriding `template`. */
+  templateBody?: string;
+};
+
+/**
+ * A CloudFormation client factory answering DescribeStacks, GetStackPolicy, and
+ * GetTemplate from `stacks`; any other command fails the test. Records every
+ * request, with the region and credentials the client was built for.
+ */
+export function fakeCloudFormation(stacks: Record<string, FakeStack>): {
+  create: CreateCloudFormationClient;
+  calls: { command: string; input: Record<string, unknown>; region: string }[];
+} {
+  const calls: { command: string; input: Record<string, unknown>; region: string }[] = [];
+  const create: CreateCloudFormationClient = (config) =>
+    ({
+      send: async (command: { constructor: { name: string }; input: Record<string, unknown> }) => {
+        const name = command.constructor.name;
+        calls.push({ command: name, input: command.input, region: config.region });
+        const stackName = String(command.input.StackName);
+        const stack = stacks[stackName];
+        if (!stack) {
+          throw Object.assign(new Error(`Stack with id ${stackName} does not exist`), {
+            name: "ValidationError",
+          });
+        }
+        if (name === DescribeStacksCommand.name) {
+          return {
+            Stacks: [{ StackName: stackName, StackStatus: stack.status ?? "UPDATE_COMPLETE" }],
+          };
+        }
+        if (name === GetStackPolicyCommand.name) return { StackPolicyBody: stack.policy };
+        if (name === GetTemplateCommand.name) {
+          return { TemplateBody: stack.templateBody ?? JSON.stringify(stack.template ?? {}) };
+        }
+        throw new Error(`unexpected CloudFormation command ${name}`);
+      },
+    }) as unknown as CloudFormationClient;
+  return { create, calls };
+}
+
+/**
+ * A synthesizer that writes a cloud assembly with one stack per target instead
+ * of installing and running the CDK app. Records the workspaces it was given.
+ */
+export function fakeSynth(
+  stacks: { target: string; stackName: string; template: CfnTemplate }[],
+): WorkspaceSynthesizer & { workspaces: string[] } {
+  const workspaces: string[] = [];
+  const synthesize = async (workspaceDirectory: string) => {
+    workspaces.push(workspaceDirectory);
+    const assembly = join(workspaceDirectory, "agentcore", "cdk", "cdk.out");
+    await mkdir(assembly, { recursive: true });
+    const artifacts: Record<string, unknown> = {};
+    for (const stack of stacks) {
+      const templateFile = `${stack.stackName}.template.json`;
+      artifacts[stack.stackName] = {
+        type: "aws:cloudformation:stack",
+        properties: {
+          templateFile,
+          stackName: stack.stackName,
+          tags: { "agentcore:target-name": stack.target },
+        },
+      };
+      await writeFile(join(assembly, templateFile), JSON.stringify(stack.template));
+    }
+    await writeFile(join(assembly, "manifest.json"), JSON.stringify({ artifacts }));
+    return assembly;
+  };
+  return Object.assign(synthesize, { workspaces });
+}
+
+/** Credentials and an account lookup that never leave the process. */
+export const FAKE_AWS_IDENTITY: {
+  resolveCredentials: CdkCredentialResolver;
+  resolveAccount: AccountResolver;
+} = {
+  resolveCredentials: async () => async () => ({
+    accessKeyId: "AKIDEXAMPLE",
+    secretAccessKey: "secret",
+  }),
+  resolveAccount: async () => "998846730471",
+};

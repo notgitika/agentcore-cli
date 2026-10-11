@@ -69,6 +69,10 @@ Before finishing a change run `bun test`, `bun run typecheck`, `bun run lint:che
   staged at build time from `@aws/agent-inspector` (files get a `.asset` suffix);
   `AGENT_INSPECTOR_PATH` overrides it with a local build. `scripts/sync-vended-cdk.ts` pins
   `@aws/agentcore-cdk` in `src/assets/cdk/package.json` (release workflow; must not import `src/`).
+- **`AGENTCORE_MIGRATE_CDK_LIBRARY`** (dev/test only) replaces the `@aws/agentcore-cdk`
+  dependency of the v1 CDK app `agentcore migrate` synthesizes, with an npm spec or a path to a
+  tarball or package directory (e.g. `npm pack --ignore-scripts` of a local library checkout), so
+  the planner can run against an unpublished library. See `src/core/project/migrate/synth.ts`.
 - **`command.md` is generated** from `agentcore --help` ("Do not edit directly"). Regenerate it
   after changing command names, flags, or descriptions. Section grouping lives in
   `DEFAULT_GROUPS` in `scripts/generate-command-reference.mjs`.
