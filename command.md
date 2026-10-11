@@ -961,6 +961,7 @@ upgrade a v0 project to v1
 **Options**
 
 - `--dry-run`: show what migrating would change, without changing anything (default: false)
+- `--yes`: migrate without asking for confirmation (default: false)
 
 ## Resource commands
 

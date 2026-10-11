@@ -4,13 +4,15 @@ import { z } from "zod";
 import { ProjectStateError } from "../../../errors";
 import { FsReadWriteJson, runProcess, type ProcessRunner, type ReadWriteJson } from "../../../io";
 import type { Logger } from "../../../logging";
+import { existsSync } from "node:fs";
+import type { CloudFormationClient } from "@aws-sdk/client-cloudformation";
 import type {
   MigrationCheck,
   MigrationPlan,
   MigrationPlanOptions,
   MigrationProblem,
+  PreparedMigration,
   ProjectMigrator,
-  StackMigrationPlan,
 } from "../../../handlers/project/migrate/types";
 import {
   AwsDeploymentTargetsSchema,
@@ -21,15 +23,32 @@ import { createCloudFormationClient } from "../../factories";
 import type { CreateCloudFormationClient } from "../../types";
 import { stackArtifactForTarget } from "../backends/cdk/assembly";
 import { resolveAwsAccount, type AccountResolver } from "../backends/cdk/environment";
-import { createCdkCredentialResolver, type CdkCredentialResolver } from "../backends/cdk/toolkit";
+import {
+  createCdkCredentialResolver,
+  type CdkCredentialProvider,
+  type CdkCredentialResolver,
+} from "../backends/cdk/toolkit";
 import { defaultSource, type AssetSource } from "../source";
 import { convertHarness } from "./convertHarness";
 import { AWS_TARGETS_RELATIVE_PATH, convertSpec, convertTargets } from "./convertSpec";
-import { planStack } from "./plan";
+import {
+  JOURNAL_RELATIVE_PATH,
+  MigrationApplier,
+  type MigrationJournal,
+  type PreparedStack,
+} from "./apply";
+import { BACKUP_RELATIVE_PATH, type writeMigratedFiles } from "./files";
+import { planStack, type PlannedStack } from "./plan";
+import type { PollOptions } from "./refactor";
 import { preflight } from "./preflight";
 import { checkStack, cloudFormationStackReader } from "./stacks";
-import { createWorkspaceSynthesizer, type WorkspaceSynthesizer } from "./synth";
+import {
+  CDK_LIBRARY_OVERRIDE_ENV,
+  createWorkspaceSynthesizer,
+  type WorkspaceSynthesizer,
+} from "./synth";
 import type { CfnTemplate } from "./templates";
+import { bootstrapBucketStore, type TemplateStore } from "./templateStore";
 import { buildMigrationWorkspace } from "./workspace";
 
 export { CDK_LIBRARY_OVERRIDE_ENV } from "./synth";
@@ -49,8 +68,20 @@ export type FsProjectMigratorConfig = {
   resolveCredentials?: CdkCredentialResolver;
   /** The account behind those credentials, checked against the target's. */
   resolveAccount?: AccountResolver;
-  /** Installs and synthesizes the v1 CDK app in the migration workspace. */
+  /** Installs and synthesizes the v1 CDK app, in the migration workspace and then in the project. */
   synthesize?: WorkspaceSynthesizer;
+  /** Where templates too big to pass inline are uploaded; defaults to the CDK bootstrap bucket. */
+  createTemplateStore?: (config: {
+    cloudFormation: CloudFormationClient;
+    credentials: CdkCredentialProvider;
+    region: string;
+  }) => TemplateStore;
+  /** How stack refactors and change sets are waited on; tests poll without sleeping. */
+  poll?: PollOptions;
+  /** Read for {@link CDK_LIBRARY_OVERRIDE_ENV}, to note it in MIGRATION.md; defaults to `process.env`. */
+  env?: NodeJS.ProcessEnv;
+  /** Writes the migrated files into the project; tests make it fail. */
+  writeFiles?: typeof writeMigratedFiles;
 };
 
 /** A deployment target with a deployed stack, and what planning has read about it. */
@@ -59,12 +90,16 @@ type DeployedTarget = {
   stackName: string;
   /** Set once the stack passed its checks and its template was read. */
   template?: CfnTemplate;
+  /** The client the stack was read through, for the target's account and region. */
+  client?: CloudFormationClient;
+  credentials?: CdkCredentialProvider;
 };
 
 /**
- * Plans a v0 → v1 migration from the project on disk. Planning reads the project,
- * builds the converted copy in a temporary directory, and synthesizes it; from
- * AWS it only reads the deployed stacks. It never writes to the project or to AWS.
+ * Plans and applies a v0 → v1 migration of the project on disk. Planning reads
+ * the project, builds the converted copy in a temporary directory, and
+ * synthesizes it; from AWS it only reads the deployed stacks. It never writes to
+ * the project or to AWS. Applying (see {@link MigrationApplier}) does both.
  */
 export class FsProjectMigrator implements ProjectMigrator {
   private readonly runner: ProcessRunner;
@@ -74,6 +109,10 @@ export class FsProjectMigrator implements ProjectMigrator {
   private readonly resolveCredentials: CdkCredentialResolver;
   private readonly resolveAccount: AccountResolver;
   private readonly synthesize: WorkspaceSynthesizer;
+  private readonly createTemplateStore: NonNullable<FsProjectMigratorConfig["createTemplateStore"]>;
+  private readonly poll: PollOptions;
+  private readonly env: NodeJS.ProcessEnv;
+  private readonly writeFiles?: typeof writeMigratedFiles;
 
   constructor(config: FsProjectMigratorConfig) {
     this.runner = config.runner ?? runProcess;
@@ -85,12 +124,25 @@ export class FsProjectMigrator implements ProjectMigrator {
       config.resolveCredentials ?? createCdkCredentialResolver(config.logger);
     this.resolveAccount = config.resolveAccount ?? resolveAwsAccount;
     this.synthesize = config.synthesize ?? createWorkspaceSynthesizer({ runner: this.runner });
+    this.createTemplateStore = config.createTemplateStore ?? bootstrapBucketStore;
+    this.poll = config.poll ?? {};
+    this.env = config.env ?? process.env;
+    if (config.writeFiles) this.writeFiles = config.writeFiles;
   }
 
   public async plan(rootPath: string, options: MigrationPlanOptions = {}): Promise<MigrationPlan> {
+    const prepared = await this.prepare(rootPath, options);
+    await prepared.dispose();
+    return prepared.plan;
+  }
+
+  public async prepare(
+    rootPath: string,
+    options: MigrationPlanOptions = {},
+  ): Promise<PreparedMigration> {
     const { checks, context } = await preflight(rootPath, this.runner);
     if (!context) {
-      return {
+      return unprepared({
         rootPath,
         checks,
         problems: [],
@@ -100,7 +152,7 @@ export class FsProjectMigrator implements ProjectMigrator {
         changes: [],
         stacks: [],
         ready: false,
-      };
+      });
     }
     const { v0Spec, deployedState } = context;
 
@@ -129,6 +181,8 @@ export class FsProjectMigrator implements ProjectMigrator {
       );
       checks.push(await this.readStack(entry));
     }
+    const unfinished = await unfinishedMigration(rootPath);
+    if (unfinished) checks.push(unfinished);
 
     const workspace = await buildMigrationWorkspace({
       rootPath,
@@ -139,6 +193,18 @@ export class FsProjectMigrator implements ProjectMigrator {
       assetSource: this.assetSource,
     });
     try {
+      if (workspace.escapingSymlinks.length > 0) {
+        checks.push({
+          name: "symlinks",
+          ok: false,
+          message:
+            "Migration installs and synthesizes the v1 CDK app in a copy of the project, and " +
+            "these symlinks lead out of it, so the build could change files outside the copy:\n" +
+            workspace.escapingSymlinks.map((link) => `  ${link}`).join("\n") +
+            "\nReplace each with the files it points to (or, if it points inside the project, " +
+            "with a relative link), then try again.",
+        });
+      }
       // The v1 app only synthesizes from a project that converted cleanly, is only
       // needed when there are stacks to plan, and only worth running once every
       // stack has passed its checks (which is also when its template was read).
@@ -146,11 +212,11 @@ export class FsProjectMigrator implements ProjectMigrator {
         checks.every((check) => check.ok) &&
         problems.length === 0 &&
         converted.deployedChanges.length === 0;
-      const stacks =
+      const planned =
         readyToSynth && deployed.targets.length > 0
           ? await this.planStacks(workspace.directory, deployed.targets, checks, options)
           : [];
-      return {
+      const plan: MigrationPlan = {
         rootPath,
         projectName: v0Spec.name,
         checks,
@@ -159,15 +225,47 @@ export class FsProjectMigrator implements ProjectMigrator {
         pins: converted.pins,
         warnings: [...converted.warnings, ...harnesses.flatMap((harness) => harness.warnings)],
         changes: workspace.changes,
-        stacks,
+        stacks: planned.map((stack) => stack.planned.plan),
         ready:
           checks.every((check) => check.ok) &&
           problems.length === 0 &&
           converted.deployedChanges.length === 0 &&
-          stacks.every((stack) => stack.ready),
+          planned.every((stack) => stack.planned.plan.ready),
       };
-    } finally {
+      const applier = new MigrationApplier({
+        rootPath,
+        plan,
+        workspace,
+        stacks: planned,
+        codeDirectories: v0Spec.runtimes.map((runtime) => runtime.codeLocation),
+        synthesize: this.synthesize,
+        json: this.json,
+        poll: this.poll,
+        libraryOverride: this.env[CDK_LIBRARY_OVERRIDE_ENV]?.trim() || undefined,
+        ...(this.writeFiles && { writeFiles: this.writeFiles }),
+      });
+      const requireReady = () => {
+        if (!plan.ready) {
+          throw new ProjectStateError(
+            "The project can't be migrated yet; run `agentcore migrate --dry-run` to see why.",
+          );
+        }
+      };
+      return {
+        plan,
+        preview: async (applyOptions) => {
+          requireReady();
+          return applier.preview(applyOptions);
+        },
+        apply: async (applyOptions) => {
+          requireReady();
+          return applier.apply(applyOptions);
+        },
+        dispose: () => workspace.dispose(),
+      };
+    } catch (error) {
       await workspace.dispose();
+      throw error;
     }
   }
 
@@ -212,11 +310,14 @@ export class FsProjectMigrator implements ProjectMigrator {
             `credentials belong to ${account}. Use credentials for ${target.account}.`,
         };
       }
-      const reader = cloudFormationStackReader(
-        this.createCloudFormationClient({ credentials, region: target.region }),
-      );
+      const client = this.createCloudFormationClient({ credentials, region: target.region });
+      const reader = cloudFormationStackReader(client);
       const check = await checkStack(reader, target.name, stackName);
-      if (check.ok) entry.template = await reader.template(stackName);
+      if (check.ok) {
+        entry.template = await reader.template(stackName);
+        entry.client = client;
+        entry.credentials = credentials;
+      }
       return check;
     } catch (error) {
       return {
@@ -232,7 +333,7 @@ export class FsProjectMigrator implements ProjectMigrator {
     targets: DeployedTarget[],
     checks: MigrationCheck[],
     options: MigrationPlanOptions,
-  ): Promise<StackMigrationPlan[]> {
+  ): Promise<PreparedStack[]> {
     let assemblyDirectory: string;
     try {
       assemblyDirectory = await this.synthesize(workspaceDirectory, options);
@@ -246,8 +347,8 @@ export class FsProjectMigrator implements ProjectMigrator {
     }
     checks.push({ name: "v1 synth", ok: true, message: "the converted project synthesizes" });
 
-    const plans: StackMigrationPlan[] = [];
-    for (const { target, stackName, template } of targets) {
+    const plans: PreparedStack[] = [];
+    for (const { target, stackName, template, client, credentials } of targets) {
       options.onStep?.(`Planning the refactor of ${stackName}`);
       try {
         const artifact = await stackArtifactForTarget(this.json, assemblyDirectory, target.name);
@@ -260,15 +361,30 @@ export class FsProjectMigrator implements ProjectMigrator {
           join(assemblyDirectory, artifact.templateFile),
           TemplateSchema,
         )) as CfnTemplate;
-        const { plan } = await planStack({
+        // Read by readStack, whose check passing is a precondition of getting here.
+        const deployed = template!;
+        const planned: PlannedStack = await planStack({
           target,
           stackName,
-          // Read by readStack, whose check passing is a precondition of getting here.
-          deployed: template!,
+          deployed,
           v1,
           v1StackName: artifact.stackName,
         });
-        plans.push(plan);
+        const cloudFormation = client!;
+        let store: TemplateStore | undefined;
+        plans.push({
+          target,
+          stackName,
+          deployed,
+          planned,
+          client: cloudFormation,
+          templates: async () =>
+            (store ??= this.createTemplateStore({
+              cloudFormation,
+              credentials: credentials!,
+              region: target.region,
+            })),
+        });
       } catch (error) {
         // One target that can't be planned still leaves the rest of the report.
         checks.push({
@@ -280,6 +396,60 @@ export class FsProjectMigrator implements ProjectMigrator {
     }
     return plans;
   }
+}
+
+/**
+ * A failing check when an earlier `agentcore migrate` was stopped part-way (a
+ * second Ctrl-C, a crash): it leaves its journal, and its backup of the v0 files
+ * if it got as far as writing them. Says what it may have done and where the
+ * originals are, so nothing is deleted by accident.
+ */
+async function unfinishedMigration(rootPath: string): Promise<MigrationCheck | undefined> {
+  const journalPath = join(rootPath, JOURNAL_RELATIVE_PATH);
+  const backupPath = join(rootPath, BACKUP_RELATIVE_PATH);
+  const hasBackup = existsSync(backupPath);
+  if (!existsSync(journalPath) && !hasBackup) return undefined;
+  let journal: Partial<MigrationJournal> = {};
+  try {
+    journal = JSON.parse(await readFile(journalPath, "utf8")) as MigrationJournal;
+  } catch {
+    // No journal (or an unreadable one): the backup alone still says enough.
+  }
+  const lines = [
+    `An earlier \`agentcore migrate\`${journal.startedAt ? ` (started ${journal.startedAt})` : ""} ` +
+      "was stopped before it finished.",
+  ];
+  for (const refactor of journal.refactors ?? []) {
+    lines.push(
+      `Stack ${refactor.stackName} may be refactored to the v1 logical IDs: check with ` +
+        `\`aws cloudformation describe-stack-refactor --stack-refactor-id ${refactor.refactorId} ` +
+        `--region ${refactor.region}\` (EXECUTE_COMPLETE means it was; running \`agentcore ` +
+        "migrate` again then finds nothing to move in it). Don't deploy it with the v0 CLI " +
+        "until you know.",
+    );
+  }
+  if (hasBackup) {
+    lines.push(
+      `The v0 files it replaced are in ${BACKUP_RELATIVE_PATH}: agentcore/cdk in its cdk ` +
+        "directory, everything else under files/ at its project path. Copy back any that are " +
+        "missing or already converted (or restore them from git).",
+    );
+  }
+  lines.push(
+    `Once the project is a v0 project again, delete ${hasBackup ? `${BACKUP_RELATIVE_PATH} and ` : ""}` +
+      `${JOURNAL_RELATIVE_PATH}, then try again.`,
+  );
+  return { name: "unfinished migration", ok: false, message: lines.join("\n") };
+}
+
+/** A migration that can't go ahead: there is only the plan saying why. */
+function unprepared(plan: MigrationPlan): PreparedMigration {
+  const refuse = async (): Promise<never> => {
+    throw new ProjectStateError(
+      "The project can't be migrated; run `agentcore migrate --dry-run` to see why.",
+    );
+  };
+  return { plan, preview: refuse, apply: refuse, dispose: async () => {} };
 }
 
 /**

@@ -1,18 +1,27 @@
+import { createInterface } from "node:readline/promises";
 import z from "zod";
 import { enclosingProjectRoot } from "../../../core/project/fsUtils";
-import { InputValidationError, ProjectStateError, SilentCLIError } from "../../../errors";
+import {
+  InputValidationError,
+  ProjectStateError,
+  SilentCLIError,
+  UserCancellationError,
+} from "../../../errors";
 import type { AppIO } from "../../../io";
 import { projectNotFoundMessage } from "../../../middleware/withProject";
 import { createHandler, flag, type Middleware } from "../../../router";
+import { JsonKey } from "../../keys";
 import { renderResult } from "../../utils";
 import type {
   MigrationPlan,
+  MigrationResult,
   ProjectMigrator,
   StackMigrationPlan,
+  StackRefactorPreview,
   StackResourceChange,
 } from "./types";
 
-export type { MigrationPlan, ProjectMigrator } from "./types";
+export type { MigrationPlan, MigrationResult, ProjectMigrator } from "./types";
 
 type MigrateProjectHandlerConfig = {
   migrator: ProjectMigrator;
@@ -22,8 +31,20 @@ type MigrateProjectHandlerConfig = {
   cwd?: string;
 };
 
-export const APPLY_UNAVAILABLE_MESSAGE =
-  "Applying a migration isn't available yet; run with --dry-run to see what it would change.";
+export const CONFIRMATION_REQUIRED_MESSAGE =
+  "Migrating refactors the project's deployed stacks and rewrites its files; re-run with --yes " +
+  "to confirm non-interactively, or with --dry-run to see what it would change.";
+
+/**
+ * What `agentcore migrate --json` prints when applying: the plan, the refactors
+ * created from it, and what applying did. A plan that isn't ready stops before
+ * any refactor is created, so it has neither `refactors` entries nor `result`.
+ */
+export type MigrationOutput = {
+  plan: MigrationPlan;
+  refactors: StackRefactorPreview[];
+  result?: MigrationResult;
+};
 
 /**
  * `agentcore migrate`: upgrades a v0 project to v1. Resolves the project root itself
@@ -40,30 +61,195 @@ export const createMigrateProjectHandler = (config: MigrateProjectHandlerConfig)
         "show what migrating would change, without changing anything",
         z.boolean().default(false),
       ),
+      flag("yes", "migrate without asking for confirmation", z.boolean().default(false)),
     ],
     handle: async (ctx, flags) => {
-      if (!flags["dry-run"]) throw new InputValidationError(APPLY_UNAVAILABLE_MESSAGE);
-
       const from = config.cwd ?? process.cwd();
       const rootPath = enclosingProjectRoot(from);
       if (!rootPath) throw new ProjectStateError(projectNotFoundMessage(from));
-
+      const { io } = config;
       // Progress goes to stderr, so it never mixes with the plan (or its JSON) on stdout.
-      const plan = await config.migrator.plan(rootPath, {
-        onStep: (message) => config.io.stderr.write(`${message}...\n`),
-      });
-      renderResult(ctx, plan, () => config.io.stdout.write(formatMigrationPlan(plan)));
-      // The plan is the output either way; a project that can't migrate yet still
-      // exits non-zero so scripts can tell.
-      if (!plan.ready) throw new SilentCLIError("the project can't be migrated yet");
+      const onStep = (message: string) => io.stderr.write(`${message}...\n`);
+
+      if (flags["dry-run"]) {
+        const plan = await config.migrator.plan(rootPath, { onStep });
+        renderResult(ctx, plan, () => io.stdout.write(formatMigrationPlan(plan)));
+        // The plan is the output either way; a project that can't migrate yet still
+        // exits non-zero so scripts can tell.
+        if (!plan.ready) throw new SilentCLIError("the project can't be migrated yet");
+        return;
+      }
+
+      // Decided before anything is read, so a script without --yes changes nothing.
+      const json = ctx.require(JsonKey);
+      const canPrompt = !json && io.stdin.isTTY && io.stdout.isTTY && io.stderr.isTTY;
+      if (!flags.yes && !canPrompt) throw new InputValidationError(CONFIRMATION_REQUIRED_MESSAGE);
+
+      const prepared = await config.migrator.prepare(rootPath, { onStep });
+      try {
+        const { plan } = prepared;
+        if (!plan.ready) {
+          renderResult<MigrationOutput>(ctx, { plan, refactors: [] }, () =>
+            io.stdout.write(formatMigrationPlan(plan, { dryRun: false })),
+          );
+          throw new SilentCLIError("the project can't be migrated yet");
+        }
+        if (!json) io.stdout.write(formatMigrationPlan(plan, { dryRun: false }));
+
+        // CloudFormation validates each refactor as it's created, so the user
+        // confirms what it will actually do; nothing changes until it's executed.
+        const refactors = await prepared.preview({ onStep });
+        if (!json) io.stdout.write(formatRefactorPreviews(refactors));
+        if (!flags.yes && !(await confirmMigration(io, plan, refactors))) {
+          throw new UserCancellationError();
+        }
+
+        const result = await prepared.apply({ onStep });
+        renderResult<MigrationOutput>(ctx, { plan, refactors, result }, () =>
+          io.stdout.write(formatMigrationResult(result)),
+        );
+        if (!result.migrated) throw new SilentCLIError("the migration didn't complete");
+      } finally {
+        await prepared.dispose();
+      }
     },
   });
 
-/** The human-readable dry-run report. */
-export function formatMigrationPlan(plan: MigrationPlan): string {
+async function confirmMigration(
+  io: AppIO,
+  plan: MigrationPlan,
+  refactors: StackRefactorPreview[],
+): Promise<boolean> {
+  const readline = createInterface({ input: io.stdin, output: io.stderr });
+  try {
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      const cancel = () => reject(new UserCancellationError());
+      readline.once("SIGINT", cancel);
+      readline.once("close", cancel);
+    });
+    const stacks = refactors.filter((refactor) => refactor.refactorId !== undefined).length;
+    const answer = await Promise.race([
+      readline.question(
+        `Migrate project '${plan.projectName ?? plan.rootPath}' to v1? This ` +
+          (stacks === 0
+            ? "rewrites the project's files as listed above (no stack needs refactoring). "
+            : `refactors ${stacks} deployed ${stacks === 1 ? "stack" : "stacks"} and rewrites ` +
+              "the project's files as listed above. ") +
+          "(y/N) ",
+      ),
+      cancelled,
+    ]);
+    return /^(?:y|yes)$/i.test(answer.trim());
+  } finally {
+    readline.close();
+  }
+}
+
+/** What each stack's refactor will do, as CloudFormation listed it once created. */
+export function formatRefactorPreviews(previews: StackRefactorPreview[]): string {
+  if (previews.length === 0) return "";
+  const lines: string[] = [];
+  for (const preview of previews) {
+    lines.push("");
+    if (preview.refactorId === undefined) {
+      lines.push(`Stack ${preview.stackName}: nothing to move, so no refactor is needed`);
+      continue;
+    }
+    lines.push(
+      `Stack refactor ${preview.refactorId} for ${preview.stackName}, validated by CloudFormation:`,
+    );
+    lines.push(
+      ...table(
+        ["ACTION", "FROM", "TO", "NOTE"],
+        preview.actions.map((action) => [
+          action.action,
+          action.from,
+          action.to,
+          action.description ?? "",
+        ]),
+      ).map((line) => `  ${line}`),
+    );
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+const OUTCOME_LABELS: Record<MigrationResult["stacks"][number]["outcome"], string> = {
+  refactored: "refactored",
+  unchanged: "nothing to move",
+  failed: "FAILED",
+  undone: "refactored, then moved back",
+  "undo-failed": "refactored; moving it back FAILED",
+  "not-started": "not refactored",
+};
+
+/** The summary printed after applying. */
+export function formatMigrationResult(result: MigrationResult): string {
+  const lines: string[] = [""];
+  lines.push(result.migrated ? "Migrated to v1." : "Migration didn't complete.");
+  if (result.stacks.length > 0) {
+    lines.push("", "Stacks");
+    for (const stack of result.stacks) {
+      lines.push(`  ${stack.stackName}: ${OUTCOME_LABELS[stack.outcome]}`);
+      if (stack.message && stack.outcome !== "failed") lines.push(`    ${stack.message}`);
+    }
+  }
+  if (result.verification.length > 0) {
+    lines.push("", "First v1 deploy (previewed with a change set, not executed)");
+    for (const entry of result.verification) {
+      if (entry.error) {
+        lines.push(`  ${entry.stackName}: not verified: ${entry.error}`);
+        continue;
+      }
+      const removes = entry.changes.filter((change) => change.action === "Remove").length;
+      const replaces = entry.changes.filter((change) => change.replacement === "True").length;
+      lines.push(
+        `  ${entry.stackName}: ${entry.changes.length} ${entry.changes.length === 1 ? "change" : "changes"} ` +
+          `(${replaces} ${replaces === 1 ? "replacement" : "replacements"}, ${removes} ` +
+          `${removes === 1 ? "removal" : "removals"}); ` +
+          (entry.problems.length === 0
+            ? "no AgentCore resource is replaced or removed"
+            : `${entry.problems.length} kept ${entry.problems.length === 1 ? "resource" : "resources"} would be replaced or removed`),
+      );
+      for (const problem of entry.problems) lines.push(`    ${problem}`);
+    }
+  }
+  if (result.migrated) {
+    lines.push("", "Files changed");
+    for (const change of result.files) lines.push(`  ${change.kind.padEnd(8)}  ${change.path}`);
+    if (result.warnings?.length) {
+      lines.push("", "Warnings");
+      for (const warning of result.warnings) lines.push(`  - ${warning}`);
+    }
+    lines.push("");
+    if (result.report) lines.push(`What changed and what's left to do is in ${result.report}.`);
+    lines.push("Next: review the changes (git diff), commit them, then run `agentcore deploy`.");
+  } else {
+    if (result.error) lines.push("", `Error: ${result.error}`);
+    if (result.restored) {
+      lines.push(
+        "",
+        "Nothing was changed: every stack and file is as it was, so the project is still a v0 project.",
+      );
+    }
+    if (result.recovery.length > 0) {
+      lines.push("", "To recover");
+      result.recovery.forEach((step, index) => lines.push(`  ${index + 1}. ${step}`));
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+/** The human-readable plan, printed by a dry run and before applying. */
+export function formatMigrationPlan(
+  plan: MigrationPlan,
+  options: { dryRun?: boolean } = {},
+): string {
   const lines: string[] = [];
   const title = plan.projectName ? `project '${plan.projectName}'` : plan.rootPath;
-  lines.push(`Migration plan for ${title} (dry run: nothing was changed)`, "");
+  lines.push(
+    `Migration plan for ${title}${options.dryRun === false ? "" : " (dry run: nothing was changed)"}`,
+    "",
+  );
 
   lines.push("Checks");
   const nameWidth = Math.max(...plan.checks.map((check) => check.name.length));

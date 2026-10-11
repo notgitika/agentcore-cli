@@ -4,10 +4,19 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
+  CreateChangeSetCommand,
+  CreateStackRefactorCommand,
+  DeleteChangeSetCommand,
+  DescribeChangeSetCommand,
+  DescribeStackRefactorCommand,
   DescribeStacksCommand,
+  ExecuteStackRefactorCommand,
   GetStackPolicyCommand,
   GetTemplateCommand,
+  ListStackRefactorActionsCommand,
+  type Change,
   type CloudFormationClient,
+  type ResourceMapping,
 } from "@aws-sdk/client-cloudformation";
 import { ProcessFailedError, type ProcessRunner } from "../../../io";
 import type { CreateCloudFormationClient } from "../../types";
@@ -15,6 +24,7 @@ import type { AccountResolver } from "../backends/cdk/environment";
 import type { CdkCredentialResolver } from "../backends/cdk/toolkit";
 import type { WorkspaceSynthesizer } from "./synth";
 import type { CfnTemplate } from "./templates";
+import type { TemplateStore } from "./templateStore";
 
 /** A deployed v0 project shaped like the live-tested F1 fixture, trimmed to one of each resource. */
 export const F1_SPEC = {
@@ -322,28 +332,178 @@ export type FakeStack = {
   templateBody?: string;
 };
 
+/** How a fake stack refactor turns out; by default it's created and executes. */
+export type FakeRefactorOutcome = {
+  /** The refactor's Status after creation; anything but CREATE_COMPLETE fails it. */
+  create?: { status: string; reason?: string };
+  /** Its ExecutionStatus once executed; anything but EXECUTE_COMPLETE fails it. */
+  execute?: { status: string; reason?: string };
+  /**
+   * ExecutionStatus for successive reads after execution, before `execute`'s
+   * (which every later read returns), e.g. a rollback in progress.
+   */
+  executeSteps?: string[];
+  /** ExecuteStackRefactor throws this; `started` says whether CloudFormation ran it anyway. */
+  executeThrows?: { message: string; started: boolean };
+  /** How many reads after execution throw before the refactor reads normally again. */
+  failedReads?: number;
+};
+
+/** A change set as the fake reports it: the changes, or a failed creation. */
+export type FakeChangeSet = { changes: Change[] } | { status: "FAILED"; reason: string };
+
+export type FakeCloudFormationOptions = {
+  /** Decides each refactor's outcome; `index` counts refactors created for that stack, from 0. */
+  refactors?: (call: { stackName: string; index: number }) => FakeRefactorOutcome;
+  /** The change set created for each stack; defaults to one with no changes. */
+  changeSets?: Record<string, FakeChangeSet>;
+  /** The CDK bootstrap bucket CDKToolkit reports. */
+  bootstrapBucket?: string;
+};
+
+type FakeRefactor = {
+  stackName: string;
+  template: CfnTemplate;
+  mappings: ResourceMapping[];
+  outcome: FakeRefactorOutcome;
+  /** DescribeStackRefactor calls so far; the first reads still in progress. */
+  reads: number;
+  executed: boolean;
+};
+
 /**
- * A CloudFormation client factory answering DescribeStacks, GetStackPolicy, and
- * GetTemplate from `stacks`; any other command fails the test. Records every
- * request, with the region and credentials the client was built for.
+ * A CloudFormation client factory answering, from `stacks`: DescribeStacks,
+ * GetStackPolicy, and GetTemplate; stack refactors (created, listed, and executed,
+ * moving the stack to the refactor's template); and change sets (created from
+ * `options.changeSets`, described, deleted). Any other command fails the test.
+ * Records every request, with the region the client was built for; `stacks` is
+ * updated as refactors execute.
  */
-export function fakeCloudFormation(stacks: Record<string, FakeStack>): {
+export function fakeCloudFormation(
+  stacks: Record<string, FakeStack>,
+  options: FakeCloudFormationOptions = {},
+): {
   create: CreateCloudFormationClient;
   calls: { command: string; input: Record<string, unknown>; region: string }[];
+  stacks: Record<string, FakeStack>;
 } {
   const calls: { command: string; input: Record<string, unknown>; region: string }[] = [];
+  const refactors = new Map<string, FakeRefactor>();
+  const created = new Map<string, number>();
+  const changeSets = new Map<string, FakeChangeSet>();
+  const notFound = (id: string) =>
+    Object.assign(new Error(`Stack with id ${id} does not exist`), { name: "ValidationError" });
+
+  const refactorCommand = (name: string, input: Record<string, unknown>) => {
+    if (name === CreateStackRefactorCommand.name) {
+      const [definition] = input.StackDefinitions as {
+        StackName: string;
+        TemplateBody?: string;
+        TemplateURL?: string;
+      }[];
+      const stackName = definition!.StackName;
+      if (!stacks[stackName]) throw notFound(stackName);
+      const index = created.get(stackName) ?? 0;
+      created.set(stackName, index + 1);
+      const id = `refactor-${refactors.size + 1}`;
+      refactors.set(id, {
+        stackName,
+        template: JSON.parse(
+          definition!.TemplateBody ??
+            JSON.stringify(TEMPLATES_BY_URL.get(definition!.TemplateURL!)),
+        ) as CfnTemplate,
+        mappings: (input.ResourceMappings as ResourceMapping[]) ?? [],
+        outcome: options.refactors?.({ stackName, index }) ?? {},
+        reads: 0,
+        executed: false,
+      });
+      return { StackRefactorId: id };
+    }
+    const id = String(input.StackRefactorId);
+    const refactor = refactors.get(id);
+    if (!refactor) throw new Error(`no stack refactor ${id}`);
+    if (name === DescribeStackRefactorCommand.name) {
+      refactor.reads += 1;
+      const create = refactor.outcome.create ?? { status: "CREATE_COMPLETE" };
+      if (!refactor.executed) {
+        return refactor.reads === 1
+          ? { StackRefactorId: id, Status: "CREATE_IN_PROGRESS", ExecutionStatus: "UNAVAILABLE" }
+          : {
+              StackRefactorId: id,
+              Status: create.status,
+              StatusReason: create.reason,
+              ExecutionStatus: create.status === "CREATE_COMPLETE" ? "AVAILABLE" : "UNAVAILABLE",
+            };
+      }
+      if ((refactor.outcome.failedReads ?? 0) > 0) {
+        refactor.outcome.failedReads! -= 1;
+        throw Object.assign(new Error("Rate exceeded"), { name: "Throttling" });
+      }
+      const step = refactor.outcome.executeSteps?.shift();
+      if (step) return { StackRefactorId: id, Status: "CREATE_COMPLETE", ExecutionStatus: step };
+      const execute = refactor.outcome.execute ?? { status: "EXECUTE_COMPLETE" };
+      return {
+        StackRefactorId: id,
+        Status: "CREATE_COMPLETE",
+        ExecutionStatus: execute.status,
+        ExecutionStatusReason: execute.reason,
+      };
+    }
+    if (name === ListStackRefactorActionsCommand.name) {
+      // Pages of two, so callers have to follow NextToken.
+      const start = Number(input.NextToken ?? 0);
+      const page = refactor.mappings.slice(start, start + 2);
+      return {
+        StackRefactorActions: page.map((mapping) => ({
+          Action: "MOVE",
+          Entity: "RESOURCE",
+          PhysicalResourceId: `physical-${mapping.Source!.LogicalResourceId}`,
+          Description: "No configuration changes detected.",
+          ResourceMapping: mapping,
+        })),
+        ...(start + 2 < refactor.mappings.length && { NextToken: String(start + 2) }),
+      };
+    }
+    if (name === ExecuteStackRefactorCommand.name) {
+      const throws = refactor.outcome.executeThrows;
+      if (throws && !throws.started) throw new Error(throws.message);
+      refactor.executed = true;
+      // A completed refactor leaves the stack on the refactor's template; a failed
+      // one rolls back, and one that couldn't roll back is left as it was here.
+      if ((refactor.outcome.execute?.status ?? "EXECUTE_COMPLETE") === "EXECUTE_COMPLETE") {
+        stacks[refactor.stackName]!.template = refactor.template;
+        delete stacks[refactor.stackName]!.templateBody;
+      }
+      if (throws) throw new Error(throws.message);
+      return {};
+    }
+    return undefined;
+  };
+
   const create: CreateCloudFormationClient = (config) =>
     ({
       send: async (command: { constructor: { name: string }; input: Record<string, unknown> }) => {
         const name = command.constructor.name;
         calls.push({ command: name, input: command.input, region: config.region });
-        const stackName = String(command.input.StackName);
-        const stack = stacks[stackName];
-        if (!stack) {
-          throw Object.assign(new Error(`Stack with id ${stackName} does not exist`), {
-            name: "ValidationError",
-          });
+        if (name.includes("StackRefactor")) {
+          const response = refactorCommand(name, command.input);
+          if (response !== undefined) return response;
         }
+        const stackName = String(command.input.StackName);
+        if (name === DescribeStacksCommand.name && stackName === "CDKToolkit") {
+          if (!options.bootstrapBucket) throw notFound(stackName);
+          return {
+            Stacks: [
+              {
+                StackName: stackName,
+                StackStatus: "UPDATE_COMPLETE",
+                Outputs: [{ OutputKey: "BucketName", OutputValue: options.bootstrapBucket }],
+              },
+            ],
+          };
+        }
+        const stack = stacks[stackName];
+        if (!stack) throw notFound(stackName);
         if (name === DescribeStacksCommand.name) {
           return {
             Stacks: [{ StackName: stackName, StackStatus: stack.status ?? "UPDATE_COMPLETE" }],
@@ -353,10 +513,55 @@ export function fakeCloudFormation(stacks: Record<string, FakeStack>): {
         if (name === GetTemplateCommand.name) {
           return { TemplateBody: stack.templateBody ?? JSON.stringify(stack.template ?? {}) };
         }
+        const changeSetKey = `${stackName}/${String(command.input.ChangeSetName)}`;
+        if (name === CreateChangeSetCommand.name) {
+          changeSets.set(changeSetKey, options.changeSets?.[stackName] ?? { changes: [] });
+          return { Id: changeSetKey };
+        }
+        if (name === DescribeChangeSetCommand.name) {
+          const changeSet = changeSets.get(changeSetKey);
+          if (!changeSet) throw new Error(`no change set ${changeSetKey}`);
+          if ("status" in changeSet) {
+            return { Status: "FAILED", StatusReason: changeSet.reason };
+          }
+          if (changeSet.changes.length === 0) {
+            return {
+              Status: "FAILED",
+              StatusReason: "The submitted information didn't contain changes.",
+            };
+          }
+          return { Status: "CREATE_COMPLETE", Changes: changeSet.changes };
+        }
+        if (name === DeleteChangeSetCommand.name) {
+          changeSets.delete(changeSetKey);
+          return {};
+        }
         throw new Error(`unexpected CloudFormation command ${name}`);
       },
     }) as unknown as CloudFormationClient;
-  return { create, calls };
+  return { create, calls, stacks };
+}
+
+/** Templates uploaded to a {@link fakeTemplateStore}, by URL, so refactors made from a URL can read them. */
+const TEMPLATES_BY_URL = new Map<string, unknown>();
+
+/** A template store that keeps uploads in memory and records them. */
+export function fakeTemplateStore(): TemplateStore & { puts: string[]; removed: string[] } {
+  const puts: string[] = [];
+  const removed: string[] = [];
+  return {
+    puts,
+    removed,
+    async put(key, body) {
+      puts.push(key);
+      const url = `https://bootstrap.example/${key}`;
+      TEMPLATES_BY_URL.set(url, JSON.parse(body));
+      return url;
+    },
+    async remove(key) {
+      removed.push(key);
+    },
+  };
 }
 
 /**

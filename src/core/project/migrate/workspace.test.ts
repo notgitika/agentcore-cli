@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FsAssetSource } from "../source";
 import { writeV0Project } from "./migrate-test-support";
-import { buildMigrationWorkspace, diffTrees, removeOnInterrupt } from "./workspace";
+import {
+  buildMigrationWorkspace,
+  diffTrees,
+  escapingSymlinks,
+  removeOnInterrupt,
+} from "./workspace";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(() => Promise.all(cleanups.splice(0).map((cleanup) => cleanup())));
@@ -189,5 +194,57 @@ describe("removeOnInterrupt", () => {
     expect(process.listenerCount("exit")).toBe(exitListeners);
     expect(process.listenerCount("SIGINT")).toBe(sigintListeners);
     detach();
+  });
+});
+
+describe("escapingSymlinks", () => {
+  test("lists links that lead outside the tree, however they get there", async () => {
+    const root = await mkdtemp(join(tmpdir(), "agentcore-links-"));
+    const outside = await mkdtemp(join(tmpdir(), "agentcore-outside-"));
+    cleanups.push(() => rm(root, { recursive: true, force: true }));
+    cleanups.push(() => rm(outside, { recursive: true, force: true }));
+    await mkdir(join(root, "app", "deep"), { recursive: true });
+    await writeFile(join(root, "app", "file.txt"), "x");
+
+    await symlink("file.txt", join(root, "app", "ok-file"));
+    await symlink("../app", join(root, "app", "deep", "ok-dir"));
+    await symlink("not-yet", join(root, "app", "ok-dangling"));
+    await symlink(outside, join(root, "app", "absolute-out"));
+    await symlink("../../..", join(root, "app", "deep", "relative-out"));
+    await symlink(join(outside, "missing"), join(root, "app", "dangling-out"));
+    await symlink("loop", join(root, "app", "loop"));
+    // Up through a link to the root: lexically inside (app/deep/x), really outside.
+    await symlink("../..", join(root, "app", "deep", "up"));
+    await symlink("deep/up/../x", join(root, "app", "climb"));
+    // Never looked at: dependencies are never copied into a workspace.
+    await mkdir(join(root, "node_modules"));
+    await symlink(outside, join(root, "node_modules", "ignored"));
+
+    expect(await escapingSymlinks(root)).toEqual([
+      `app/absolute-out -> ${outside}`,
+      "app/climb -> deep/up/../x",
+      `app/dangling-out -> ${join(outside, "missing")}`,
+      "app/deep/relative-out -> ../../..",
+      "app/loop -> loop",
+    ]);
+  });
+
+  test("the workspace reports the escaping links it copied verbatim", async () => {
+    const { root, cleanup } = await writeV0Project();
+    cleanups.push(cleanup);
+    await symlink(join(root, "app", "CompatAAgent"), join(root, "app", "linked"));
+
+    const workspace = await buildMigrationWorkspace({
+      rootPath: root,
+      spec: { name: "CompatA", version: 2 },
+      harnesses: [],
+      assetSource: new FsAssetSource(),
+    });
+    cleanups.push(workspace.dispose);
+
+    // Copied as is, it points back into the real project.
+    expect(workspace.escapingSymlinks).toEqual([
+      `app/linked -> ${join(root, "app", "CompatAAgent")}`,
+    ]);
   });
 });

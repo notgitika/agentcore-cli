@@ -139,7 +139,7 @@ function cascadeProbe(
 }
 
 /** IAM roles a harness runs as, in either template; a harness role keeps its pinned name. */
-function rolesUsedByHarnesses(...templates: CfnTemplate[]): Set<string> {
+export function rolesUsedByHarnesses(...templates: CfnTemplate[]): Set<string> {
   const roles = new Set<string>();
   for (const template of templates) {
     const resources = resourcesOf(template);

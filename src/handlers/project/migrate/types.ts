@@ -140,7 +140,136 @@ export type MigrationPlanOptions = {
   onStep?: (message: string) => void;
 };
 
-/** Plans the migration of a v0 project to v1. Implemented in src/core/project/migrate. */
+/** One action a created (not yet executed) stack refactor would take, as CloudFormation lists it. */
+export type RefactorActionPreview = {
+  /** `MOVE` for every resource a migration refactor moves. */
+  action: string;
+  entity: string;
+  /** Logical ID the resource moves from. */
+  from: string;
+  /** Logical ID the resource moves to. */
+  to: string;
+  physicalResourceId?: string;
+  /** CloudFormation's note, e.g. "No configuration changes detected." */
+  description?: string;
+};
+
+/** The refactor created for one stack, before it runs. */
+export type StackRefactorPreview = {
+  target: string;
+  stackName: string;
+  region: string;
+  /** Absent when nothing in the stack needs to move, so no refactor was created. */
+  refactorId?: string;
+  actions: RefactorActionPreview[];
+};
+
+/** A resource change in the change set that previews the first v1 deploy. */
+export type ChangeSetResourceChange = {
+  logicalId: string;
+  type: string;
+  /** CloudFormation's action: Add, Modify, Remove, ... */
+  action: string;
+  /** For a Modify: True, False, or Conditional. */
+  replacement?: string;
+  /**
+   * For a Conditional replacement, the create-only properties that may change and
+   * why, as CloudFormation explains it.
+   */
+  recreatedBy?: {
+    property: string;
+    /** Static (the template changes it) or Dynamic (it depends on another resource). */
+    evaluation: string;
+    source: string;
+    /** The resource (`LogicalId` or `LogicalId.Attribute`) it depends on. */
+    causingEntity?: string;
+  }[];
+};
+
+/** What the change set previewing the first v1 deploy of a stack showed. */
+export type StackVerification = {
+  target: string;
+  stackName: string;
+  changeSetName: string;
+  /** Why the change set couldn't be created or read; the stack isn't verified. */
+  error?: string;
+  changes: ChangeSetResourceChange[];
+  /** AgentCore resources (or ECR repositories, harness roles) it would replace or delete; empty means verified. */
+  problems: string[];
+};
+
+/**
+ * What became of one stack: `refactored` (and still is), `unchanged` (nothing
+ * needed moving), `failed` (its refactor failed; CloudFormation rolled it back
+ * unless recovery steps say otherwise), `undone` (refactored, then moved back
+ * after a later failure), `undo-failed` (refactored, and couldn't be moved back),
+ * or `not-started`.
+ */
+export type StackRefactorOutcome =
+  "refactored" | "unchanged" | "failed" | "undone" | "undo-failed" | "not-started";
+
+export type StackRefactorResult = {
+  target: string;
+  stackName: string;
+  region: string;
+  outcome: StackRefactorOutcome;
+  refactorId?: string;
+  /** Why it failed, for the failed outcomes. */
+  message?: string;
+};
+
+/** What applying a migration did. */
+export type MigrationResult = {
+  /** The project is v1 and every stack was verified; next is `agentcore deploy`. */
+  migrated: boolean;
+  stacks: StackRefactorResult[];
+  /** Project files the migration changed and left changed; empty when it didn't get that far or put them back. */
+  files: FileChange[];
+  verification: StackVerification[];
+  /** Project-relative path of MIGRATION.md, once written. */
+  report?: string;
+  /** What went wrong, when the migration didn't complete. */
+  error?: string;
+  /**
+   * After a failure, whether the project and its stacks were put back as they
+   * were (so the project is still a working v0 project).
+   */
+  restored?: boolean;
+  /** Steps only the user can take; empty unless something couldn't be undone. */
+  recovery: string[];
+  /** Housekeeping that failed after a completed migration (MIGRATION.md, cleanup). */
+  warnings?: string[];
+};
+
+export type MigrationApplyOptions = {
+  /** Called as each slow step starts. */
+  onStep?: (message: string) => void;
+};
+
+/**
+ * A planned migration whose working copy (the converted project, its synthesized
+ * v1 app) is kept until disposed, so it can be applied exactly as planned.
+ */
+export interface PreparedMigration {
+  plan: MigrationPlan;
+  /**
+   * Creates each stack's refactor without executing it, so CloudFormation
+   * validates it and lists what it will do. Changes nothing.
+   */
+  preview(options?: MigrationApplyOptions): Promise<StackRefactorPreview[]>;
+  /**
+   * Refactors the stacks, then writes the converted files into the project,
+   * installs and synthesizes the v1 CDK app in place, and verifies with a change
+   * set per stack that the first v1 deploy keeps every AgentCore resource. A
+   * failure at any step puts the stacks and files back as they were.
+   */
+  apply(options?: MigrationApplyOptions): Promise<MigrationResult>;
+  /** Deletes the working copy. */
+  dispose(): Promise<void>;
+}
+
+/** Plans and applies the migration of a v0 project to v1. Implemented in src/core/project/migrate. */
 export interface ProjectMigrator {
   plan(rootPath: string, options?: MigrationPlanOptions): Promise<MigrationPlan>;
+  prepare(rootPath: string, options?: MigrationPlanOptions): Promise<PreparedMigration>;
 }

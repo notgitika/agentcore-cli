@@ -6,12 +6,13 @@ import {
   mkdtemp,
   readdir,
   readFile,
+  readlink,
   realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, parse, relative, sep } from "node:path";
 import { ProjectStateError } from "../../../errors";
 import type { FileChange } from "../../../handlers/project/migrate/types";
 import type { AssetSource } from "../source";
@@ -57,6 +58,18 @@ export type MigrationWorkspace = {
   directory: string;
   /** How the converted copy differs from the project. */
   changes: FileChange[];
+  /**
+   * Symlinks in the copy that lead out of it (`path -> target`). Nothing may run
+   * in a workspace that has any: an install or synth writing through one would
+   * change files outside the copy, such as the project itself.
+   */
+  escapingSymlinks: string[];
+  /**
+   * Stops Ctrl-C from deleting the workspace (it's still deleted when the process
+   * exits), for a step that handles Ctrl-C itself. Returns the function that turns
+   * the cleanup back on.
+   */
+  pauseInterruptCleanup(): () => void;
   /** Deletes the workspace. */
   dispose(): Promise<void>;
 };
@@ -69,10 +82,23 @@ export type MigrationWorkspace = {
  */
 export async function buildMigrationWorkspace(input: WorkspaceInput): Promise<MigrationWorkspace> {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "agentcore-migrate-")));
-  const detach = removeOnInterrupt(directory);
+  let detach = removeOnInterrupt(directory);
   const dispose = async () => {
     detach();
     await rm(directory, { recursive: true, force: true });
+  };
+  const pauseInterruptCleanup = () => {
+    detach();
+    const remove = () => rmSync(directory, { recursive: true, force: true });
+    process.on("exit", remove);
+    let resumed = false;
+    detach = () => process.off("exit", remove);
+    return () => {
+      if (resumed) return;
+      resumed = true;
+      detach();
+      detach = removeOnInterrupt(directory);
+    };
   };
   try {
     // Symlinks are copied as they are rather than rewritten to point back into the
@@ -111,7 +137,13 @@ export async function buildMigrationWorkspace(input: WorkspaceInput): Promise<Mi
     );
     await cdkApp.write(dirname(cdkDirectory));
 
-    return { directory, changes: await diffTrees(input.rootPath, directory), dispose };
+    return {
+      directory,
+      changes: await diffTrees(input.rootPath, directory),
+      escapingSymlinks: await escapingSymlinks(directory),
+      pauseInterruptCleanup,
+      dispose,
+    };
   } catch (error) {
     await dispose();
     throw error;
@@ -199,6 +231,82 @@ async function resolveExisting(path: string): Promise<string | undefined> {
       missing.unshift(basename(existing));
     }
   }
+}
+
+/**
+ * Every symlink under `root` (outside excluded directories) that resolves outside
+ * it, as `path -> target`. A link is followed through every link on the way, so a
+ * relative link through a link to `.` can't climb out unnoticed; a dangling link
+ * (writing to which creates its target) counts as escaping unless its target
+ * would land inside `root`.
+ */
+export async function escapingSymlinks(root: string, directory = root): Promise<string[]> {
+  const realRoot = await realpath(root);
+  const found: string[] = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (excludedName(entry.name)) continue;
+    const path = join(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      const target = await readlink(path);
+      const resolved = await resolveLink(path);
+      const fromRoot = resolved === undefined ? ".." : relative(realRoot, resolved);
+      if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+        found.push(`${relative(root, path).split(sep).join("/")} -> ${target}`);
+      }
+    } else if (entry.isDirectory()) {
+      found.push(...(await escapingSymlinks(root, path)));
+    }
+  }
+  return found.sort();
+}
+
+/** How many symlinks one path may pass through before it counts as a loop (Linux's limit). */
+const MAX_LINKS = 40;
+
+/**
+ * Where a symlink leads, resolved one path segment at a time the way the kernel
+ * does: a `..` after a link climbs from where the link really points, not
+ * lexically (runtimes differ on whether `realpath` gets this right). A dangling
+ * link resolves to where writing through it would create its target. A loop
+ * resolves to `undefined`.
+ */
+async function resolveLink(path: string): Promise<string | undefined> {
+  let links = 0;
+  const walk = async (from: string, segments: string[]): Promise<string | undefined> => {
+    let current = from;
+    for (let index = 0; index < segments.length; index++) {
+      const segment = segments[index]!;
+      if (segment === "" || segment === ".") continue;
+      // `current` never contains a symlink, so its lexical parent is its real one.
+      if (segment === "..") {
+        current = dirname(current);
+        continue;
+      }
+      const next = join(current, segment);
+      let stats;
+      try {
+        stats = await lstat(next);
+      } catch {
+        // Doesn't exist (yet): the rest can only be created under it, as written.
+        return join(next, ...segments.slice(index + 1));
+      }
+      if (!stats.isSymbolicLink()) {
+        current = next;
+        continue;
+      }
+      if (++links > MAX_LINKS) return undefined;
+      const target = await readlink(next);
+      const resolved = isAbsolute(target)
+        ? await walk(parse(target).root, target.slice(parse(target).root.length).split(/[\\/]/))
+        : await walk(current, target.split(/[\\/]/));
+      if (resolved === undefined) return undefined;
+      current = resolved;
+    }
+    return current;
+  };
+  const absolute = isAbsolute(path) ? path : join(process.cwd(), path);
+  const { root } = parse(absolute);
+  return walk(root, absolute.slice(root.length).split(sep));
 }
 
 function excluded(relativePath: string): boolean {
