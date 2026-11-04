@@ -270,6 +270,15 @@ add a harness to the current project (not available in China regions)
 - `--api-key <api-key>`: API key for a non-Bedrock --model; '-' for stdin, 'file://path' for file
 - `--system-prompt <system-prompt>`: the agent's system prompt
 - `--tags <tags...>`: tags as repeated key=value entries or one JSON object
+- `--build <build>`: container builds in CodeBuild; container-local builds locally and publishes through CDK
+- `--build-context-path <build-context-path>`: Docker build context relative to the project root
+- `--custom-docker-build-args <custom-docker-build-args>`: nonsecret Docker build arguments (JSON object)
+- `--container-uri <container-uri>`: ECR container image URI; alternative to --dockerfile
+- `--dockerfile <dockerfile>`: path to local Dockerfile to build the harness image; alternative to --container-uri
+- `--environment-variables <environment-variables>`: environment variables (JSON object of key/value strings)
+- `--network-mode <network-mode>`: network mode for the harness environment (PUBLIC or VPC)
+- `--network-config <network-config>`: VPC network configuration (JSON)
+- `--lifecycle-config <lifecycle-config>`: session idle timeout and instance lifetime configuration (JSON)
 - `--tools <tools>`: tools available to the agent (JSON)
 - `--allowed-tools <allowed-tools...>`: tool allowlist patterns (e.g. \* or @serverName/toolName)
 - `--skills <skills>`: skills available to the agent (JSON)
@@ -278,12 +287,6 @@ add a harness to the current project (not available in China regions)
 - `--max-iterations <max-iterations>`: max agent loop iterations per invocation
 - `--max-tokens <max-tokens>`: max total output tokens per invocation
 - `--timeout-seconds <timeout-seconds>`: max duration in seconds per invocation
-- `--container-uri <container-uri>`: ECR container image URI; alternative to --dockerfile
-- `--dockerfile <dockerfile>`: path to local Dockerfile to build the harness image; alternative to --container-uri
-- `--environment-variables <environment-variables>`: environment variables (JSON object of key/value strings)
-- `--network-mode <network-mode>`: network mode for the harness environment (PUBLIC or VPC)
-- `--network-config <network-config>`: VPC network configuration (JSON)
-- `--lifecycle-config <lifecycle-config>`: session idle timeout and instance lifetime configuration (JSON)
 - `--session-storage-path <session-storage-path>`: mount path for session storage
 - `--efs-access-points <efs-access-points>`: EFS access point configurations (JSON; requires VPC)
 - `--s3-access-points <s3-access-points>`: S3 access point configurations (JSON; requires VPC)
@@ -306,6 +309,10 @@ add a Runtime to the current project
 - `--protocol <protocol>`: protocol the Runtime serves: HTTP (default), MCP, A2A, or AGUI
 - `--description <description>`: an optional description of the Runtime
 - `--tags <tags...>`: tags as repeated key=value entries or one JSON object
+- `--build <build>`: container builds in CodeBuild; container-local builds locally and publishes through CDK
+- `--build-context-path <build-context-path>`: Docker build context relative to the project root
+- `--custom-docker-build-args <custom-docker-build-args>`: nonsecret Docker build arguments (JSON object)
+- `--dockerfile <dockerfile>`: Dockerfile to use for a container build
 - `--environment-variables <environment-variables>`: environment variables (JSON object of key/value strings)
 - `--network-mode <network-mode>`: network mode for the Runtime environment (PUBLIC or VPC)
 - `--network-config <network-config>`: VPC network configuration (JSON)

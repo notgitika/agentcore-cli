@@ -548,7 +548,8 @@ export class FsProjectManager implements ProjectManager {
         yield* this.installRuntimeDependencies(appDir, scaffoldRuntimeInput);
       }
     } else if (
-      scaffoldRuntimeInput?.build === "Container" &&
+      scaffoldRuntimeInput !== undefined &&
+      scaffoldRuntimeInput.build !== "CodeZip" &&
       templateManagesDependencies(resolveRuntimeTemplateProfile(scaffoldRuntimeInput))
     ) {
       // Container builds install from a lockfile, so generate it even with no-install.
@@ -759,6 +760,7 @@ export class FsProjectManager implements ProjectManager {
         if (!existsSync(outputPath)) scaffoldedPaths.push(outputPath);
 
         const resolver = getHarnessTemplateResolver({
+          projectRoot: project.rootPath,
           assetSource: this.assetSource,
           templateRenderer: this.templateRenderer,
         });
@@ -794,7 +796,11 @@ export class FsProjectManager implements ProjectManager {
           const relativeFolder = `app/${input.resourceConfig.name}`;
           yield { type: "step", message: `writing runtime docs to '${relativeFolder}'` };
           const tree = await runtimeDocsTree(
-            { assetSource: this.assetSource, templateRenderer: this.templateRenderer },
+            {
+              assetSource: this.assetSource,
+              templateRenderer: this.templateRenderer,
+              projectRoot: project.rootPath,
+            },
             input.resourceConfig,
           );
           // Tracked as each file is written, so a write that fails partway is

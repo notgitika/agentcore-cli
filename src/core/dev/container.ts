@@ -146,7 +146,15 @@ export class ContainerDevRunner implements DevRunner {
     };
 
     yield { type: "status", message: `Building image with ${tool}` };
-    yield* this.streamProcess(buildCommand, buildOptions);
+    const redact = redactValues(Object.values(buildArgs));
+    try {
+      for await (const event of this.streamProcess(buildCommand, buildOptions)) {
+        yield { ...event, line: redact(event.line) };
+      }
+    } catch (error) {
+      redactError(error, redact);
+      throw error;
+    }
 
     const containerPort = DEV_PORTS[input.runtime.protocol ?? "HTTP"];
     const forwardedEnv: Record<string, string> = {};
@@ -276,3 +284,4 @@ function hashString(value: string): string {
 function sanitizeImageNameComponent(value: string): string {
   return value.replace(/_{3,}/g, "__");
 }
+import { redactError, redactValues } from "../../io/redact";

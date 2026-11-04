@@ -183,3 +183,74 @@ declares, not the ones you add in the stack.
 - [Amazon Bedrock AgentCore documentation](https://docs.aws.amazon.com/bedrock-agentcore/): service guides and API references.
 - [Contributing](CONTRIBUTING.md): development, builds, architecture, and testing.
 - [Security](SECURITY.md) · [License](LICENSE): Apache-2.0.
+
+## Local container builds
+
+Use the normal `--build` option to select where a Dockerfile image is built:
+
+```bash
+agentcore add runtime --name orders --language python \
+  --build container-local --dockerfile Dockerfile
+
+agentcore add harness --name assistant \
+  --build container-local --dockerfile Dockerfile
+```
+
+The Runtime entry in `agentcore/agentcore.json` uses a top-level build value:
+
+```json
+{
+  "name": "orders",
+  "build": "Container-local",
+  "codeLocation": "app/orders",
+  "entrypoint": "main.py",
+  "dockerfile": "Dockerfile"
+}
+```
+
+Harnesses use the same top-level selector in `app/<name>/harness.yaml`:
+
+```yaml
+build: Container-local
+dockerfile: Dockerfile
+```
+
+`Container` continues to use CodeBuild. A harness Dockerfile without a `build` selector also uses
+CodeBuild. `CodeZip` remains the default Runtime packaging. A prebuilt harness image cannot be
+combined with build, Dockerfile, context, or build-argument settings.
+
+Both add commands accept `--build-context-path` (relative to the project root) and
+`--custom-docker-build-args` (a JSON object). Without a context override, the supplied Dockerfile is
+copied to the new resource directory. With an override, the Dockerfile path is relative to that
+context. Persisted settings are `buildContextPath` and `customDockerBuildArgs`.
+
+`agentcore build` validates, synthesizes, and stages the context and asset manifest. During
+`agentcore deploy`, CDK Toolkit builds and publishes missing Linux ARM64 image assets to the target
+environment's bootstrap ECR repository before deploying the workload. The local builder must be
+installed, its daemon accessible, and Linux ARM64 support configured. `CDK_DOCKER` can select a
+Docker-compatible executable. The CLI checks these prerequisites without installing emulation or
+creating builders. Runtime development continues to use its local container runner; Harness
+development uses the selected deployment build mode when it deploys.
+
+Context filtering applies the existing exclusion baseline, then the context's `.dockerignore`,
+then force-keeps the Dockerfile and its parent directories. User negations can re-include baseline
+paths. Dockerfile-specific ignore files are rejected. Build arguments are nonsecret configuration:
+asset manifests and image layers can contain their values, even though the CLI redacts them from
+terminal output and debug logs.
+
+Included source, Dockerfile, platform, and build-argument changes produce a new image asset.
+Unchanged images already published to the target can be reused. Floating base-image tags can change
+without changing the asset hash; pin digests when reproducible builds are required. Each target uses
+its own bootstrap repository and publishing credentials. The bootstrap repository's encryption,
+scanning, retention, and lifecycle settings apply. Custom KMS encryption requires separate validation
+of the repository's KMS grants and key policy. Destroying a project leaves the shared bootstrap repository intact.
+
+Before switching a deployed resource from `Container` to `Container-local`, keep `build: Container`,
+apply `RemovalPolicy.RETAIN` to its existing managed ECR repository and KMS key in the CDK app, and
+deploy that retention change. Then change the selector and deploy again. The CLI rejects a transition
+that would delete either resource without a deployed retention policy. Preserve the images needed
+for rollback.
+
+Compatibility note: Harness CodeBuild context staging now uses the same filters as Runtime staging.
+The first deployment after upgrading can rebuild a Harness image because its staged context changed.
+Projects selecting `Container-local` must install a CDK package that supports the selector.

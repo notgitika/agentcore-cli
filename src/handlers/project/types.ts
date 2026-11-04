@@ -142,7 +142,7 @@ export const ScaffoldRuntimeInputSchema = z
         path: ["runtimeVersion"],
       });
     }
-    if (build === "Container" && runtimeVersion !== undefined) {
+    if (build !== "CodeZip" && runtimeVersion !== undefined) {
       ctx.addIssue({
         code: "custom",
         message: "runtimeVersion is not supported for Container builds",

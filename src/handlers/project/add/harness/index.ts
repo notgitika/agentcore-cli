@@ -17,6 +17,7 @@ import {
 import { SourceResolver } from "../../../../io";
 import type { AddResourceInput, Project } from "../../types";
 import { toLiteLlmGatewayModel } from "../../../harness/liteLlmGateway";
+import { containerFlags, parseContainerBuildArgs } from "../containerFlags";
 
 const CONFIGURATION = "Configuration:";
 const TOOLS_AND_SKILLS = "Tools and skills:";
@@ -101,6 +102,7 @@ export const createAddHarnessHandler = (config: AddProjectResourceConfig) =>
         group: CONFIGURATION,
       }),
       tagsFlag({ group: CONFIGURATION }),
+      ...containerFlags(ENVIRONMENT),
       flag("tools", "tools available to the agent (JSON)", z.string().optional(), {
         group: TOOLS_AND_SKILLS,
       }),
@@ -227,6 +229,9 @@ export const createAddHarnessHandler = (config: AddProjectResourceConfig) =>
         timeoutSeconds: flags["timeout-seconds"],
         tags: parseTags(flags["tags"]),
         dockerfile: flags["dockerfile"],
+        build: flags.build,
+        buildContextPath: flags["build-context-path"],
+        customDockerBuildArgs: parseContainerBuildArgs(flags["custom-docker-build-args"]),
       };
 
       const project = ctx.require(ProjectKey);

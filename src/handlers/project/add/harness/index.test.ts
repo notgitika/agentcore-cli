@@ -32,6 +32,30 @@ async function run(args: string[], opts?: { core?: TestCoreClient; stdin?: strin
 }
 
 describe("project add harness", () => {
+  test("persists a top-level Container-local build selector and custom arguments in harness.yaml", async () => {
+    const { projectRoot, cleanup } = await initProject();
+    cleanups.push(cleanup);
+    const dockerfile = join(projectRoot, "Dockerfile");
+    await Bun.write(dockerfile, "FROM scratch\n");
+    await run([
+      "add",
+      "harness",
+      "--name",
+      "local",
+      "--build",
+      "container-local",
+      "--dockerfile",
+      dockerfile,
+      "--custom-docker-build-args",
+      '{"VERSION":"v1"}',
+    ]);
+    const spec = parse(await Bun.file(join(projectRoot, "app", "local", "harness.yaml")).text());
+    expect(spec).toMatchObject({
+      build: "Container-local",
+      dockerfile: "Dockerfile",
+      customDockerBuildArgs: { VERSION: "v1" },
+    });
+  });
   const defaultModel = { provider: "bedrock", modelId: "global.anthropic.claude-sonnet-5-5" };
 
   test.each<[string, string[], Record<string, unknown>]>([

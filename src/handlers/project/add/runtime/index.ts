@@ -24,6 +24,7 @@ import {
 } from "../../importBedrockAgent";
 import { RegionKey } from "../../../keys";
 import { addProjectResource, requireDeployedNameFits, addDescription } from "../shared";
+import { containerFlags, parseContainerBuildArgs } from "../containerFlags";
 
 const CONFIGURATION = "Configuration:";
 const ENVIRONMENT = "Environment:";
@@ -108,6 +109,10 @@ export const createAddRuntimeHandler = (config: AddProjectResourceConfig) =>
         group: CONFIGURATION,
       }),
       tagsFlag({ group: CONFIGURATION }),
+      ...containerFlags(ENVIRONMENT),
+      flag("dockerfile", "Dockerfile to use for a container build", z.string().optional(), {
+        group: ENVIRONMENT,
+      }),
       flag(
         "environment-variables",
         "environment variables (JSON object of key/value strings)",
@@ -203,9 +208,16 @@ export const createAddRuntimeHandler = (config: AddProjectResourceConfig) =>
         }
       }
       if (isImport) {
-        const offending = (["language", "protocol"] as const).find(
-          (flagName) => flags[flagName] !== undefined,
-        );
+        const offending = (
+          [
+            "language",
+            "protocol",
+            "build",
+            "dockerfile",
+            "build-context-path",
+            "custom-docker-build-args",
+          ] as const
+        ).find((flagName) => flags[flagName] !== undefined);
         if (offending !== undefined) {
           throw new InputValidationError(
             `--agent-id imports a Bedrock Agent as Python HTTP runtime code; ` +
@@ -261,6 +273,10 @@ export const createAddRuntimeHandler = (config: AddProjectResourceConfig) =>
 
       const infra = {
         name: flags.name,
+        build: flags.build,
+        dockerfile: flags.dockerfile,
+        buildContextPath: flags["build-context-path"] as RuntimeInput["buildContextPath"],
+        customDockerBuildArgs: parseContainerBuildArgs(flags["custom-docker-build-args"]),
         description: flags.description,
         executionRoleArn: flags["role-arn"],
         additionalPolicies: flags["additional-policies"],

@@ -98,6 +98,8 @@ describe("project add harness wizard", () => {
     await waitForText(screen.lastFrame, DEFAULT_HARNESS_MODEL.modelId);
     await screen.press("return");
 
+    await waitForText(screen.lastFrame, "does this harness use a custom Dockerfile?");
+    await screen.press("return");
     await waitForText(screen.lastFrame, "this harness will be added to agentcore.json");
     const review = flatFrame(screen.lastFrame);
     expect(review).toContain("harness assistant");
@@ -178,6 +180,8 @@ describe("project add harness wizard", () => {
 
     await waitForText(screen.lastFrame, "choose a model gateway");
     await acceptDefaultModel(screen);
+    await waitForText(screen.lastFrame, "does this harness use a custom Dockerfile?");
+    await screen.press("return");
     await waitForText(screen.lastFrame, "this harness will be added to agentcore.json");
     await screen.press("return");
     await waitForText(screen.lastFrame, "added harness 'assistant'");
@@ -220,6 +224,8 @@ describe("project add harness wizard", () => {
     await screen.write(apiKeyArn);
     await screen.press("return");
 
+    await waitForText(screen.lastFrame, "does this harness use a custom Dockerfile?");
+    await screen.press("return");
     await waitForText(screen.lastFrame, "this harness will be added to agentcore.json");
     const review = flatFrame(screen.lastFrame);
     expect(review).toContain("provider openai");
@@ -249,6 +255,8 @@ describe("project add harness wizard", () => {
     await screen.write(`file://${keyPath}`);
     await screen.press("return");
 
+    await waitForText(screen.lastFrame, "does this harness use a custom Dockerfile?");
+    await screen.press("return");
     await waitForText(screen.lastFrame, "this harness will be added to agentcore.json");
     expect(flatFrame(screen.lastFrame).replace(/\s/g, "")).toContain(`APIkeyfile://${keyPath}`);
     await screen.press("return");
@@ -302,6 +310,8 @@ describe("project add harness wizard", () => {
     await screen.write("https://llm.example.com/v1");
     await screen.press("return");
 
+    await waitForText(screen.lastFrame, "does this harness use a custom Dockerfile?");
+    await screen.press("return");
     await waitForText(screen.lastFrame, "this harness will be added to agentcore.json");
     const review = flatFrame(screen.lastFrame);
     expect(review).toContain("provider litellm");
@@ -331,6 +341,8 @@ describe("project add harness wizard", () => {
     await screen.write("-test");
     await screen.press("return");
 
+    await waitForText(screen.lastFrame, "does this harness use a custom Dockerfile?");
+    await screen.press("return");
     await waitForText(screen.lastFrame, "this harness will be added to agentcore.json");
     expect(flatFrame(screen.lastFrame)).toContain(`model ${DEFAULT_HARNESS_MODEL.modelId}-test`);
     await screen.press("return");
@@ -399,6 +411,8 @@ describe("project add harness wizard", () => {
     const screen = renderScreen("/agentcore/add/harness");
     await reachModelStep(screen, "assistant");
     await acceptDefaultModel(screen);
+    await waitForText(screen.lastFrame, "does this harness use a custom Dockerfile?");
+    await screen.press("return");
     await waitForText(screen.lastFrame, "this harness will be added to agentcore.json");
     await screen.press("return");
 
