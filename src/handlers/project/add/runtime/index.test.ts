@@ -66,6 +66,59 @@ async function runtimeOf(projectRoot: string, name: string) {
 }
 
 describe("project add runtime", () => {
+  test("rejects malformed build arguments without exposing their values", async () => {
+    const { cleanup } = await initProject();
+    cleanups.push(cleanup);
+    const result = await run([
+      "add",
+      "runtime",
+      "--name",
+      "local",
+      "--language",
+      "python",
+      "--build",
+      "container-local",
+      "--dockerfile",
+      "Dockerfile",
+      "--custom-docker-build-args",
+      '{"ARG":"private-value",oops}',
+    ]).catch((error: unknown) => error);
+    expect(result).toBeInstanceOf(InputValidationError);
+    const error = result as InputValidationError;
+    expect(error.message).toContain("Invalid JSON for option '--custom-docker-build-args'");
+    expect(error.message).not.toContain("private-value");
+    expect(error.cause).toBeUndefined();
+  });
+  test.each(["Container-local", "container-local"])(
+    "persists the normal --build %s option and copies the Dockerfile",
+    async (build) => {
+      const { projectRoot, cleanup } = await initProject();
+      cleanups.push(cleanup);
+      const dockerfile = join(projectRoot, "Dockerfile");
+      await writeFile(dockerfile, "FROM scratch\n");
+      await run([
+        "add",
+        "runtime",
+        "--name",
+        "local",
+        "--language",
+        "python",
+        "--build",
+        build,
+        "--dockerfile",
+        dockerfile,
+      ]);
+      expect(await runtimeOf(projectRoot, "local")).toMatchObject({
+        build: "Container-local",
+        dockerfile: "Dockerfile",
+        codeLocation: "app/local",
+      });
+      expect((await runtimeOf(projectRoot, "local")).runtimeVersion).toBeUndefined();
+      expect(await Bun.file(join(projectRoot, "app", "local", "Dockerfile")).text()).toBe(
+        "FROM scratch\n",
+      );
+    },
+  );
   const allInfrastructureFlags = [
     "--description",
     "Configured runtime",

@@ -3,7 +3,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import { ProjectKey } from "../../../../router";
 import { RegionKey } from "../../../keys";
-import { AgentNameSchema } from "../../../../projectSchemas/runtime";
+import { AgentNameSchema, type BuildType } from "../../../../projectSchemas/runtime";
+import { CONTAINER_BUILD_CHOICES } from "../../ContainerBuildField";
 import type { ProtocolMode } from "../../../../projectSchemas/constants";
 import type { ScreenProps } from "../../../types";
 import type { Project } from "../../types";
@@ -53,6 +54,8 @@ interface RuntimeFormValues {
   name: string;
   language: RuntimeLanguageFlag;
   protocol: ProtocolMode;
+  build?: BuildType;
+  dockerfile?: string;
 }
 
 // toRuntimeInput builds the runtime the way the flag handler does for
@@ -63,6 +66,11 @@ export function toRuntimeInput(values: RuntimeFormValues): RuntimeInput {
     envVars: [],
     language: RUNTIME_LANGUAGES[values.language],
     protocol: values.protocol,
+    ...(values.build &&
+      values.build !== "CodeZip" && {
+        build: values.build,
+        dockerfile: values.dockerfile,
+      }),
   };
 }
 
@@ -74,6 +82,8 @@ function summaryOf(values: RuntimeFormValues): Record<string, string> {
     protocol: values.protocol,
     folder: `app/${values.name}/ (README.md, AGENTS.md)`,
     entrypoint: docsRuntimeEntrypoint(language),
+    ...(values.build &&
+      values.build !== "CodeZip" && { build: values.build, dockerfile: values.dockerfile ?? "" }),
   };
 }
 
@@ -166,6 +176,32 @@ function AddRuntimeWizard({
           onChange={(protocol) => set({ protocol })}
         />
       </Step>
+
+      <Step stepKey="build" prompt="how should this runtime be packaged?">
+        <ChoiceField<BuildType>
+          choices={[
+            {
+              value: "CodeZip",
+              label: "CodeZip",
+              description: "package the source and its dependencies as a ZIP",
+            },
+            ...CONTAINER_BUILD_CHOICES,
+          ]}
+          value={values.build ?? "CodeZip"}
+          onChange={(build) => set({ build })}
+        />
+      </Step>
+
+      {values.build && values.build !== "CodeZip" && (
+        <Step stepKey="dockerfile" prompt="which Dockerfile should it use?">
+          <TextField
+            label="Dockerfile"
+            value={values.dockerfile ?? ""}
+            onChange={(dockerfile) => set({ dockerfile })}
+            required
+          />
+        </Step>
+      )}
 
       <Step stepKey="review" prompt="this runtime will be added to agentcore.json">
         <Summary items={summaryOf(values)} />

@@ -1,6 +1,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { Stack } from "@aws-sdk/client-cloudformation";
+import { readFile } from "node:fs/promises";
+import { GetTemplateCommand, type Stack } from "@aws-sdk/client-cloudformation";
+import { parse as parseYaml } from "yaml";
 import { MalformedServiceResponseError, ProjectStateError } from "../../../errors/errors";
 import type {
   DeployResult,
@@ -10,7 +12,15 @@ import type {
   ResolvedDeployedResource,
   ResolvedProjectResource,
 } from "../../../handlers/project/types";
-import { cdkCompatibilityWarning } from "./cdk/compatibility";
+import { assertCdkLocalContainerSupport, cdkCompatibilityWarning } from "./cdk/compatibility";
+import {
+  assertRetainedContainerImages,
+  buildArgumentRedactor,
+  checkLocalContainerBuilder,
+  containerBuildSettings,
+  redactBuildError,
+  type ContainerTemplate,
+} from "./cdk/localContainers";
 import {
   createLineSplitter,
   FsReadWriteJson,
@@ -146,6 +156,8 @@ export type CdkBackendConfig = {
   removeCredentials?: CredentialRemover;
   describeStack?: StackDescriber;
   reportPaymentConnectorAuthorizationUrls?: PaymentConnectorAuthorizationUrlReporter;
+  checkLocalBuilder?: typeof checkLocalContainerBuilder;
+  assertLocalCdkSupport?: typeof assertCdkLocalContainerSupport;
 };
 
 /** Builds and deploys projects through the scaffolded CDK app. */
@@ -164,10 +176,17 @@ export class CdkBackend implements ProjectBackend {
   private readonly removeCredentials: CredentialRemover;
   private readonly describeStack: StackDescriber;
   private readonly reportPaymentConnectorAuthorizationUrls: PaymentConnectorAuthorizationUrlReporter;
+  private readonly checkLocalBuilder: typeof checkLocalContainerBuilder;
+  private readonly assertLocalCdkSupport: typeof assertCdkLocalContainerSupport;
+  private readonly createCloudFormationClient: CreateCloudFormationClient;
 
   constructor(config: CdkBackendConfig) {
     this.logger = config.logger;
     this.runner = config.runner ?? runProcess;
+    this.checkLocalBuilder = config.checkLocalBuilder ?? checkLocalContainerBuilder;
+    this.assertLocalCdkSupport = config.assertLocalCdkSupport ?? assertCdkLocalContainerSupport;
+    this.createCloudFormationClient =
+      config.createCloudFormationClient ?? createCloudFormationClient;
     this.checkTool = config.checkTool ?? requireTool;
     this.json = config.json ?? new FsReadWriteJson({ logger: config.logger });
     this.cdk = config.cdk ?? createCdkRunner(config.logger);
@@ -221,21 +240,30 @@ export class CdkBackend implements ProjectBackend {
       yield { type: "warning", message: compatibilityWarning };
     }
 
+    const settings = containerBuildSettings(project);
+    if (settings.localRuntimes.length || settings.localHarnesses.length) {
+      this.assertLocalCdkSupport(this.cdkDirectory(project));
+    }
+    const redact = buildArgumentRedactor(settings.buildArgumentValues);
     yield { type: "step", message: "synthesizing CloudFormation templates" };
     try {
       yield* withOutputEvents((emit) => {
-        // Chunks still go to the debug log whole; the splitter reassembles them
-        // into lines for the live progress tail.
-        const lines = createLineSplitter(emit);
+        // Reassemble chunks before redaction so an argument split between chunks
+        // cannot reach the debug log or live progress tail.
+        const lines = createLineSplitter((line) => {
+          const safe = redact(line);
+          this.logger.debug(safe);
+          emit(safe);
+        });
         return this.runner(synthCommand(this.assemblyDirectory(project)), {
           cwd: this.cdkDirectory(project),
           onOutput: (chunk) => {
-            this.logger.debug(chunk);
             lines.push(chunk);
           },
         }).finally(() => lines.flush());
       });
     } catch (error) {
+      redactBuildError(error, redact);
       const credentialName = explainUndeployedCredentials
         ? unresolvedCredentialName(error)
         : undefined;
@@ -266,6 +294,13 @@ export class CdkBackend implements ProjectBackend {
     // before any AWS mutation, so a local problem never leaves credentials
     // provisioned or the stack ARN unrecorded.
     await this.ensureCdkDependencies(project);
+    const settings = containerBuildSettings(project);
+    const hasLocalImages = settings.localRuntimes.length > 0 || settings.localHarnesses.length > 0;
+    if (hasLocalImages) {
+      this.assertLocalCdkSupport(this.cdkDirectory(project));
+      yield { type: "step", message: "checking the local builder for Linux ARM64 support" };
+      await this.checkLocalBuilder(this.runner, project.rootPath);
+    }
 
     // Read before provisioning rewrites the credentials map: it is the only record
     // of what this target provisioned, so it is the only way to find a provider whose
@@ -291,7 +326,46 @@ export class CdkBackend implements ProjectBackend {
     yield* this.synthesize(project, false);
     const assemblyDirectory = this.assemblyDirectory(project);
     const artifact = await stackArtifactForTarget(this.json, assemblyDirectory, target.name);
-    const options = { assemblyDirectory, credentials, region: target.region };
+    const options = {
+      assemblyDirectory,
+      credentials,
+      region: target.region,
+      ...(settings.buildArgumentValues.length > 0 && {
+        redactOutput: buildArgumentRedactor(settings.buildArgumentValues),
+      }),
+    };
+    if (hasLocalImages && artifact.templateFile) {
+      const names = [
+        ...settings.localRuntimes.map((runtime) => runtime.name),
+        ...settings.localHarnesses.map((harness) => `harness-${harness.name}`),
+      ].map((name) =>
+        [project.name, ...(project.spec.migratedFrom ? [] : [target.name]), name]
+          .join("/")
+          .toLowerCase(),
+      );
+      const stack = await this.describeStack(target.region, credentials, artifact.stackName);
+      if (stack) {
+        const client = this.createCloudFormationClient({ region: target.region, credentials });
+        const previous = await client.send(
+          new GetTemplateCommand({
+            StackName: stack.StackId ?? artifact.stackName,
+            TemplateStage: "Original",
+          }),
+        );
+        if (!previous.TemplateBody) {
+          throw new ProjectStateError(
+            "Cannot verify image retention: the deployed stack template is unavailable.",
+          );
+        }
+        assertRetainedContainerImages(
+          parseYaml(previous.TemplateBody) as ContainerTemplate,
+          JSON.parse(
+            await readFile(join(assemblyDirectory, artifact.templateFile), "utf8"),
+          ) as ContainerTemplate,
+          names,
+        );
+      }
+    }
 
     // Decided before the Toolkit is handed the assembly: it reads a template
     // with nothing in it as an instruction to delete the stack, and reports that
@@ -490,13 +564,15 @@ export class CdkBackend implements ProjectBackend {
         this.cdk(operation, {
           ...options,
           onOutput: (line) => {
-            recent.push(line);
+            const safe = options.redactOutput?.(line) ?? line;
+            recent.push(safe);
             if (recent.length > MAX_ERROR_OUTPUT_LINES) recent.shift();
-            emit(line);
+            emit(safe);
           },
         }),
       );
     } catch (error) {
+      if (options.redactOutput) redactBuildError(error, options.redactOutput);
       if (error instanceof Error && recent.length > 0) {
         error.message += `\n\nRecent output:\n${recent.join("\n")}`;
       }

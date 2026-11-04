@@ -195,7 +195,8 @@ export class DevSupervisor {
     try {
       const port = await this.config.resolvePort(entry.runtime);
       const env = await this.config.getDevEnvVarsForRuntime(entry.runtime);
-      const runner = this.config.runners[entry.runtime.build];
+      const runner =
+        this.config.runners[entry.runtime.build === "CodeZip" ? "CodeZip" : "Container"];
 
       let ready = false;
       const activity = { at: Date.now() };

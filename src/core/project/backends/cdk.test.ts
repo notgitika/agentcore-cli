@@ -9,7 +9,7 @@ import { ProjectSpecSchema } from "../../../projectSchemas/project";
 import { ProjectRuntimeSchema } from "../../../projectSchemas/runtime";
 import { createSilentLogger } from "../../../testing";
 import { TransactionSearchSetupError } from "../../../errors";
-import { CdkBackend } from "./cdk";
+import { CdkBackend, type CdkBackendConfig } from "./cdk";
 import type {
   CredentialProviderCalls,
   CredentialProvisionInput,
@@ -151,6 +151,7 @@ async function writeAssembly(
 }
 
 type HarnessOptions = {
+  checkLocalBuilder?: CdkBackendConfig["checkLocalBuilder"];
   account?: string;
   bootstrap?: BootstrapState;
   outputs?: CdkOutputs;
@@ -193,6 +194,8 @@ function harness(options: HarnessOptions = {}) {
 
   const backend = new CdkBackend({
     logger: createSilentLogger(),
+    assertLocalCdkSupport: () => {},
+    checkLocalBuilder: options.checkLocalBuilder,
     identity: unusedIdentity(),
     runner: async (command, { cwd, onOutput }) => {
       commands.push({ command, cwd });
@@ -310,6 +313,25 @@ function stepMessages(events: ProjectEvent[]): string[] {
 }
 
 describe("CdkBackend.build", () => {
+  test("stages Container-local through synthesis without probing the daemon or publishing", async () => {
+    const p = await project();
+    p.spec.runtimes.push(
+      ProjectRuntimeSchema.parse({
+        name: "agent",
+        build: "Container-local",
+        codeLocation: "app/agent",
+        entrypoint: "main.py",
+      }),
+    );
+    const h = harness({
+      checkLocalBuilder: async () => {
+        throw new Error("build must not probe Docker");
+      },
+    });
+    await collect(h.backend.build(p));
+    expect(h.commands.map(({ command }) => command)).toEqual([synthCommand(p)]);
+    expect(h.runs).toHaveLength(0);
+  });
   test("synthesizes into the assembly directory deploy reads", async () => {
     const input = await project();
     const subject = harness();
@@ -404,6 +426,61 @@ describe("CdkBackend.build", () => {
 });
 
 describe("CdkBackend.deploy", () => {
+  test("refuses an unavailable local builder before provisioning credentials or invoking Toolkit", async () => {
+    const p = await project();
+    p.spec.runtimes.push(
+      ProjectRuntimeSchema.parse({
+        name: "agent",
+        build: "Container-local",
+        codeLocation: "app/agent",
+        entrypoint: "main.py",
+      }),
+    );
+    let provisioned = false;
+    const h = harness({
+      checkLocalBuilder: async () => {
+        throw new Error("ARM64 builder unavailable");
+      },
+      provisionCredentials: async function* () {
+        provisioned = true;
+        yield { type: "step", message: "provisioning credentials" };
+        return {};
+      },
+    });
+    await expect(collectDeploy(h.backend.deploy(p, deployInput()))).rejects.toThrow(
+      "ARM64 builder unavailable",
+    );
+    expect(provisioned).toBe(false);
+    expect(h.runs).toHaveLength(0);
+    expect(h.commands).toHaveLength(0);
+  });
+
+  test("redacts build arguments in chunked synthesis output and Toolkit publishing output", async () => {
+    const p = await project();
+    p.spec.runtimes.push(
+      ProjectRuntimeSchema.parse({
+        name: "agent",
+        build: "Container-local",
+        codeLocation: "app/agent",
+        entrypoint: "main.py",
+        customDockerBuildArgs: { VERSION: "configured-value" },
+      }),
+    );
+    await writeAssembly(p, [TARGET.name]);
+    const h = harness({
+      checkLocalBuilder: async () => {},
+      synthOutput: ["VERSION=configured-", "value\n"],
+      cdkOutput: ["building VERSION=configured-value"],
+      describedStack: null,
+    });
+    const { events } = await collectDeploy(h.backend.deploy(p, deployInput()));
+    const output = events
+      .filter((event) => event.type === "output")
+      .map((event) => event.line)
+      .join("\n");
+    expect(output).toContain("[REDACTED]");
+    expect(output).not.toContain("configured-value");
+  });
   test("preflights, synthesizes, and deploys the selected stack", async () => {
     const input = await project();
     await writeAssembly(input, [TARGET.name]);

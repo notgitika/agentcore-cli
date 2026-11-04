@@ -45,6 +45,39 @@ async function runtimeInSpec(projectRoot: string, name: string) {
 }
 
 describe("project add runtime wizard", () => {
+  test("selects a local container build, asks for its Dockerfile, and persists the selection", async () => {
+    const projectRoot = await inProject();
+    const dockerfile = join(projectRoot, "Dockerfile");
+    await Bun.write(dockerfile, "FROM scratch\n");
+    const r = renderScreen("/agentcore/add/runtime");
+
+    await waitForText(r.lastFrame, "what should this runtime be called?");
+    await r.write("local_agent");
+    await r.press("return");
+    await waitForText(r.lastFrame, "which language will you write it in?");
+    await r.press("return");
+    await waitForText(r.lastFrame, "which protocol will it serve?");
+    await r.press("return");
+    await waitForText(r.lastFrame, "how should this runtime be packaged?");
+    await selectChoice(r, "Local");
+    await r.press("return");
+    await waitForText(r.lastFrame, "which Dockerfile should it use?");
+    await r.write(dockerfile);
+    await r.press("return");
+    await waitForText(r.lastFrame, "this runtime will be added to agentcore.json");
+    expect(flatFrame(r.lastFrame)).toContain("build Container-local");
+    await r.press("return");
+    await waitForText(r.lastFrame, 'added runtime "local_agent"');
+
+    const runtime = await runtimeInSpec(projectRoot, "local_agent");
+    expect(runtime).toMatchObject({ build: "Container-local", dockerfile: "Dockerfile" });
+    expect(runtime.runtimeVersion).toBeUndefined();
+    expect(await Bun.file(join(projectRoot, "app", "local_agent", "Dockerfile")).text()).toBe(
+      "FROM scratch\n",
+    );
+    r.unmount();
+  });
+
   test("collects a name, a language, and a protocol, then writes the runtime docs", async () => {
     const projectRoot = await inProject();
     const queryClient = new QueryClient({
@@ -64,6 +97,8 @@ describe("project add runtime wizard", () => {
     expect(flatFrame(r.lastFrame)).toContain("● HTTP ");
     await r.press("return");
 
+    await waitForText(r.lastFrame, "how should this runtime be packaged?");
+    await r.press("return");
     await waitForText(r.lastFrame, "this runtime will be added to agentcore.json");
     const review = flatFrame(r.lastFrame);
     expect(review).toContain("runtime orders_agent");
@@ -115,6 +150,8 @@ describe("project add runtime wizard", () => {
     await selectChoice(r, "MCP");
     await r.press("return");
 
+    await waitForText(r.lastFrame, "how should this runtime be packaged?");
+    await r.press("return");
     await waitForFlatText(r.lastFrame, "entrypoint main.js");
     expect(flatFrame(r.lastFrame)).toContain("protocol MCP");
     await r.press("return");
@@ -211,6 +248,8 @@ describe("project add runtime wizard", () => {
     await waitForText(r.lastFrame, "which language will you write it in?");
     await r.press("return");
     await waitForText(r.lastFrame, "which protocol will it serve?");
+    await r.press("return");
+    await waitForText(r.lastFrame, "how should this runtime be packaged?");
     await r.press("return");
     await waitForText(r.lastFrame, "this runtime will be added to agentcore.json");
     await r.press("return");
