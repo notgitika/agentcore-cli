@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { HarnessSpecSchema } from "../../../../projectSchemas/harness";
 import { ProjectRuntimeSchema } from "../../../../projectSchemas/runtime";
 import {
@@ -10,6 +13,16 @@ import {
 } from "./localContainers";
 
 describe("local container builder prerequisites", () => {
+  const projects: string[] = [];
+  const projectDirectory = () => {
+    const path = mkdtempSync(join(tmpdir(), "agentcore-builder-test-"));
+    projects.push(path);
+    return path;
+  };
+  afterEach(() => {
+    for (const path of projects.splice(0)) rmSync(path, { recursive: true, force: true });
+  });
+
   test("accepts a native Linux ARM64 daemon without probing or creating builders", async () => {
     const commands: string[][] = [];
     await checkLocalContainerBuilder(
@@ -23,22 +36,85 @@ describe("local container builder prerequisites", () => {
     expect(commands).toEqual([["/tools/docker-wrapper", "info", "--format", "{{json .}}"]]);
   });
 
-  test("checks configured ARM64 support on x86 without provisioning a builder", async () => {
-    const commands: string[][] = [];
-    await checkLocalContainerBuilder(
-      async (command, options) => {
-        commands.push(command);
-        options.onOutput?.(
-          command[1] === "info"
-            ? '{"OSType":"linux","Architecture":"x86_64"}'
-            : "Platforms: linux/amd64*, linux/arm64\n",
-        );
-      },
-      "/project",
-      "docker",
-    );
-    expect(commands[1]).toEqual(["docker", "buildx", "inspect"]);
-  });
+  test.each(["linux/arm64", "linux/arm64/v8", "linux/arm64*"])(
+    "accepts advertised %s support without building or provisioning a builder",
+    async (platform) => {
+      const commands: string[][] = [];
+      await checkLocalContainerBuilder(
+        async (command, options) => {
+          commands.push(command);
+          options.onOutput?.(
+            command[1] === "info"
+              ? '{"OSType":"linux","Architecture":"x86_64"}'
+              : `Platforms: linux/amd64*, ${platform}\n`,
+          );
+        },
+        "/project",
+        "docker",
+      );
+      expect(commands).toEqual([
+        ["docker", "info", "--format", "{{json .}}"],
+        ["docker", "buildx", "inspect"],
+      ]);
+    },
+  );
+
+  test.each(["unsupported buildx", "unadvertised ARM64", "failed buildx with partial output"])(
+    "checks real ARM64 execution for a compatible builder with %s",
+    async (capabilities) => {
+      const commands: string[][] = [];
+      const project = projectDirectory();
+      let context = "";
+      await checkLocalContainerBuilder(
+        async (command, options) => {
+          commands.push(command);
+          if (command[1] === "info") {
+            options.onOutput?.('{"OSType":"linux","Architecture":"x86_64"}');
+          } else if (command[1] === "buildx") {
+            if (capabilities === "unadvertised ARM64") {
+              options.onOutput?.("Platforms: linux/amd64\n");
+              return;
+            }
+            if (capabilities === "failed buildx with partial output") {
+              options.onOutput?.("Platforms: linux/arm64\n");
+            }
+            throw new Error('unknown command "buildx"');
+          } else if (command[1] === "build") {
+            context = options.cwd;
+            expect(context.startsWith(join(project, ".agentcore-arm64-"))).toBe(true);
+            expect(readFileSync(join(context, "Dockerfile"), "utf8")).toBe(
+              'FROM scratch\nCOPY --chmod=0555 arm64-check /arm64-check\nRUN ["/arm64-check"]\n',
+            );
+            const executable = readFileSync(join(context, "arm64-check"));
+            expect(executable.subarray(0, 4).toString("hex")).toBe("7f454c46");
+            expect(executable.readUInt16LE(18)).toBe(183); // ELF machine: AArch64.
+            expect(options.signal).toBeInstanceOf(AbortSignal);
+            expect(existsSync(join(context, "output"))).toBe(true);
+            writeFileSync(join(context, "output", "arm64-check"), executable);
+          } else {
+            throw new Error(`Unexpected builder command: ${command.join(" ")}`);
+          }
+        },
+        project,
+        "/tools/finch wrapper",
+      );
+      expect(commands[2]).toEqual([
+        "/tools/finch wrapper",
+        "build",
+        "--platform",
+        "linux/arm64",
+        "--network",
+        "none",
+        "--no-cache",
+        "--output",
+        "type=local,dest=output",
+        "--file",
+        "Dockerfile",
+        ".",
+      ]);
+      expect(existsSync(context)).toBe(false);
+    },
+  );
 
   test("refuses an unavailable daemon with an actionable error", async () => {
     await expect(
@@ -53,19 +129,73 @@ describe("local container builder prerequisites", () => {
   });
 
   test("refuses an x86 builder without Linux ARM64 capability", async () => {
+    const project = projectDirectory();
+    let context = "";
+    const buildError = new Error("exec format error");
     await expect(
       checkLocalContainerBuilder(
         async (command, options) => {
+          if (command[1] === "build") {
+            context = options.cwd;
+            throw buildError;
+          }
           options.onOutput?.(
             command[1] === "info"
               ? '{"OSType":"linux","Architecture":"x86_64"}'
               : "Platforms: linux/amd64\n",
           );
         },
-        "/project",
+        project,
         "docker",
       ),
     ).rejects.toThrow("Linux ARM64 build support");
+    expect(context).not.toBe("");
+    expect(existsSync(context)).toBe(false);
+  });
+
+  test("reports a failed Finch build and cleans up its context", async () => {
+    const project = projectDirectory();
+    let context = "";
+    const buildError = new Error("configured BuildKit is unavailable");
+    let caught: unknown;
+    try {
+      await checkLocalContainerBuilder(
+        async (command, options) => {
+          if (command[1] === "info") {
+            options.onOutput?.('{"OSType":"linux","Architecture":"x86_64"}');
+          } else if (command[1] === "buildx") {
+            throw new Error('unknown command "buildx"');
+          } else {
+            context = options.cwd;
+            throw buildError;
+          }
+        },
+        project,
+        "finch",
+      );
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain("network-free ARM64 test build failed");
+    expect((caught as Error).cause).toBe(buildError);
+    expect(context).not.toBe("");
+    expect(existsSync(context)).toBe(false);
+  });
+
+  test("refuses invalid daemon information before building", async () => {
+    const commands: string[][] = [];
+    await expect(
+      checkLocalContainerBuilder(
+        async (command, options) => {
+          commands.push(command);
+          options.onOutput?.("not JSON");
+        },
+        "/project",
+        "finch",
+      ),
+    ).rejects.toThrow("invalid daemon information");
+    expect(commands).toHaveLength(1);
   });
 });
 

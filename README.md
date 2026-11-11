@@ -228,8 +228,12 @@ context. Persisted settings are `buildContextPath` and `customDockerBuildArgs`.
 `agentcore deploy`, CDK Toolkit builds and publishes missing Linux ARM64 image assets to the target
 environment's bootstrap ECR repository before deploying the workload. The local builder must be
 installed, its daemon accessible, and Linux ARM64 support configured. `CDK_DOCKER` can select a
-Docker-compatible executable. The CLI checks these prerequisites without installing emulation or
-creating builders. Runtime development continues to use its local container runner; Harness
+Docker-compatible executable, for example `CDK_DOCKER=finch agentcore deploy`. If the builder cannot
+report ARM64 support through Docker's `buildx inspect`, the CLI runs a small, uncached ARM64 execution
+test build before deployment. This test uses no base image or network access, exports only to a
+temporary directory, and removes that directory afterward. It does not tag or publish an image,
+install emulation, or provision a builder. The test build has a 60-second timeout. Runtime
+development continues to use its local container runner; Harness
 development uses the selected deployment build mode when it deploys.
 
 Context filtering applies the existing exclusion baseline, then the context's `.dockerignore`,
