@@ -183,3 +183,103 @@ declares, not the ones you add in the stack.
 - [Amazon Bedrock AgentCore documentation](https://docs.aws.amazon.com/bedrock-agentcore/): service guides and API references.
 - [Contributing](CONTRIBUTING.md): development, builds, architecture, and testing.
 - [Security](SECURITY.md) · [License](LICENSE): Apache-2.0.
+
+## Local container builds
+
+Use the normal `--build` option to select where a Dockerfile image is built:
+
+```bash
+agentcore add runtime --name orders --language python \
+  --build container-local --dockerfile Dockerfile
+
+agentcore add harness --name assistant \
+  --build container-local --dockerfile Dockerfile
+```
+
+The Runtime entry in `agentcore/agentcore.json` uses a top-level build value:
+
+```json
+{
+  "name": "orders",
+  "build": "Container-local",
+  "codeLocation": "app/orders",
+  "entrypoint": "main.py",
+  "dockerfile": "Dockerfile"
+}
+```
+
+Harnesses use the same top-level selector in `app/<name>/harness.yaml`:
+
+```yaml
+build: Container-local
+dockerfile: Dockerfile
+```
+
+`Container` continues to use CodeBuild. A harness Dockerfile without a `build` selector also uses
+CodeBuild. `CodeZip` remains the default Runtime packaging. A prebuilt harness image cannot be
+combined with build, Dockerfile, context, or build-argument settings.
+
+Both add commands accept `--build-context-path` (relative to the project root) and
+`--custom-docker-build-args` (a JSON object). Without a context override, the supplied Dockerfile is
+copied to the new resource directory. With an override, the Dockerfile path is relative to that
+context. Persisted settings are `buildContextPath` and `customDockerBuildArgs`.
+
+`agentcore build` validates, synthesizes, and stages the context and asset manifest. During
+`agentcore deploy`, CDK Toolkit builds and publishes missing Linux ARM64 image assets to the target
+environment's bootstrap ECR repository before deploying the workload. The local builder must be
+installed, its daemon accessible, and Linux ARM64 support configured. `CDK_DOCKER` can select a
+Docker-compatible executable, for example `CDK_DOCKER=finch agentcore deploy`. If the builder cannot
+report ARM64 support through Docker's `buildx inspect`, the CLI runs a small, uncached ARM64 execution
+test build before deployment. This test uses no base image or network access, exports only to a
+temporary directory, and removes that directory afterward. It does not tag or publish an image,
+install emulation, or provision a builder. The test build has a 60-second timeout. Runtime
+development continues to use its local container runner; Harness
+development uses the selected deployment build mode when it deploys.
+
+Context filtering applies the existing exclusion baseline, then the context's `.dockerignore`,
+then force-keeps the Dockerfile and its parent directories. User negations can re-include baseline
+paths. Dockerfile-specific ignore files are rejected. Build arguments are nonsecret configuration:
+asset manifests and image layers can contain their values, even though the CLI redacts them from
+terminal output and debug logs.
+
+Included source, Dockerfile, platform, and build-argument changes produce a new image asset.
+Unchanged images already published to the target can be reused. Pin base-image digests and dependency
+lockfiles; update those tracked files and deploy to pick up an upstream security fix. A repeated
+deploy does not refresh an unchanged published asset, regardless of Docker's layer cache. Forcing a
+rebuild of unchanged inputs is outside this release.
+
+Each target uses its own shared bootstrap repository and publishing credentials. Pull permissions
+cover that repository, including other workloads' images. This path provides no dedicated workload
+repository or KMS key. The standard bootstrap repository uses AES256 encryption; it does not enable
+scan-on-push by default. Repository and registry scanning settings govern scanning. Customers must
+accept these settings and repository-wide pull access. Custom KMS encryption requires separate
+qualification of the repository's KMS grants and key policy.
+
+Supported repository lifecycle policies retain tagged workload images. Environment owners must
+preserve images referenced by active versions and any versions retained for rollback, together with
+their pull permissions. CDK publishes and reuses assets; it does not provide workload-specific rollback
+retention. Avoid garbage collection of referenced image assets. Destroying a project leaves the shared
+bootstrap repository intact. Automated image cleanup is outside this feature.
+
+The first release supports `Container-local` only for new workloads, including additions to existing
+projects. Switching an already-deployed workload into or out of this mode is unsupported. The CLI
+reads the target's deployed CloudFormation template and rejects these changes before provisioning
+credentials, bootstrapping, or publishing assets. Editing configuration or deleting local deployed
+state does not enable a migration. Keep the deployed build mode or add a workload with a new name.
+Deployment credentials need `cloudformation:DescribeStacks` and `cloudformation:GetTemplate` access
+to the selected target's stack so these checks can run before deployment changes.
+
+Dependency downloads use the builder's network. Workstation credentials are not automatically
+available inside Dockerfile `RUN` instructions. This release supports dependencies supplied in the
+context or downloaded without injecting build-time secrets. Base-image registry authentication uses
+the builder's registry credentials. For a private package, an authenticated download before deployment
+can place a wheel or npm package in the context for installation during the build. Do not copy
+credentials into the context or pass them through build arguments. BuildKit secrets and secret
+injection into private pip/npm installation are deferred.
+
+Compatibility note: Harness CodeBuild context staging now uses the same filters as Runtime staging.
+The first deployment after upgrading can rebuild a Harness image because its staged context changed.
+Projects selecting `Container-local` must install a CDK package that supports the selector.
+For testing the companion PR before publication, build and pack that CDK checkout, then install its
+tarball in the project's `agentcore/cdk/` directory. Publish the companion CDK package before releasing
+this CLI change; release preparation verifies its local-build support before updating the vended pin.

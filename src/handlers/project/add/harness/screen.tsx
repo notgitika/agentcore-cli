@@ -27,6 +27,7 @@ import { LoadingFrame, ProjectGate, projectQueryKey, useProjectTargets } from ".
 import { requireDeployedNameFits } from "../shared";
 import { toAddHarnessInput } from "./index";
 import { RegionKey } from "../../../keys";
+import { ContainerBuildField, type ContainerBuild } from "../../ContainerBuildField";
 
 const BREADCRUMB = ["agentcore", "add", "harness"];
 const DESCRIPTION = "add a harness to the current project";
@@ -41,6 +42,8 @@ interface HarnessFormValues {
   // project, so a harness added here and one a project starts with are
   // configured the same way.
   model: HarnessModelValues;
+  dockerfile?: string;
+  build?: ContainerBuild;
 }
 
 // toHarnessInput is the answers as the flag path would state them: `--name`,
@@ -52,6 +55,10 @@ export function toHarnessInput(values: HarnessFormValues): HarnessSpecInput {
     name: values.name,
     model: toHarnessModelInput(values.model),
     systemPrompt: values.systemPrompt,
+    ...(values.dockerfile && {
+      dockerfile: values.dockerfile,
+      build: values.build ?? "Container",
+    }),
   };
 }
 
@@ -60,6 +67,7 @@ function summaryOf(values: HarnessFormValues): Record<string, string> {
     harness: values.name,
     ...harnessModelSummary(values.model),
     "system prompt": promptPreview(values.systemPrompt),
+    ...(values.dockerfile && { dockerfile: values.dockerfile, build: values.build ?? "Container" }),
   };
 }
 
@@ -197,6 +205,24 @@ function AddHarnessWizard({
       <Step stepKey="model" title="model gateway">
         <HarnessModelField value={values.model} onChange={(model) => set({ model })} />
       </Step>
+
+      <Step stepKey="dockerfile" prompt="does this harness use a custom Dockerfile?">
+        <TextField
+          label="Dockerfile"
+          help="leave empty to use the standard harness environment"
+          value={values.dockerfile ?? ""}
+          onChange={(dockerfile) => set({ dockerfile })}
+        />
+      </Step>
+
+      {values.dockerfile && (
+        <Step stepKey="build" prompt="where should the container image be built?">
+          <ContainerBuildField
+            value={values.build ?? "Container"}
+            onChange={(build) => set({ build })}
+          />
+        </Step>
+      )}
 
       <Step stepKey="review" prompt="this harness will be added to agentcore.json">
         <Summary items={summaryOf(values)} />

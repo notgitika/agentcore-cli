@@ -10,6 +10,7 @@ import type {
 } from "@aws-cdk/toolkit-lib";
 import { AgentCoreCLIError } from "../../../../errors";
 import type { Logger } from "../../../../logging";
+import { withCdkOutput } from "./output";
 
 export type CdkOperation =
   | { kind: "bootstrap"; environments: string[]; templateFile?: string }
@@ -29,6 +30,8 @@ export type CdkRunOptions = {
    * whether or not a sink is given.
    */
   onOutput?: (line: string) => void;
+  /** Redacts configured build arguments before Toolkit output is displayed or logged. */
+  redactOutput?: (line: string) => string;
 };
 
 export type CdkOutputs = Record<string, string>;
@@ -120,7 +123,11 @@ export async function loadBootstrapTemplate(
   };
 }
 
-export function createCdkIoHost(logger: Logger, onLine?: (line: string) => void): IIoHost {
+export function createCdkIoHost(
+  logger: Logger,
+  onLine?: (line: string) => void,
+  redact: (text: string) => string = (text) => text,
+): IIoHost {
   const toolkitLogger = logger.child({ component: "cdk-toolkit" });
   const notify = async (message: IoMessage<unknown>): Promise<void> => {
     toolkitLogger
@@ -129,11 +136,11 @@ export function createCdkIoHost(logger: Logger, onLine?: (line: string) => void)
         level: message.level,
         ...(message.code && { code: message.code }),
       })
-      .debug(message.message);
+      .debug(redact(message.message));
     // Toolkit messages can span lines (diffs, stack traces); split so the sink
     // always receives displayable single lines.
     if (onLine) {
-      for (const line of message.message.split("\n")) {
+      for (const line of redact(message.message).split("\n")) {
         const trimmed = line.trimEnd();
         if (trimmed) onLine(trimmed);
       }
@@ -245,8 +252,18 @@ export function createCdkRunner(
   return async (operation, options) => {
     // A fresh ioHost per operation, so each operation's messages can flow into
     // its own onOutput sink rather than only the construction-time logger.
-    const ioHost = createCdkIoHost(logger, options.onOutput);
-    const loaded = await load(ioHost, options.region, options.credentials);
-    return performCdkOperation(loaded, operation, options);
+    const ioHost = createCdkIoHost(logger, options.onOutput, options.redactOutput);
+    return withCdkOutput(
+      (line, destination) => {
+        const safe = options.redactOutput?.(line) ?? line;
+        logger.child({ component: "cdk-assets", destination }).debug(safe);
+        if (options.onOutput) options.onOutput(safe);
+        else process[destination].write(`${safe}\n`);
+      },
+      async () => {
+        const loaded = await load(ioHost, options.region, options.credentials);
+        return performCdkOperation(loaded, operation, options);
+      },
+    );
   };
 }
