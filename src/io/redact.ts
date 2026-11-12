@@ -1,6 +1,11 @@
 /** Redact configured values longest-first so overlapping values cannot reveal suffixes. */
 export function redactValues(values: readonly string[]): (text: string) => string {
-  const ordered = [...new Set(values)].filter(Boolean).sort((a, b) => b.length - a.length);
+  // Process output is delivered one line at a time; structured diagnostics can
+  // also escape a value rather than print it literally.
+  const variants = values.flatMap((value) =>
+    [value, ...value.split(/\r?\n/)].flatMap((part) => [part, JSON.stringify(part).slice(1, -1)]),
+  );
+  const ordered = [...new Set(variants)].filter(Boolean).sort((a, b) => b.length - a.length);
   return (text) => {
     for (const value of ordered) text = text.replaceAll(value, "[REDACTED]");
     return text;

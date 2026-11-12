@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { HarnessSpecSchema } from "../../../../projectSchemas/harness";
 import { ProjectRuntimeSchema } from "../../../../projectSchemas/runtime";
 import {
-  assertRetainedContainerImages,
+  assertNewLocalWorkloads,
   buildArgumentRedactor,
   checkLocalContainerBuilder,
   redactBuildError,
@@ -34,6 +34,20 @@ describe("local container builder prerequisites", () => {
       "/tools/docker-wrapper",
     );
     expect(commands).toEqual([["/tools/docker-wrapper", "info", "--format", "{{json .}}"]]);
+  });
+  test("accepts formatted daemon information alongside Finch stderr diagnostics", async () => {
+    const commands: string[][] = [];
+    await checkLocalContainerBuilder(
+      async (command, options) => {
+        commands.push(command);
+        options.onOutput?.('time="now" level=warning msg="config {defaults}"\n');
+        options.onOutput?.('{"OSType":"linux","Architecture":"arm64"}\n');
+        options.onOutput?.('{"diagnostic":"after daemon output"}\n');
+      },
+      "/project",
+      "finch",
+    );
+    expect(commands).toHaveLength(1);
   });
 
   test.each(["linux/arm64", "linux/arm64/v8", "linux/arm64*"])(
@@ -251,38 +265,130 @@ describe("container configuration", () => {
     expect((error.cause as Error).message).toBe("cause [REDACTED]");
     expect(error.stack).not.toContain("example-value");
   });
+  test("redacts multiline arguments from separate output lines and escaped diagnostics", () => {
+    const value = 'first"line\nsecond\\line';
+    const redact = buildArgumentRedactor([value]);
+    expect(value.split("\n").map(redact)).toEqual(["[REDACTED]", "[REDACTED]"]);
+    expect(redact(JSON.stringify({ argument: value }))).toBe('{"argument":"[REDACTED]"}');
+    const error = new Error(JSON.stringify({ argument: value }));
+    redactBuildError(error, redact);
+    expect(error.message).toBe('{"argument":"[REDACTED]"}');
+  });
 });
 
-describe("retention before switching from CodeBuild", () => {
-  const previous = (retained: boolean): ContainerTemplate => ({
-    Resources: {
-      Repository: {
-        Type: "AWS::ECR::Repository",
-        Properties: {
-          RepositoryName: "example/default/agent",
-          EncryptionConfiguration: [{ KmsKey: { "Fn::GetAtt": ["Key", "Arn"] } }],
+describe("new workloads only", () => {
+  test.each([
+    ["Container", "Container-local"],
+    ["CodeZip", "Container-local"],
+    ["Container-local", "Container"],
+    ["Container-local", "CodeZip"],
+  ])("rejects a deployed %s to %s transition", (before, after) => {
+    for (const kind of ["runtime", "harness"]) {
+      const key = `${kind}/agent`;
+      expect(() =>
+        assertNewLocalWorkloads(
+          { Metadata: { "agentcore:builds": { [key]: before } } },
+          { [key]: after },
+          "example",
+          "default",
+        ),
+      ).toThrow("supported only for new workloads");
+    }
+  });
+  test("allows unchanged local workloads and new workloads in an existing mixed project", () => {
+    expect(() =>
+      assertNewLocalWorkloads(
+        {
+          Metadata: {
+            "agentcore:builds": {
+              "runtime/existing": "Container",
+              "harness/local": "Container-local",
+            },
+          },
         },
-        DeletionPolicy: retained ? "Retain" : "Delete",
-      },
-      Key: { Type: "AWS::KMS::Key", DeletionPolicy: retained ? "Retain" : "Delete" },
+        {
+          "runtime/existing": "Container",
+          "harness/local": "Container-local",
+          "runtime/new": "Container-local",
+        },
+        "example",
+        "default",
+      ),
+    ).not.toThrow();
+  });
+  test.each(["runtime", "harness"])(
+    "detects pre-feature %s templates without local state",
+    (kind) => {
+      const previous: ContainerTemplate = {
+        Resources: {
+          Workload: {
+            Type:
+              kind === "runtime"
+                ? "AWS::BedrockAgentCore::Runtime"
+                : "AWS::BedrockAgentCore::Harness",
+            Properties: {
+              [kind === "runtime" ? "AgentRuntimeName" : "HarnessName"]: "example_prod_us_agent",
+            },
+          },
+        },
+      };
+      expect(() =>
+        assertNewLocalWorkloads(
+          previous,
+          { [`${kind}/agent`]: "Container-local" },
+          "example",
+          "prod-us",
+        ),
+      ).toThrow("supported only for new workloads");
     },
-  });
-  test("rejects removing the managed repository and its key until retention is deployed", () => {
+  );
+  test("recognizes target-less legacy names and previously published local image URIs", () => {
+    const previous: ContainerTemplate = {
+      Resources: {
+        Runtime: {
+          Type: "AWS::BedrockAgentCore::Runtime",
+          Properties: {
+            AgentRuntimeName: "example_agent",
+            AgentRuntimeArtifact: {
+              ContainerConfiguration: { ContainerUri: "registry/cdk-custom-container-assets:hash" },
+            },
+          },
+        },
+      },
+    };
     expect(() =>
-      assertRetainedContainerImages(previous(false), {}, ["example/default/agent"]),
-    ).toThrow("Repository, Key");
-  });
-  test("allows a switch after both resources have a deployed retention policy", () => {
+      assertNewLocalWorkloads(previous, { "runtime/agent": "Container" }, "example", undefined),
+    ).toThrow("Cannot change runtime/agent from Container-local to Container");
     expect(() =>
-      assertRetainedContainerImages(previous(true), {}, ["example/default/agent"]),
+      assertNewLocalWorkloads(
+        previous,
+        { "runtime/agent": "Container-local" },
+        "example",
+        undefined,
+      ),
     ).not.toThrow();
   });
-  test("does not block unrelated repositories or resources that remain in the stack", () => {
+  test("fails closed on malformed deployed build metadata", () => {
     expect(() =>
-      assertRetainedContainerImages(previous(false), {}, ["example/default/other"]),
-    ).not.toThrow();
+      assertNewLocalWorkloads({ Metadata: { "agentcore:builds": [] } }, {}, "example", "default"),
+    ).toThrow("invalid build metadata");
+  });
+  test("rejects adopting an existing legacy role-only Harness into local mode", () => {
+    const previous: ContainerTemplate = {
+      Outputs: {
+        HarnessRole: { Export: { Name: "AgentCore-example-default-Harness-assistant-RoleArn" } },
+      },
+    };
     expect(() =>
-      assertRetainedContainerImages(previous(false), previous(false), ["example/default/agent"]),
+      assertNewLocalWorkloads(
+        previous,
+        { "harness/assistant": "Container-local" },
+        "example",
+        "default",
+      ),
+    ).toThrow("supported only for new workloads");
+    expect(() =>
+      assertNewLocalWorkloads(previous, { "harness/assistant": "Container" }, "example", "default"),
     ).not.toThrow();
   });
 });

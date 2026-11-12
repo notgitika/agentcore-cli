@@ -151,6 +151,7 @@ async function writeAssembly(
 }
 
 type HarnessOptions = {
+  deployedTemplate?: object | null;
   checkLocalBuilder?: CdkBackendConfig["checkLocalBuilder"];
   account?: string;
   bootstrap?: BootstrapState;
@@ -195,6 +196,15 @@ function harness(options: HarnessOptions = {}) {
   const backend = new CdkBackend({
     logger: createSilentLogger(),
     assertLocalCdkSupport: () => {},
+    createCloudFormationClient: () =>
+      ({
+        send: async () => ({
+          TemplateBody:
+            options.deployedTemplate === null
+              ? undefined
+              : JSON.stringify(options.deployedTemplate ?? { Resources: {} }),
+        }),
+      }) as unknown as ReturnType<NonNullable<CdkBackendConfig["createCloudFormationClient"]>>,
     checkLocalBuilder: options.checkLocalBuilder,
     identity: unusedIdentity(),
     runner: async (command, { cwd, onOutput }) => {
@@ -426,6 +436,107 @@ describe("CdkBackend.build", () => {
 });
 
 describe("CdkBackend.deploy", () => {
+  test.each([
+    ["Container", "Container-local"],
+    ["Container-local", "Container"],
+  ])(
+    "rejects %s to %s before credential provisioning, synthesis, or publication",
+    async (before, after) => {
+      const p = await project();
+      p.spec.runtimes.push(
+        ProjectRuntimeSchema.parse({
+          name: "agent",
+          build: after,
+          codeLocation: "app/agent",
+          entrypoint: "main.py",
+        }),
+      );
+      let provisioned = false;
+      const h = harness({
+        deployedTemplate: { Metadata: { "agentcore:builds": { "runtime/agent": before } } },
+        checkLocalBuilder: async () => {},
+        provisionCredentials: async function* () {
+          provisioned = true;
+          yield { type: "step", message: "provisioning credentials" };
+          return {};
+        },
+      });
+      await expect(collectDeploy(h.backend.deploy(p, deployInput()))).rejects.toThrow(
+        "supported only for new workloads",
+      );
+      expect(provisioned).toBe(false);
+      expect(h.commands).toHaveLength(0);
+      expect(h.runs).toHaveLength(0);
+      expect(h.bootstrapRegions).toHaveLength(0);
+      expect(h.transactionSearchRegions).toHaveLength(0);
+      expect(h.stackReads[0]?.region).toBe(TARGET.region);
+      expect(h.stackReads[0]?.stackName).toBe("AgentCore-example-default");
+    },
+  );
+
+  test("refuses to deploy when the previous stack template cannot be inspected", async () => {
+    const p = await project();
+    p.spec.runtimes.push(
+      ProjectRuntimeSchema.parse({
+        name: "agent",
+        build: "Container-local",
+        codeLocation: "app/agent",
+        entrypoint: "main.py",
+      }),
+    );
+    const h = harness({ deployedTemplate: null, checkLocalBuilder: async () => {} });
+    await expect(collectDeploy(h.backend.deploy(p, deployInput()))).rejects.toThrow(
+      "template is unavailable",
+    );
+    expect(h.commands).toHaveLength(0);
+    expect(h.runs).toHaveLength(0);
+  });
+  test("checks the selected target's recorded stack, including an unchanged local workload", async () => {
+    const p = await project();
+    p.spec.runtimes.push(
+      ProjectRuntimeSchema.parse({
+        name: "agent",
+        build: "Container-local",
+        codeLocation: "app/agent",
+        entrypoint: "main.py",
+      }),
+    );
+    const otherTarget = { ...TARGET, name: "preview", region: "us-west-2" };
+    const stackArn = "arn:aws:cloudformation:us-west-2:111122223333:stack/CustomPreview/id";
+    await updateTargetState(json, p.rootPath, otherTarget.name, { stackArn });
+    await writeAssembly(p, [otherTarget.name]);
+    const h = harness({
+      deployedTemplate: {
+        Metadata: { "agentcore:builds": { "runtime/agent": "Container-local" } },
+      },
+      checkLocalBuilder: async () => {},
+    });
+    await collectDeploy(h.backend.deploy(p, deployInput({ target: otherTarget })));
+    expect(h.stackReads[0]?.stackName).toBe(stackArn);
+    expect(h.stackReads[0]?.region).toBe(otherTarget.region);
+    expect(h.accountRegions).toEqual([otherTarget.region]);
+  });
+  test("recovers a custom stack from its assembly when deployed state is absent", async () => {
+    const p = await project();
+    p.spec.runtimes.push(
+      ProjectRuntimeSchema.parse({
+        name: "agent",
+        build: "Container-local",
+        codeLocation: "app/agent",
+        entrypoint: "main.py",
+      }),
+    );
+    await writeAssembly(p, [TARGET.name]);
+    const h = harness({
+      deployedTemplate: { Metadata: { "agentcore:builds": { "runtime/agent": "Container" } } },
+      checkLocalBuilder: async () => {},
+    });
+    await expect(collectDeploy(h.backend.deploy(p, deployInput()))).rejects.toThrow(
+      "supported only for new workloads",
+    );
+    expect(h.stackReads[0]?.stackName).toBe("AgentCore-example-default-0");
+    expect(h.commands).toHaveLength(0);
+  });
   test("refuses an unavailable local builder before provisioning credentials or invoking Toolkit", async () => {
     const p = await project();
     p.spec.runtimes.push(

@@ -60,6 +60,28 @@ export type StackArtifact = {
   templateFile: string | undefined;
 };
 
+/** Recover a custom stack name from an existing assembly when local deployed state is absent. */
+export async function existingStackNameForTarget(
+  json: ReadWriteJson,
+  assemblyDirectory: string,
+  target: string,
+): Promise<string | undefined> {
+  const manifestPath = join(assemblyDirectory, "manifest.json");
+  if (!existsSync(manifestPath)) return undefined;
+  const manifest = await json.read(manifestPath, AssemblyManifestSchema);
+  const matches = Object.entries(manifest.artifacts).filter(
+    ([, artifact]) =>
+      artifact.type === STACK_ARTIFACT && artifact.properties?.tags?.[TARGET_TAG] === target,
+  );
+  if (matches.length > 1) {
+    throw new ProjectStateError(
+      `Cannot inspect build modes: multiple stacks are tagged for target '${target}'.`,
+    );
+  }
+  const match = matches[0];
+  return match && (match[1].properties?.stackName ?? match[0]);
+}
+
 /** Finds the one synthesized stack artifact tagged for the selected deployment target. */
 export async function stackArtifactForTarget(
   json: ReadWriteJson,

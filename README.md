@@ -243,18 +243,41 @@ asset manifests and image layers can contain their values, even though the CLI r
 terminal output and debug logs.
 
 Included source, Dockerfile, platform, and build-argument changes produce a new image asset.
-Unchanged images already published to the target can be reused. Floating base-image tags can change
-without changing the asset hash; pin digests when reproducible builds are required. Each target uses
-its own bootstrap repository and publishing credentials. The bootstrap repository's encryption,
-scanning, retention, and lifecycle settings apply. Custom KMS encryption requires separate validation
-of the repository's KMS grants and key policy. Destroying a project leaves the shared bootstrap repository intact.
+Unchanged images already published to the target can be reused. Pin base-image digests and dependency
+lockfiles; update those tracked files and deploy to pick up an upstream security fix. A repeated
+deploy does not refresh an unchanged published asset, regardless of Docker's layer cache. Forcing a
+rebuild of unchanged inputs is outside this release.
 
-Before switching a deployed resource from `Container` to `Container-local`, keep `build: Container`,
-apply `RemovalPolicy.RETAIN` to its existing managed ECR repository and KMS key in the CDK app, and
-deploy that retention change. Then change the selector and deploy again. The CLI rejects a transition
-that would delete either resource without a deployed retention policy. Preserve the images needed
-for rollback.
+Each target uses its own shared bootstrap repository and publishing credentials. Pull permissions
+cover that repository, including other workloads' images. This path provides no dedicated workload
+repository or KMS key. The standard bootstrap repository uses AES256 encryption; it does not enable
+scan-on-push by default. Repository and registry scanning settings govern scanning. Customers must
+accept these settings and repository-wide pull access. Custom KMS encryption requires separate
+qualification of the repository's KMS grants and key policy.
+
+Supported repository lifecycle policies retain tagged workload images. Environment owners must
+preserve images referenced by active versions and any versions retained for rollback, together with
+their pull permissions. CDK publishes and reuses assets; it does not provide workload-specific rollback
+retention. Avoid garbage collection of referenced image assets. Destroying a project leaves the shared
+bootstrap repository intact. Automated image cleanup is outside this feature.
+
+The first release supports `Container-local` only for new workloads, including additions to existing
+projects. Switching an already-deployed workload into or out of this mode is unsupported. The CLI
+reads the target's deployed CloudFormation template and rejects these changes before provisioning
+credentials, bootstrapping, or publishing assets. Editing configuration or deleting local deployed
+state does not enable a migration. Keep the deployed build mode or add a workload with a new name.
+
+Dependency downloads use the builder's network. Workstation credentials are not automatically
+available inside Dockerfile `RUN` instructions. This release supports dependencies supplied in the
+context or downloaded without injecting build-time secrets. Base-image registry authentication uses
+the builder's registry credentials. For a private package, an authenticated download before deployment
+can place a wheel or npm package in the context for installation during the build. Do not copy
+credentials into the context or pass them through build arguments. BuildKit secrets and secret
+injection into private pip/npm installation are deferred.
 
 Compatibility note: Harness CodeBuild context staging now uses the same filters as Runtime staging.
 The first deployment after upgrading can rebuild a Harness image because its staged context changed.
 Projects selecting `Container-local` must install a CDK package that supports the selector.
+For testing the companion PR before publication, build and pack that CDK checkout, then install its
+tarball in the project's `agentcore/cdk/` directory. Publish the companion CDK package before releasing
+this CLI change; release preparation verifies its local-build support before updating the vended pin.

@@ -69,6 +69,13 @@ export function containerBuildSettings(project: Project) {
     return existsSync(path) ? [HarnessYamlSchema.parse(parse(readFileSync(path, "utf8")))] : [];
   });
   return {
+    builds: Object.fromEntries([
+      ...project.spec.runtimes.map((runtime) => [`runtime/${runtime.name}`, runtime.build]),
+      ...harnesses.map((harness) => [
+        `harness/${harness.name}`,
+        harness.build ?? (harness.dockerfile ? "Container" : "Managed"),
+      ]),
+    ]),
     localRuntimes: project.spec.runtimes.filter((runtime) => runtime.build === "Container-local"),
     localHarnesses: harnesses.filter((harness) => harness.build === "Container-local"),
     buildArgumentValues: [
@@ -100,10 +107,21 @@ export async function checkLocalContainerBuilder(
         "CDK_DOCKER can select a Docker-compatible executable.",
     );
   }
-  let daemon: { OSType?: string; Architecture?: string };
-  try {
-    daemon = JSON.parse(info.trim()) as typeof daemon;
-  } catch {
+  let daemon: { OSType: string; Architecture: string } | undefined;
+  // ProcessRunner streams stdout and stderr together. Finch can print startup
+  // diagnostics before its single-line --format JSON; those are not daemon data.
+  for (const candidate of [info.trim(), ...info.trim().split(/\r?\n/).reverse()]) {
+    try {
+      const value = JSON.parse(candidate) as Record<string, unknown> | null;
+      if (value && typeof value.OSType === "string" && typeof value.Architecture === "string") {
+        daemon = { OSType: value.OSType, Architecture: value.Architecture };
+        break;
+      }
+    } catch {
+      // Continue looking for the formatted daemon information.
+    }
+  }
+  if (!daemon) {
     throw new ProjectStateError(
       `The container builder '${executable}' returned invalid daemon information.`,
     );
@@ -139,47 +157,84 @@ export async function checkLocalContainerBuilder(
 
 type TemplateResource = {
   Type?: string;
-  Properties?: {
-    RepositoryName?: unknown;
-    EncryptionConfiguration?: { KmsKey?: unknown }[];
-  };
-  DeletionPolicy?: string;
+  Properties?: Record<string, unknown>;
 };
-export type ContainerTemplate = { Resources?: Record<string, TemplateResource> };
+export type ContainerTemplate = {
+  Metadata?: Record<string, unknown>;
+  Resources?: Record<string, TemplateResource>;
+  Outputs?: Record<string, { Export?: { Name?: unknown } }>;
+};
 
-/** A switch to local assets must preserve the old images and the key needed to decrypt them. */
-export function assertRetainedContainerImages(
+/**
+ * The deployed template is authoritative; editing local configuration or deleting
+ * deployed-state.json must not permit a build-mode migration.
+ */
+export function assertNewLocalWorkloads(
   previous: ContainerTemplate,
-  next: ContainerTemplate,
-  repositoryNames: readonly string[],
+  builds: Record<string, string>,
+  projectName: string,
+  targetName: string | undefined,
 ): void {
-  const current = previous.Resources ?? {};
-  const desired = next.Resources ?? {};
-  const removed = new Set<string>();
-  for (const [id, resource] of Object.entries(current)) {
-    if (
-      resource.Type !== "AWS::ECR::Repository" ||
-      desired[id] ||
-      !repositoryNames.includes(String(resource.Properties?.RepositoryName))
-    )
-      continue;
-    removed.add(id);
-    for (const encryption of resource.Properties?.EncryptionConfiguration ?? []) {
-      const key = encryption.KmsKey as
-        { "Fn::GetAtt"?: [string, string]; Ref?: string } | undefined;
-      const keyId = key?.["Fn::GetAtt"]?.[0] ?? key?.Ref;
-      if (keyId && current[keyId]?.Type === "AWS::KMS::Key" && !desired[keyId]) removed.add(keyId);
-    }
-  }
-  const unsafe = [...removed].filter(
-    (id) => !["Retain", "RetainExceptOnCreate"].includes(current[id]?.DeletionPolicy ?? ""),
-  );
-  if (unsafe.length) {
+  const recorded = previous.Metadata?.["agentcore:builds"];
+  if (
+    recorded !== undefined &&
+    (typeof recorded !== "object" || recorded === null || Array.isArray(recorded))
+  ) {
     throw new ProjectStateError(
-      `Switching to Container-local would delete managed image resources: ${unsafe.join(", ")}. ` +
-        "Keep build as Container, apply RemovalPolicy.RETAIN to the existing ECR repository and KMS key " +
-        "in the CDK app, and deploy that retention change first. Then select Container-local. " +
-        "Retain the images needed for rollback.",
+      "Cannot verify build modes: the deployed template has invalid build metadata.",
     );
+  }
+  for (const [key, desired] of Object.entries(builds)) {
+    const [kind, name] = key.split("/");
+    let deployed = (recorded as Record<string, unknown> | undefined)?.[key];
+    if (deployed !== undefined && typeof deployed !== "string") {
+      throw new ProjectStateError(`Cannot verify the deployed build mode for ${key}.`);
+    }
+    if (deployed === undefined) {
+      // Templates deployed before this feature have no build metadata. Match the
+      // workload's stable physical name, including v0's target-less naming.
+      const physicalName = [
+        projectName,
+        ...(targetName ? [targetName.replace(/-/g, "_")] : []),
+        name,
+      ].join("_");
+      const type =
+        kind === "runtime" ? "AWS::BedrockAgentCore::Runtime" : "AWS::BedrockAgentCore::Harness";
+      const nameProperty = kind === "runtime" ? "AgentRuntimeName" : "HarnessName";
+      const resource = Object.values(previous.Resources ?? {}).find(
+        (entry) => entry.Type === type && entry.Properties?.[nameProperty] === physicalName,
+      );
+      if (resource) {
+        // Inspect the image artifact rather than unrelated environment values.
+        // This also recognizes the original local-build POC's bootstrap URI.
+        const artifact =
+          resource.Properties?.[
+            kind === "runtime" ? "AgentRuntimeArtifact" : "EnvironmentArtifact"
+          ];
+        deployed = JSON.stringify(artifact)?.includes("container-assets")
+          ? "Container-local"
+          : "Container";
+      } else if (
+        kind === "harness" &&
+        Object.values(previous.Outputs ?? {}).some((output) =>
+          JSON.stringify(output.Export?.Name)?.includes(
+            `-Harness-${name!.replaceAll("_", "-")}-RoleArn`,
+          ),
+        )
+      ) {
+        // Old vended apps managed the Harness outside CloudFormation, but its
+        // execution role output still identifies an existing deployed workload.
+        deployed = "Container";
+      } else {
+        continue;
+      }
+    }
+    if ((deployed === "Container-local") !== (desired === "Container-local")) {
+      throw new ProjectStateError(
+        `Cannot change ${key} from ${deployed} to ${desired}. ` +
+          "Container-local is supported only for new workloads. " +
+          "Keep the deployed build mode or add a workload with a new name; build-mode migration is not supported.",
+      );
+    }
   }
 }

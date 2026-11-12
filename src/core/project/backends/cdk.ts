@@ -1,6 +1,5 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { readFile } from "node:fs/promises";
 import { GetTemplateCommand, type Stack } from "@aws-sdk/client-cloudformation";
 import { parse as parseYaml } from "yaml";
 import { MalformedServiceResponseError, ProjectStateError } from "../../../errors/errors";
@@ -14,7 +13,7 @@ import type {
 } from "../../../handlers/project/types";
 import { assertCdkLocalContainerSupport, cdkCompatibilityWarning } from "./cdk/compatibility";
 import {
-  assertRetainedContainerImages,
+  assertNewLocalWorkloads,
   buildArgumentRedactor,
   checkLocalContainerBuilder,
   containerBuildSettings,
@@ -52,6 +51,7 @@ import {
 } from "./cdk/credentials";
 import {
   countDeployableResources,
+  existingStackNameForTarget,
   stackArtifactForTarget,
   synthCommand,
   type StackArtifact,
@@ -295,6 +295,41 @@ export class CdkBackend implements ProjectBackend {
     // provisioned or the stack ARN unrecorded.
     await this.ensureCdkDependencies(project);
     const settings = containerBuildSettings(project);
+    const deployedState = (await readDeployedState(this.json, project.rootPath)).targets[
+      target.name
+    ];
+    if (Object.keys(settings.builds).length) {
+      yield { type: "step", message: "checking deployed workload build modes" };
+      const stackName =
+        stackReferenceOf(deployedState) ??
+        (await existingStackNameForTarget(
+          this.json,
+          this.assemblyDirectory(project),
+          target.name,
+        )) ??
+        `AgentCore-${project.name.replace(/_/g, "-")}-${target.name.replace(/_/g, "-")}`;
+      const stack = await this.describeStack(target.region, credentials, stackName);
+      if (stack) {
+        const client = this.createCloudFormationClient({ region: target.region, credentials });
+        const previous = await client.send(
+          new GetTemplateCommand({
+            StackName: stack.StackId ?? stackName,
+            TemplateStage: "Original",
+          }),
+        );
+        if (!previous.TemplateBody) {
+          throw new ProjectStateError(
+            "Cannot verify build modes: the deployed stack template is unavailable.",
+          );
+        }
+        assertNewLocalWorkloads(
+          parseYaml(previous.TemplateBody) as ContainerTemplate,
+          settings.builds,
+          project.name,
+          project.spec.migratedFrom ? undefined : target.name,
+        );
+      }
+    }
     const hasLocalImages = settings.localRuntimes.length > 0 || settings.localHarnesses.length > 0;
     if (hasLocalImages) {
       this.assertLocalCdkSupport(this.cdkDirectory(project));
@@ -305,9 +340,7 @@ export class CdkBackend implements ProjectBackend {
     // Read before provisioning rewrites the credentials map: it is the only record
     // of what this target provisioned, so it is the only way to find a provider whose
     // credential has since left the spec.
-    const recorded =
-      (await readDeployedState(this.json, project.rootPath)).targets[target.name]?.resources
-        ?.credentials ?? {};
+    const recorded = deployedState?.resources?.credentials ?? {};
     const orphaned = orphanedCredentials(recorded, project.spec.credentials);
 
     // Credential providers aren't stack resources; the synthesized app reads their
@@ -334,38 +367,6 @@ export class CdkBackend implements ProjectBackend {
         redactOutput: buildArgumentRedactor(settings.buildArgumentValues),
       }),
     };
-    if (hasLocalImages && artifact.templateFile) {
-      const names = [
-        ...settings.localRuntimes.map((runtime) => runtime.name),
-        ...settings.localHarnesses.map((harness) => `harness-${harness.name}`),
-      ].map((name) =>
-        [project.name, ...(project.spec.migratedFrom ? [] : [target.name]), name]
-          .join("/")
-          .toLowerCase(),
-      );
-      const stack = await this.describeStack(target.region, credentials, artifact.stackName);
-      if (stack) {
-        const client = this.createCloudFormationClient({ region: target.region, credentials });
-        const previous = await client.send(
-          new GetTemplateCommand({
-            StackName: stack.StackId ?? artifact.stackName,
-            TemplateStage: "Original",
-          }),
-        );
-        if (!previous.TemplateBody) {
-          throw new ProjectStateError(
-            "Cannot verify image retention: the deployed stack template is unavailable.",
-          );
-        }
-        assertRetainedContainerImages(
-          parseYaml(previous.TemplateBody) as ContainerTemplate,
-          JSON.parse(
-            await readFile(join(assemblyDirectory, artifact.templateFile), "utf8"),
-          ) as ContainerTemplate,
-          names,
-        );
-      }
-    }
 
     // Decided before the Toolkit is handed the assembly: it reads a template
     // with nothing in it as an instruction to delete the stack, and reports that
