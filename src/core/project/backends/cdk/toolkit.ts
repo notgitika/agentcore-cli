@@ -10,6 +10,7 @@ import type {
 } from "@aws-cdk/toolkit-lib";
 import { AgentCoreCLIError } from "../../../../errors";
 import type { Logger } from "../../../../logging";
+import { withCdkOutput } from "./output";
 
 export type CdkOperation =
   | { kind: "bootstrap"; environments: string[]; templateFile?: string }
@@ -252,7 +253,17 @@ export function createCdkRunner(
     // A fresh ioHost per operation, so each operation's messages can flow into
     // its own onOutput sink rather than only the construction-time logger.
     const ioHost = createCdkIoHost(logger, options.onOutput, options.redactOutput);
-    const loaded = await load(ioHost, options.region, options.credentials);
-    return performCdkOperation(loaded, operation, options);
+    return withCdkOutput(
+      (line, destination) => {
+        const safe = options.redactOutput?.(line) ?? line;
+        logger.child({ component: "cdk-assets", destination }).debug(safe);
+        if (options.onOutput) options.onOutput(safe);
+        else process[destination].write(`${safe}\n`);
+      },
+      async () => {
+        const loaded = await load(ioHost, options.region, options.credentials);
+        return performCdkOperation(loaded, operation, options);
+      },
+    );
   };
 }
