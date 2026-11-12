@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { stringify } from "yaml";
 import { ZodError, z } from "zod";
 import {
@@ -59,6 +60,7 @@ export function harnessApiKeyCredentialName(
 type GetHarnessTemplateResolverConfig = {
   assetSource: AssetSource;
   templateRenderer: TemplateRenderer;
+  projectRoot?: string;
 };
 
 /** Given a harness spec, resolve the {@link TemplateResolver} that renders its config directory **/
@@ -67,12 +69,16 @@ export function getHarnessTemplateResolver(
 ): TemplateResolver<z.input<typeof HarnessSpecSchema>> {
   return {
     async resolve(spec) {
-      validateHarnessTemplateSource(spec);
+      validateHarnessTemplateSource(spec, config.projectRoot);
 
       const parsed = parseHarnessSpec({
         ...spec,
         memory: spec.memory === undefined ? { mode: "managed" } : spec.memory,
-        dockerfile: spec.dockerfile ? "Dockerfile" : undefined,
+        dockerfile: spec.dockerfile
+          ? spec.buildContextPath
+            ? spec.dockerfile
+            : "Dockerfile"
+          : undefined,
       });
       const { systemPrompt, ...settings } = parsed;
       const context = buildTemplateContext(settings);
@@ -89,7 +95,9 @@ export function getHarnessTemplateResolver(
           "system-prompt.md",
           async () => systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
         ),
-        ...(spec.dockerfile ? [FsTreeNode.fromTextFile("Dockerfile", spec.dockerfile)] : []),
+        ...(spec.dockerfile && !spec.buildContextPath
+          ? [FsTreeNode.fromTextFile("Dockerfile", spec.dockerfile)]
+          : []),
       );
 
       return {
@@ -128,9 +136,24 @@ function buildTemplateContext(spec: HarnessSpec) {
   };
 }
 
-export function validateHarnessTemplateSource(spec: z.input<typeof HarnessSpecSchema>): void {
-  if (spec.dockerfile && !existsSync(spec.dockerfile)) {
-    throw new ResourceNotFoundError(`no dockerfile exists at ${spec.dockerfile}`);
+export function validateHarnessTemplateSource(
+  spec: z.input<typeof HarnessSpecSchema>,
+  projectRoot?: string,
+): void {
+  if (spec.buildContextPath && !projectRoot) {
+    throw new InputValidationError("projectRoot is required for a Harness build context override.");
+  }
+  const dockerfile =
+    spec.dockerfile && typeof spec.buildContextPath === "string"
+      ? resolve(projectRoot!, spec.buildContextPath, spec.dockerfile)
+      : spec.dockerfile;
+  if (dockerfile && existsSync(`${dockerfile}.dockerignore`)) {
+    throw new InputValidationError(
+      "Dockerfile-specific ignore files are not supported; use .dockerignore in the build context.",
+    );
+  }
+  if (dockerfile && !existsSync(dockerfile)) {
+    throw new ResourceNotFoundError(`no dockerfile exists at ${dockerfile}`);
   }
 }
 

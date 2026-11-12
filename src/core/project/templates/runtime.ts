@@ -107,7 +107,7 @@ function buildRuntimeSpec(input: RuntimeResourceConfig): ProjectRuntime {
     ...(scaffoldRuntimeInput.runtimeVersion && {
       runtimeVersion: scaffoldRuntimeInput.runtimeVersion,
     }),
-    ...(scaffoldRuntimeInput.build === "Container" && {
+    ...(scaffoldRuntimeInput.build !== "CodeZip" && {
       dockerfile: runtimeProfile?.dockerfile ?? "Dockerfile",
     }),
     ...(infra.description && { description: infra.description }),
@@ -268,7 +268,7 @@ const getTemplateResolvers = (assetSource: AssetSource, templateRenderer: Templa
       // The strands template's entrypoint is fixed to main.py; the container Dockerfile launches it as the `main` module.
       entrypoint: "main",
     };
-    const isContainer = input.scaffoldRuntimeInput.build === "Container";
+    const isContainer = input.scaffoldRuntimeInput.build !== "CodeZip";
     const tree = await FsTreeNode.fromAssetSource(
       { assetSource },
       { assetDir: "templates/agent-python-strands" },

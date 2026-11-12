@@ -4,6 +4,10 @@ import { enclosingProjectRoot, isV0Project } from "../../../core/project/fsUtils
 import { runV0Deploy, type V0DeployRunner } from "../../../core/project/legacy/deploy";
 import { assertNoPendingMigration } from "../../../core/project/migrate/journal";
 import {
+  workloadBuilds,
+  type WorkloadBuild,
+} from "../../../core/project/backends/cdk/localContainers";
+import {
   LegacyDeployError,
   LegacyDeployWarningExit,
   ProjectStateError,
@@ -154,9 +158,32 @@ export const createDeployProjectHandler = (config: DeployProjectHandlerConfig) =
     },
   });
 
+/** Counts runtimes and harnesses by build type. Unreadable harness.yaml files are not counted. */
+function buildTypeCounts(project: Project) {
+  let builds: Record<string, WorkloadBuild>;
+  try {
+    builds = workloadBuilds(project);
+  } catch {
+    builds = Object.fromEntries(
+      project.spec.runtimes.map((runtime) => [`runtime/${runtime.name}`, runtime.build]),
+    );
+  }
+  const count = (kind: "runtime" | "harness", build: WorkloadBuild) =>
+    Object.entries(builds).filter(([key, value]) => key.startsWith(`${kind}/`) && value === build)
+      .length;
+  return {
+    project_runtime_codezip_count: count("runtime", "CodeZip"),
+    project_runtime_container_count: count("runtime", "Container"),
+    project_runtime_container_local_count: count("runtime", "ContainerLocal"),
+    project_harness_container_count: count("harness", "Container"),
+    project_harness_container_local_count: count("harness", "ContainerLocal"),
+  };
+}
+
 export function recordProjectResourceCounts(ctx: Context, project: Project): void {
   const { spec } = project;
   ctx.value(CommandRunMetricEventKey)?.setAttributes({
+    ...buildTypeCounts(project),
     project_runtime_count: spec.runtimes.length,
     project_memory_count: spec.memories.length,
     project_knowledge_base_count: spec.knowledgeBases.length,
