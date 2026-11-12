@@ -266,6 +266,8 @@ projects. Switching an already-deployed workload into or out of this mode is uns
 reads the target's deployed CloudFormation template and rejects these changes before provisioning
 credentials, bootstrapping, or publishing assets. Editing configuration or deleting local deployed
 state does not enable a migration. Keep the deployed build mode or add a workload with a new name.
+Deployment credentials need `cloudformation:DescribeStacks` and `cloudformation:GetTemplate` access
+to the selected target's stack so these checks can run before deployment changes.
 
 Dependency downloads use the builder's network. Workstation credentials are not automatically
 available inside Dockerfile `RUN` instructions. This release supports dependencies supplied in the
